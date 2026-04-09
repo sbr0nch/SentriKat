@@ -69,26 +69,7 @@ class EmailAlertManager:
         # business hours. Users can configure email notification rules on their email
         # client/server if they need quiet hours.
 
-        # Get SMTP config - try organization first, then fall back to global
-        smtp_config = organization.get_smtp_config()
-
-        # Fall back to global SMTP if organization SMTP not configured
-        if not smtp_config['host'] or not smtp_config['from_email']:
-            from app.settings_api import get_setting
-            smtp_config = {
-                'host': get_setting('smtp_host', organization_id=None),
-                'port': int(get_setting('smtp_port', '587', organization_id=None) or '587'),
-                'username': get_setting('smtp_username', organization_id=None),
-                'password': get_setting('smtp_password', organization_id=None),
-                'use_tls': get_setting('smtp_use_tls', 'true', organization_id=None) == 'true',
-                'use_ssl': get_setting('smtp_use_ssl', 'false', organization_id=None) == 'true',
-                'from_email': get_setting('smtp_from_email', organization_id=None),
-                'from_name': get_setting('smtp_from_name', 'SentriKat Alerts', organization_id=None)
-            }
-
-        # Check if any SMTP is configured
-        if not smtp_config['host'] or not smtp_config['from_email']:
-            return {'status': 'error', 'reason': 'SMTP not configured (neither org nor global)'}
+        # Email provider handles SMTP vs Resend routing automatically
 
         # Get recipient emails - handle potentially double-encoded JSON
         recipients = []
@@ -180,14 +161,18 @@ class EmailAlertManager:
             organization, filtered_matches, new_count=new_count
         )
 
-        # Send email
+        # Send email via abstraction layer (handles SMTP vs Resend routing)
         try:
-            EmailAlertManager._send_email(
-                smtp_config=smtp_config,
-                recipients=recipients,
+            from app.email_provider import send_email
+            result = send_email(
+                to=recipients,
                 subject=subject,
-                html_body=body
+                html_body=body,
+                organization_id=organization.id,
+                email_type='alert',
             )
+            if not result.get('success'):
+                raise Exception(result.get('error', 'Email send failed'))
 
             # Mark NEW matches as alerted (set first_alerted_at)
             now = datetime.utcnow()
@@ -708,7 +693,7 @@ class EmailAlertManager:
         body = EmailAlertManager._build_container_alert_html(organization, severity_filtered, new_count)
 
         try:
-            EmailAlertManager._send_email(smtp_config, recipients, subject, body)
+            EmailAlertManager._send_email(smtp_config, recipients, subject, body, organization_id=organization.id)
 
             # Mark new vulns as alerted
             now = datetime.utcnow()
@@ -888,53 +873,24 @@ class EmailAlertManager:
         return html
 
     @staticmethod
-    def _send_email(smtp_config, recipients, subject, html_body, max_retries=3):
-        """Send HTML email via SMTP with retry logic (supports Gmail, Office365, Internal SMTP)
+    def _send_email(smtp_config, recipients, subject, html_body, max_retries=3, organization_id=None):
+        """Send HTML email, routing through the email provider abstraction.
 
-        Retries up to max_retries times with exponential backoff for transient failures.
+        For legacy callers that still pass smtp_config: the provider will use
+        SMTP directly if on-premise, or route through Resend in SaaS mode.
+
+        New code should use app.email_provider.send_email() directly.
         """
-        import time
-
-        msg = MIMEMultipart('alternative')
-        msg['From'] = f"{smtp_config['from_name']} <{smtp_config['from_email']}>"
-        msg['To'] = ', '.join(recipients)
-        msg['Subject'] = subject
-
-        # Attach HTML body
-        html_part = MIMEText(html_body, 'html', 'utf-8')
-        msg.attach(html_part)
-
-        last_error = None
-        for attempt in range(max_retries):
-            try:
-                # Determine connection type
-                if smtp_config['use_ssl']:
-                    # Use SSL (typically port 465)
-                    server = smtplib.SMTP_SSL(smtp_config['host'], smtp_config['port'], timeout=30)
-                else:
-                    # Use plain connection, possibly with STARTTLS
-                    server = smtplib.SMTP(smtp_config['host'], smtp_config['port'], timeout=30)
-                    if smtp_config['use_tls']:
-                        server.starttls()
-
-                # Authenticate if credentials provided
-                if smtp_config['username'] and smtp_config['password']:
-                    server.login(smtp_config['username'], smtp_config['password'])
-
-                # Send email
-                server.sendmail(smtp_config['from_email'], recipients, msg.as_string())
-                server.quit()
-                return  # Success
-
-            except Exception as e:
-                last_error = e
-                if attempt < max_retries - 1:
-                    # Exponential backoff: 2s, 4s, 8s
-                    wait_time = 2 ** (attempt + 1)
-                    time.sleep(wait_time)
-                else:
-                    # Final attempt failed, raise the error
-                    raise last_error
+        from app.email_provider import send_email
+        result = send_email(
+            to=recipients,
+            subject=subject,
+            html_body=html_body,
+            organization_id=organization_id,
+            email_type='alert',
+        )
+        if not result.get('success'):
+            raise Exception(result.get('error', 'Email send failed'))
 
     @staticmethod
     def _log_alert(org_id, alert_type, matches_count, recipients_count, status, error_msg):
@@ -1092,10 +1048,11 @@ def send_user_invite_email(user):
             smtp_config=smtp_config,
             recipients=[user.email],
             subject=subject,
-            html_body=html_body
+            html_body=html_body,
+            organization_id=organization.id
         )
 
-        msg = f"Email sent via {smtp_source} SMTP ({smtp_config['host']}:{smtp_config['port']}) to {user.email}"
+        msg = f"Email sent to {user.email}"
         logger.info(msg)
         return True, msg
 
@@ -1947,117 +1904,61 @@ def send_scheduled_report(recipients, report_name, org_name, pdf_buffer):
     """
     from email.mime.base import MIMEBase
     from email import encoders
-    from app.settings_api import get_setting
     import logging
-
     logger = logging.getLogger(__name__)
 
     try:
-        # Get global SMTP settings
-        smtp_config = {
-            'host': get_setting('smtp_host', organization_id=None),
-            'port': int(get_setting('smtp_port', '587', organization_id=None) or '587'),
-            'username': get_setting('smtp_username', organization_id=None),
-            'password': get_setting('smtp_password', organization_id=None),
-            'use_tls': get_setting('smtp_use_tls', 'true', organization_id=None) == 'true',
-            'use_ssl': get_setting('smtp_use_ssl', 'false', organization_id=None) == 'true',
-            'from_email': get_setting('smtp_from_email', organization_id=None),
-            'from_name': get_setting('smtp_from_name', 'SentriKat Reports', organization_id=None)
-        }
+        from app.email_provider import send_email, render_email_html
 
-        if not smtp_config['host'] or not smtp_config['from_email']:
-            return {'success': False, 'error': 'SMTP not configured'}
+        # Determine org_id for routing
+        org_id = None
+        try:
+            from app.models import Organization
+            org = Organization.query.filter_by(display_name=org_name).first()
+            if org:
+                org_id = org.id
+        except Exception:
+            pass
 
-        # Create message
-        msg = MIMEMultipart('mixed')
-        msg['From'] = f"{smtp_config['from_name']} <{smtp_config['from_email']}>"
-        msg['To'] = ', '.join(recipients)
-        msg['Subject'] = f"[SentriKat] {report_name} - {org_name}"
-
-        # Email body
-        html_body = f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-</head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #f3f4f6; margin: 0; padding: 0;">
-    <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-        <div style="background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); padding: 30px; text-align: center; border-radius: 12px 12px 0 0;">
-            <h1 style="color: white; margin: 0; font-size: 24px;">Scheduled Report</h1>
-            <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0;">{report_name}</p>
-        </div>
-
-        <div style="background: white; padding: 40px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
-            <p style="font-size: 16px; color: #374151; line-height: 1.6;">
-                Hello,
+        # Build HTML body using the white-label template
+        body_content = f"""
+        <p style="font-size: 16px; color: #374151; line-height: 1.6;">Hello,</p>
+        <p style="font-size: 16px; color: #374151; line-height: 1.6;">
+            Please find attached the scheduled vulnerability report for <strong>{org_name}</strong>.
+        </p>
+        <div style="background: #f0f9ff; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0; border-radius: 4px;">
+            <p style="margin: 0; color: #1e40af;">
+                <strong>Report:</strong> {report_name}<br>
+                <strong>Generated:</strong> {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
             </p>
-
-            <p style="font-size: 16px; color: #374151; line-height: 1.6;">
-                Please find attached the scheduled vulnerability report for <strong>{org_name}</strong>.
-            </p>
-
-            <div style="background: #f0f9ff; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0; border-radius: 4px;">
-                <p style="margin: 0; color: #1e40af;">
-                    <strong>Report:</strong> {report_name}<br>
-                    <strong>Generated:</strong> {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
-                </p>
-            </div>
-
-            <p style="color: #6b7280; font-size: 14px;">
-                Open the attached PDF to view the full vulnerability report.
-            </p>
-
-            <div style="text-align: center; margin: 30px 0;">
-                <a href="{get_app_url()}" style="display: inline-block; background: #1e40af; color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 14px;">
-                    View Dashboard
-                </a>
-            </div>
         </div>
+        <p style="color: #6b7280; font-size: 14px;">Open the attached PDF to view the full vulnerability report.</p>
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="{get_app_url()}" style="display: inline-block; background: #1e40af; color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 14px;">
+                View Dashboard
+            </a>
+        </div>"""
 
-        <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
-            <p>This is an automated report from SentriKat</p>
-            <p>© {datetime.utcnow().year} {org_name}</p>
-        </div>
-    </div>
-</body>
-</html>
-"""
+        org_obj = Organization.query.get(org_id) if org_id else None
+        html_body = render_email_html(body_content, org=org_obj)
 
-        # Attach HTML body
-        html_part = MIMEText(html_body, 'html', 'utf-8')
-        msg.attach(html_part)
-
-        # Attach PDF
+        # Prepare PDF attachment
         pdf_buffer.seek(0)
-        pdf_attachment = MIMEBase('application', 'pdf')
-        pdf_attachment.set_payload(pdf_buffer.read())
-        encoders.encode_base64(pdf_attachment)
-
         filename = f"{report_name.replace(' ', '_')}_{datetime.utcnow().strftime('%Y%m%d')}.pdf"
-        pdf_attachment.add_header(
-            'Content-Disposition',
-            'attachment',
-            filename=filename
+        attachments = [{'filename': filename, 'content': pdf_buffer.read()}]
+
+        result = send_email(
+            to=recipients,
+            subject=f"[SentriKat] {report_name} - {org_name}",
+            html_body=html_body,
+            organization_id=org_id,
+            email_type='report',
+            attachments=attachments,
         )
-        msg.attach(pdf_attachment)
 
-        # Send email
-        if smtp_config['use_ssl']:
-            server = smtplib.SMTP_SSL(smtp_config['host'], smtp_config['port'], timeout=30)
-        else:
-            server = smtplib.SMTP(smtp_config['host'], smtp_config['port'], timeout=30)
-            if smtp_config['use_tls']:
-                server.starttls()
-
-        if smtp_config['username'] and smtp_config['password']:
-            server.login(smtp_config['username'], smtp_config['password'])
-
-        server.sendmail(smtp_config['from_email'], recipients, msg.as_string())
-        server.quit()
-
-        logger.info(f"Scheduled report '{report_name}' sent to {len(recipients)} recipients")
-        return {'success': True}
+        if result.get('success'):
+            logger.info(f"Scheduled report '{report_name}' sent to {len(recipients)} recipients")
+        return result
 
     except Exception as e:
         logger.exception(f"Failed to send scheduled report '{report_name}'")
@@ -2086,51 +1987,26 @@ def send_password_reset_email(user, token, base_url):
     logger = logging.getLogger(__name__)
 
     try:
-        # Try organization SMTP first, then fall back to global SMTP
-        smtp_config = None
-        smtp_source = "global"
-
-        if user.organization_id:
-            organization = Organization.query.get(user.organization_id)
-            if organization:
-                smtp_config = organization.get_smtp_config()
-                if smtp_config.get('host') and smtp_config.get('from_email'):
-                    smtp_source = "organization"
-
-        # Fall back to global SMTP if org SMTP not configured
-        if not smtp_config or not smtp_config.get('host') or not smtp_config.get('from_email'):
-            smtp_config = {
-                'host': get_setting('smtp_host', organization_id=None),
-                'port': int(get_setting('smtp_port', '587', organization_id=None) or '587'),
-                'username': get_setting('smtp_username', organization_id=None),
-                'password': get_setting('smtp_password', organization_id=None),
-                'use_tls': get_setting('smtp_use_tls', 'true', organization_id=None) == 'true',
-                'use_ssl': get_setting('smtp_use_ssl', 'false', organization_id=None) == 'true',
-                'from_email': get_setting('smtp_from_email', organization_id=None),
-                'from_name': get_setting('smtp_from_name', 'SentriKat', organization_id=None)
-            }
-
-        # Final check - SMTP must be configured
-        if not smtp_config.get('host') or not smtp_config.get('from_email'):
-            msg = "No SMTP configured (neither org nor global)"
-            logger.warning(f"{msg} - cannot send password reset email to {user.email}")
-            return False, msg
+        from app.email_provider import send_email
 
         reset_link = f"{base_url.rstrip('/')}/reset-password?token={token}"
-
         subject = "SentriKat - Password Reset Request"
         html_body = _build_password_reset_email_html(user, reset_link)
 
-        EmailAlertManager._send_email(
-            smtp_config=smtp_config,
-            recipients=[user.email],
+        result = send_email(
+            to=[user.email],
             subject=subject,
-            html_body=html_body
+            html_body=html_body,
+            organization_id=user.organization_id,
+            email_type='system',
         )
 
-        msg = f"Password reset email sent via {smtp_source} SMTP to {user.email}"
-        logger.info(msg)
-        return True, msg
+        if result.get('success'):
+            msg = f"Password reset email sent to {user.email}"
+            logger.info(msg)
+            return True, msg
+        else:
+            return False, result.get('error', 'Email send failed')
 
     except Exception as e:
         import traceback

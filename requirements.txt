@@ -12,6 +12,7 @@ gunicorn==22.0.0
 ldap3==2.9.1
 reportlab==4.0.7
 email-validator==2.1.0
+resend==2.5.0
 cryptography==46.0.5
 qrcode==7.4.2
 Pillow==12.1.1

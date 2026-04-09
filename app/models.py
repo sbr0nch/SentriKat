@@ -110,6 +110,10 @@ class Organization(db.Model):
     agent_stale_threshold_days = db.Column(db.Integer, default=30)  # Days before agent is considered stale
     product_stale_threshold_days = db.Column(db.Integer, default=90)  # Days before product auto-disables
 
+    # Managed email settings (SaaS)
+    use_managed_email = db.Column(db.Boolean, default=True)  # True = Resend, False = custom SMTP
+    email_reply_to = db.Column(db.String(255), nullable=True)  # Custom Reply-To for tenant emails
+
     # Metadata
     active = db.Column(db.Boolean, default=True, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -153,6 +157,8 @@ class Organization(db.Model):
             'smtp_from_email': self.smtp_from_email,
             'smtp_from_name': self.smtp_from_name,
             'smtp_configured': bool(self.smtp_host and self.smtp_from_email),
+            'use_managed_email': self.use_managed_email if self.use_managed_email is not None else True,
+            'email_reply_to': self.email_reply_to,
             # Alert settings (flat)
             'alert_on_critical': self.alert_on_critical,
             'alert_on_high': self.alert_on_high,
@@ -1439,6 +1445,41 @@ class SystemSettings(db.Model):
             'description': self.description,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
+
+class EmailSuppressionList(db.Model):
+    """Tracks hard-bounced email addresses per tenant.
+
+    When Resend reports a hard bounce, the address is added here.
+    send_email() checks this list and skips suppressed recipients.
+    """
+    __tablename__ = 'email_suppression_list'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
+    email = db.Column(db.String(255), nullable=False)
+    reason = db.Column(db.String(100), nullable=True)  # 'hard_bounce', 'complaint', 'manual'
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('organization_id', 'email', name='uq_suppression_org_email'),
+    )
+
+    organization = db.relationship('Organization', backref='suppressed_emails')
+
+
+class EmailMonthlyUsage(db.Model):
+    """Tracks per-tenant email send count per calendar month for rate limiting."""
+    __tablename__ = 'email_monthly_usage'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
+    month = db.Column(db.String(7), nullable=False)  # 'YYYY-MM'
+    count = db.Column(db.Integer, default=0)
+
+    __table_args__ = (
+        db.UniqueConstraint('organization_id', 'month', name='uq_email_usage_org_month'),
+    )
+
 
 class AlertLog(db.Model):
     """Log of email alerts sent"""

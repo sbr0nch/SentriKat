@@ -26,14 +26,6 @@ def send_product_assignment_notification(product, organization, action='assigned
         organization: Organization model instance
         action: 'assigned' or 'removed'
     """
-    # Get SMTP configuration from organization
-    smtp_config = organization.get_smtp_config()
-
-    # Skip if SMTP not configured
-    if not smtp_config.get('host') or not smtp_config.get('from_email'):
-        logger.debug(f"SMTP not configured for organization {organization.name}, skipping notification")
-        return
-
     # Get org admins
     org_admins = User.query.filter_by(
         organization_id=organization.id,
@@ -107,39 +99,19 @@ def send_product_assignment_notification(product, organization, action='assigned
         </html>
         """
 
-    # Send email to each admin
-    for admin in org_admins:
-        if not admin.email:
-            continue
+    # Send email to all admins via abstraction layer
+    admin_emails = [a.email for a in org_admins if a.email]
+    if not admin_emails:
+        return
 
-        try:
-            msg = MIMEMultipart('alternative')
-            msg['From'] = f"{smtp_config['from_name']} <{smtp_config['from_email']}>"
-            msg['To'] = admin.email
-            msg['Subject'] = subject
-
-            msg.attach(MIMEText(body, 'html'))
-
-            # Connect to SMTP server
-            if smtp_config.get('use_ssl'):
-                server = smtplib.SMTP_SSL(smtp_config['host'], smtp_config['port'])
-            else:
-                server = smtplib.SMTP(smtp_config['host'], smtp_config['port'])
-                if smtp_config.get('use_tls'):
-                    server.starttls()
-
-            try:
-                # Login if credentials provided
-                if smtp_config.get('username') and smtp_config.get('password'):
-                    server.login(smtp_config['username'], smtp_config['password'])
-
-                # Send email
-                server.send_message(msg)
-            finally:
-                server.quit()
-
-            logger.info(f"Notification sent to {admin.email} for {action} action on product {product.vendor} {product.product_name}")
-
-        except Exception as e:
-            logger.error(f"Failed to send email to {admin.email}: {str(e)}")
-            raise
+    try:
+        from app.email_provider import send_email
+        send_email(
+            to=admin_emails,
+            subject=subject,
+            html_body=body,
+            organization_id=organization.id,
+            email_type='system',
+        )
+    except Exception as e:
+        logger.error(f"Failed to send product {action} notification: {str(e)}")
