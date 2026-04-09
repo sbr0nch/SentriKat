@@ -345,7 +345,7 @@ class EmailAlertManager:
                                                 Affecting <strong>{organization.display_name}</strong> products{' — immediate action required' if len(by_priority['critical']) > 0 else ''}
                                             </p>
                                             <p style="margin: 6px 0 0 0; font-size: 12px; color: #9ca3af;">
-                                                Source: SentriKat automated vulnerability monitoring (CISA KEV, NVD, EUVD)
+                                                Source: SentriKat automated vulnerability monitoring
                                             </p>
                                         </td>
                                     </tr>
@@ -1227,7 +1227,7 @@ def _build_user_invite_email_html(user, organization):
                 <h3 style="color: #1e40af; margin-bottom: 15px;">What you can do with SentriKat:</h3>
                 <div class="feature">
                     <div class="feature-icon">✓</div>
-                    <div>Monitor CISA KEV (Known Exploited Vulnerabilities) affecting your products</div>
+                    <div>Monitor actively exploited vulnerabilities affecting your products</div>
                 </div>
                 <div class="feature">
                     <div class="feature-icon">✓</div>
