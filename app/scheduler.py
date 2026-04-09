@@ -360,6 +360,16 @@ def start_scheduler(app):
     )
     logger.info("NVD CVE sync scheduled every 2 hours")
 
+    # Schedule subscription/license expiration checks (daily at 09:00)
+    scheduler.add_job(
+        func=lambda: _run_with_lock('expiration_check', expiration_check_job, app),
+        trigger=CronTrigger(hour=9, minute=0, timezone=tz),
+        id='expiration_check',
+        name='Subscription/License Expiration Check',
+        replace_existing=True
+    )
+    logger.info("Subscription/license expiration check scheduled at 09:00")
+
     # Warm up the CVE known products cache on startup
     try:
         if refresh_known_cve_products is not None:
@@ -1397,3 +1407,226 @@ def health_check_job(app):
             logger.info(f"Health checks completed: {len(results)} checks, {problems} issues")
         except Exception as e:
             logger.error(f"Health check job failed: {str(e)}", exc_info=True)
+
+
+# ============================================================================
+# Subscription / License Expiration Notifications
+# ============================================================================
+
+# Thresholds: send notification at these days before expiry
+EXPIRY_THRESHOLDS = [30, 14, 7, 3, 1]
+
+
+def expiration_check_job(app):
+    """Check for expiring subscriptions (SaaS) and licenses (on-premise).
+
+    Sends email notifications to org admins at 30/14/7/3/1 days before expiry.
+    Tracks last notification sent to avoid duplicate alerts on the same threshold.
+    """
+    with app.app_context():
+        try:
+            from app.saas import is_saas_mode
+            if is_saas_mode():
+                _check_saas_expirations()
+            else:
+                _check_onprem_expiration()
+        except Exception as e:
+            logger.error(f"Expiration check job failed: {e}", exc_info=True)
+
+
+def _check_saas_expirations():
+    """Check all SaaS tenant subscriptions for upcoming expiration."""
+    from app.models import Organization, Subscription, User
+    from app.email_provider import send_email, render_email_html
+    from app.settings_api import get_setting
+    from datetime import datetime, timedelta
+
+    now = datetime.utcnow()
+
+    subscriptions = Subscription.query.filter(
+        Subscription.status.in_(['active', 'trialing']),
+        Subscription.current_period_end.isnot(None)
+    ).all()
+
+    for sub in subscriptions:
+        days_left = (sub.current_period_end - now).days
+        org = Organization.query.get(sub.organization_id)
+        if not org or not org.active:
+            continue
+
+        # Find which threshold we're at
+        threshold = None
+        for t in EXPIRY_THRESHOLDS:
+            if days_left <= t:
+                threshold = t
+                break
+
+        if threshold is None:
+            continue  # more than 30 days left
+
+        # Check if we already sent for this threshold (use settings as marker)
+        marker_key = f'expiry_notified_{threshold}d'
+        already_sent = get_setting(marker_key, 'false', organization_id=org.id)
+        if already_sent == 'true':
+            continue
+
+        # Get org admin emails
+        admins = User.query.filter_by(
+            organization_id=org.id, is_active=True
+        ).filter(
+            (User.role == 'org_admin') | (User.role == 'super_admin')
+        ).all()
+        recipients = [a.email for a in admins if a.email]
+        if not recipients:
+            continue
+
+        # Build notification
+        plan_name = sub.plan.display_name if sub.plan else 'your plan'
+        is_trial = sub.status == 'trialing'
+
+        if is_trial:
+            subject = f"SentriKat: Your trial expires in {days_left} day{'s' if days_left != 1 else ''}"
+            body_content = f"""
+            <p style="font-size: 16px; color: #374151;">Your <strong>{plan_name}</strong> trial expires in <strong>{days_left} day{'s' if days_left != 1 else ''}</strong>.</p>
+            <p style="color: #6b7280;">After the trial ends, your account will be downgraded to the Free plan with limited features.</p>
+            <div style="text-align: center; margin: 24px 0;">
+                <a href="https://sentrikat.com/pricing" style="display: inline-block; background: #1e40af; color: white; text-decoration: none; padding: 12px 28px; border-radius: 8px; font-weight: 600;">
+                    Upgrade Now
+                </a>
+            </div>"""
+        else:
+            subject = f"SentriKat: Your {plan_name} subscription renews in {days_left} day{'s' if days_left != 1 else ''}"
+            if sub.cancel_at_period_end:
+                subject = f"SentriKat: Your {plan_name} subscription ends in {days_left} day{'s' if days_left != 1 else ''}"
+                body_content = f"""
+                <p style="font-size: 16px; color: #374151;">Your <strong>{plan_name}</strong> subscription is set to cancel and will end in <strong>{days_left} day{'s' if days_left != 1 else ''}</strong>.</p>
+                <p style="color: #6b7280;">After cancellation, your account will be downgraded to the Free plan. Your data will be preserved for 30 days.</p>
+                <div style="text-align: center; margin: 24px 0;">
+                    <a href="https://sentrikat.com/pricing" style="display: inline-block; background: #1e40af; color: white; text-decoration: none; padding: 12px 28px; border-radius: 8px; font-weight: 600;">
+                        Reactivate Subscription
+                    </a>
+                </div>"""
+            else:
+                body_content = f"""
+                <p style="font-size: 16px; color: #374151;">Your <strong>{plan_name}</strong> subscription will automatically renew in <strong>{days_left} day{'s' if days_left != 1 else ''}</strong>.</p>
+                <p style="color: #6b7280;">No action needed — your service will continue uninterrupted. Review your plan anytime in Settings → Subscription.</p>"""
+
+        html = render_email_html(body_content, org=org, subject=subject)
+
+        result = send_email(
+            to=recipients,
+            subject=subject,
+            html_body=html,
+            organization_id=org.id,
+            email_type='system',
+        )
+
+        if result.get('success'):
+            # Mark as sent
+            from app.settings_api import set_setting
+            set_setting(marker_key, 'true', 'expiration', organization_id=org.id)
+            logger.info(f"Expiration notice sent to org {org.name}: {days_left}d left ({sub.status})")
+
+        # Reset lower thresholds when a higher one triggers
+        # (so we re-notify at each threshold)
+        for lower_t in EXPIRY_THRESHOLDS:
+            if lower_t < threshold:
+                lower_key = f'expiry_notified_{lower_t}d'
+                try:
+                    from app.models import SystemSettings
+                    existing = SystemSettings.query.filter_by(
+                        key=lower_key, organization_id=org.id
+                    ).first()
+                    if existing:
+                        existing.value = 'false'
+                except Exception:
+                    pass
+
+    try:
+        from app import db
+        db.session.commit()
+    except Exception:
+        pass
+
+
+def _check_onprem_expiration():
+    """Check on-premise license for upcoming expiration."""
+    from app.licensing import get_license
+    from app.models import User
+    from app.email_provider import send_email, render_email_html
+    from app.settings_api import get_setting, set_setting
+
+    license_info = get_license()
+    if not license_info or not license_info.expires_at:
+        return  # perpetual license or no license
+
+    days_left = license_info.days_until_expiry
+    if days_left is None:
+        return
+
+    # Find threshold
+    threshold = None
+    for t in EXPIRY_THRESHOLDS:
+        if days_left <= t:
+            threshold = t
+            break
+
+    if threshold is None:
+        return
+
+    marker_key = f'license_expiry_notified_{threshold}d'
+    if get_setting(marker_key, 'false') == 'true':
+        return
+
+    # Get super_admin emails
+    admins = User.query.filter_by(is_active=True).filter(
+        (User.role == 'super_admin') | (User.is_admin == True)
+    ).all()
+    recipients = [a.email for a in admins if a.email]
+    if not recipients:
+        return
+
+    edition = license_info.edition or 'Professional'
+    expires_str = license_info.expires_at.strftime('%d %B %Y') if hasattr(license_info.expires_at, 'strftime') else str(license_info.expires_at)
+
+    if license_info.is_expired:
+        subject = f"SentriKat: Your {edition} license has EXPIRED"
+        body_content = f"""
+        <div style="background: #fef2f2; border-left: 4px solid #dc2626; padding: 16px; margin-bottom: 20px; border-radius: 4px;">
+            <p style="margin: 0; color: #991b1b; font-weight: 600;">Your {edition} license expired on {expires_str}.</p>
+        </div>
+        <p style="color: #374151;">SentriKat is now running in Community mode with limited features. Renew your license to restore full functionality.</p>
+        <div style="text-align: center; margin: 24px 0;">
+            <a href="https://sentrikat.com/pricing" style="display: inline-block; background: #dc2626; color: white; text-decoration: none; padding: 12px 28px; border-radius: 8px; font-weight: 600;">
+                Renew License
+            </a>
+        </div>"""
+    else:
+        subject = f"SentriKat: Your {edition} license expires in {days_left} day{'s' if days_left != 1 else ''}"
+        urgency_color = '#dc2626' if days_left <= 3 else '#f59e0b' if days_left <= 14 else '#3b82f6'
+        body_content = f"""
+        <p style="font-size: 16px; color: #374151;">Your <strong>{edition}</strong> license expires on <strong>{expires_str}</strong> (<span style="color: {urgency_color}; font-weight: 600;">{days_left} day{'s' if days_left != 1 else ''} remaining</span>).</p>
+        <p style="color: #6b7280;">After expiration, SentriKat will revert to Community mode. Renew before the expiry date to avoid service interruption.</p>
+        <div style="text-align: center; margin: 24px 0;">
+            <a href="https://sentrikat.com/pricing" style="display: inline-block; background: #1e40af; color: white; text-decoration: none; padding: 12px 28px; border-radius: 8px; font-weight: 600;">
+                Renew License
+            </a>
+        </div>"""
+
+    html = render_email_html(body_content, subject=subject)
+
+    result = send_email(
+        to=recipients,
+        subject=subject,
+        html_body=html,
+        email_type='system',
+    )
+
+    if result.get('success'):
+        set_setting(marker_key, 'true', 'expiration')
+        logger.info(f"License expiration notice sent: {days_left}d left")
+
+    # Reset lower thresholds
+    for lower_t in EXPIRY_THRESHOLDS:
+        if lower_t < threshold:
+            set_setting(f'license_expiry_notified_{lower_t}d', 'false', 'expiration')
