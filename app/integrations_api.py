@@ -699,6 +699,7 @@ def create_product_from_queue(queue_item):
 @requires_professional('Integrations')
 def get_import_queue():
     """Get pending import queue items."""
+    from app.auth import get_current_user
     status = request.args.get('status', 'pending')
     integration_id = request.args.get('integration_id', type=int)
     org_id = request.args.get('organization_id', type=int)
@@ -710,12 +711,18 @@ def get_import_queue():
 
     query = ImportQueue.query
 
+    # Enforce org scope for non-super-admins
+    user = get_current_user()
+    if user and not user.is_super_admin():
+        accessible_org_ids = [o['id'] for o in user.get_all_organizations()]
+        query = query.filter(ImportQueue.organization_id.in_(accessible_org_ids))
+    elif org_id:
+        query = query.filter_by(organization_id=org_id)
+
     if status:
         query = query.filter_by(status=status)
     if integration_id:
         query = query.filter_by(integration_id=integration_id)
-    if org_id:
-        query = query.filter_by(organization_id=org_id)
     if vendor:
         query = query.filter(ImportQueue.vendor == vendor)
     if source_type:
