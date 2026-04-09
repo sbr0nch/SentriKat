@@ -7554,6 +7554,7 @@ def switch_organization(org_id):
 
 @bp.route('/api/webhooks/email/bounce', methods=['POST'])
 @csrf.exempt
+@limiter.limit("100/minute")
 def email_bounce_webhook():
     """Receive bounce/complaint webhooks from Resend.
 
@@ -7561,11 +7562,39 @@ def email_bounce_webhook():
     complains. We add the address to the suppression list so we never email
     them again for that tenant.
 
-    Security: Resend signs webhooks with a svix signature. In production,
-    verify the signature. For now we validate the payload structure.
+    Security: Validates webhook signing secret via Resend's svix header.
     """
     import logging
+    import hmac
+    import hashlib
     wh_logger = logging.getLogger('email.webhook')
+
+    # --- Verify webhook signature ---
+    webhook_secret = os.environ.get('RESEND_WEBHOOK_SECRET', '')
+    if webhook_secret:
+        signature = request.headers.get('svix-signature', '')
+        timestamp = request.headers.get('svix-timestamp', '')
+        msg_id = request.headers.get('svix-id', '')
+        if not signature or not timestamp:
+            wh_logger.warning("Bounce webhook missing signature headers")
+            return jsonify({'error': 'Unauthorized'}), 401
+        # Verify HMAC: base64(hmac-sha256(secret, "{msg_id}.{timestamp}.{body}"))
+        raw_body = request.get_data(as_text=True)
+        signed_content = f"{msg_id}.{timestamp}.{raw_body}"
+        try:
+            import base64
+            secret_bytes = base64.b64decode(webhook_secret.split('_')[-1] if '_' in webhook_secret else webhook_secret)
+            expected = base64.b64encode(
+                hmac.new(secret_bytes, signed_content.encode(), hashlib.sha256).digest()
+            ).decode()
+            # Resend sends multiple signatures separated by space, check any match
+            sig_parts = [s.split(',')[-1] for s in signature.split(' ')]
+            if not any(hmac.compare_digest(expected, s) for s in sig_parts):
+                wh_logger.warning("Bounce webhook signature mismatch")
+                return jsonify({'error': 'Unauthorized'}), 401
+        except Exception as e:
+            wh_logger.error(f"Webhook signature verification error: {e}")
+            return jsonify({'error': 'Unauthorized'}), 401
 
     data = request.get_json(silent=True)
     if not data:
@@ -7576,26 +7605,24 @@ def email_bounce_webhook():
 
     # Only process bounce and complaint events
     if event_type not in ('email.bounced', 'email.complained'):
-        wh_logger.debug(f"Ignoring webhook event: {event_type}")
         return jsonify({'status': 'ignored'}), 200
 
-    email_addr = None
     reason = 'hard_bounce' if event_type == 'email.bounced' else 'complaint'
 
     # Extract bounced recipient from Resend payload
     to_list = event_data.get('to', [])
+    email_addr = None
     if isinstance(to_list, list) and to_list:
         email_addr = to_list[0]
     elif isinstance(to_list, str):
         email_addr = to_list
 
-    if not email_addr:
-        wh_logger.warning(f"Bounce webhook missing recipient: {data}")
-        return jsonify({'error': 'No recipient found'}), 400
+    if not email_addr or '@' not in email_addr:
+        return jsonify({'error': 'Invalid recipient'}), 400
 
     email_addr = email_addr.lower().strip()
 
-    # Determine org_id from tags or headers (Resend supports custom headers)
+    # Determine org_id from tags or headers
     org_id = None
     tags = event_data.get('tags', {})
     if isinstance(tags, dict):
@@ -7610,15 +7637,16 @@ def email_bounce_webhook():
     if org_id:
         try:
             org_id = int(org_id)
+            # Validate org exists
+            if not Organization.query.get(org_id):
+                org_id = None
         except (TypeError, ValueError):
             org_id = None
 
     if not org_id:
-        # If no org context, suppress globally (org_id=0 as sentinel)
-        wh_logger.warning(
-            f"Bounce for {email_addr} without org context — suppressing globally"
-        )
-        org_id = 0
+        # No valid org context — log and skip (don't suppress globally)
+        wh_logger.info(f"Bounce for {email_addr} without valid org — skipping")
+        return jsonify({'status': 'skipped'}), 200
 
     # Add to suppression list (idempotent)
     from app.models import EmailSuppressionList
@@ -7635,9 +7663,7 @@ def email_bounce_webhook():
         db.session.add(suppression)
         try:
             db.session.commit()
-            wh_logger.info(
-                f"Suppressed {email_addr} for org {org_id} (reason={reason})"
-            )
+            wh_logger.info(f"Suppressed {email_addr} for org {org_id} ({reason})")
         except Exception as e:
             db.session.rollback()
             wh_logger.error(f"Failed to save suppression: {e}")

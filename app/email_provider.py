@@ -236,6 +236,7 @@ def render_email_html(body_content, org=None, subject=''):
     Business/Enterprise plans with a custom logo get their branding.
     Others get the default SentriKat header.
     """
+    from html import escape as html_escape
     from app.saas import is_saas_mode
 
     logo_url = None
@@ -259,12 +260,19 @@ def render_email_html(body_content, org=None, subject=''):
             if custom_name and custom_name != 'SentriKat':
                 app_name = custom_name
 
+    # Escape dynamic values to prevent HTML injection
+    safe_app_name = html_escape(app_name)
+
     # Build header
     if logo_url:
-        # White-label: customer logo
+        # White-label: customer logo — validate URL scheme
+        if not logo_url.startswith(('http://', 'https://', '/')):
+            logo_url = None
+    if logo_url:
+        safe_logo_url = html_escape(logo_url)
         header_html = f'''
         <div style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); padding: 24px; text-align: center; border-radius: 12px 12px 0 0;">
-            <img src="{logo_url}" alt="{app_name}" style="max-height: 48px; max-width: 200px;">
+            <img src="{safe_logo_url}" alt="{safe_app_name}" style="max-height: 48px; max-width: 200px;">
         </div>'''
     else:
         # Default SentriKat branding
@@ -282,8 +290,8 @@ def render_email_html(body_content, org=None, subject=''):
         {body_content}
     </div>
     <div style="text-align: center; padding: 20px; color: #9ca3af; font-size: 12px;">
-        <p style="margin: 4px 0;">This is an automated message from {app_name}.</p>
-        <p style="margin: 4px 0;">&copy; {year} {app_name}</p>
+        <p style="margin: 4px 0;">This is an automated message from {safe_app_name}.</p>
+        <p style="margin: 4px 0;">&copy; {year} {safe_app_name}</p>
     </div>
 </div>
 </body></html>'''
@@ -317,6 +325,17 @@ def send_email(to, subject, html_body, reply_to=None, organization_id=None,
 
     if not to:
         return {'success': False, 'error': 'No recipients'}
+
+    # --- Validate email addresses ---
+    validated = []
+    for addr in to:
+        if '@' in addr and '.' in addr.split('@')[-1]:
+            validated.append(addr)
+        else:
+            logger.warning(f"Skipping invalid email address: {_obfuscate_email(addr)}")
+    to = validated
+    if not to:
+        return {'success': False, 'error': 'No valid recipients'}
 
     # --- Suppression list ---
     if organization_id:
@@ -436,4 +455,5 @@ def send_email(to, subject, html_body, reply_to=None, organization_id=None,
             f"type={email_type} provider={'resend' if use_resend else 'smtp'} "
             f"error={e}"
         )
-        return {'success': False, 'error': str(e)}
+        # Return generic error to caller — full details stay in logs
+        return {'success': False, 'error': 'Email delivery failed'}

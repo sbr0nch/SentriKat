@@ -1327,7 +1327,8 @@ def send_user_status_email(user, is_blocked, blocked_by_username=None):
             smtp_config=smtp_config,
             recipients=[user.email],
             subject=subject,
-            html_body=html_body
+            html_body=html_body,
+            organization_id=organization.id
         )
 
         msg = f"Email sent via {smtp_source} SMTP ({smtp_config['host']}:{smtp_config['port']}) to {user.email}"
@@ -1474,7 +1475,8 @@ def send_role_change_email(user, old_role, new_role, changed_by_username=None):
             smtp_config=smtp_config,
             recipients=[user.email],
             subject=subject,
-            html_body=html_body
+            html_body=html_body,
+            organization_id=organization.id
         )
 
         msg = f"Email sent via {smtp_source} SMTP to {user.email}"
@@ -1643,7 +1645,8 @@ def send_2fa_reset_email(user, reset_by_username=None):
             smtp_config=smtp_config,
             recipients=[user.email],
             subject=subject,
-            html_body=html_body
+            html_body=html_body,
+            organization_id=organization.id
         )
 
         msg = f"Email sent via {smtp_source} SMTP to {user.email}"
@@ -1792,7 +1795,8 @@ def send_password_change_forced_email(user, forced_by_username=None):
             smtp_config=smtp_config,
             recipients=[user.email],
             subject=subject,
-            html_body=html_body
+            html_body=html_body,
+            organization_id=organization.id
         )
 
         msg = f"Email sent via {smtp_source} SMTP to {user.email}"

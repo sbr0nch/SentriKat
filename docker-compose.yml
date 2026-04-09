@@ -115,6 +115,7 @@ services:
       - RESEND_API_KEY=${RESEND_API_KEY:-}
       - EMAIL_FROM_ADDRESS=${EMAIL_FROM_ADDRESS:-noreply@alerts.sentrikat.com}
       - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-SentriKat Alerts}
+      - RESEND_WEBHOOK_SECRET=${RESEND_WEBHOOK_SECRET:-}
       # === SMTP / EMAIL (on-premise, can also be configured via UI) ===
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-587}
