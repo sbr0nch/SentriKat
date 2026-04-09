@@ -2453,13 +2453,8 @@ def assign_product_organizations(product_id):
 
         db.session.commit()
 
-        # Send email notifications to org admins
-        for org in added_orgs:
-            try:
-                send_product_assignment_notification(product, org, 'assigned')
-            except Exception as e:
-                # Log but don't fail the request
-                logger.warning(f"Failed to send notification to {org.name}: {str(e)}")
+        # Email notifications disabled to conserve email quota (Resend free plan)
+        # Product assignment is visible in the dashboard audit log
 
         return jsonify({
             'success': True,
@@ -2530,11 +2525,7 @@ def remove_product_organization(product_id, org_id):
 
         db.session.commit()
 
-        # Send email notification
-        try:
-            send_product_assignment_notification(product, org, 'removed')
-        except Exception as e:
-            logger.warning(f"Failed to send notification to {org.name}: {str(e)}")
+        # Email notification disabled to conserve email quota
 
         # Check if product has any organizations left after removal
         remaining_orgs = product.organizations.count()
