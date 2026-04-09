@@ -51,7 +51,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -72,7 +72,7 @@ jobs:
       digest: ${{ steps.build.outputs.digest }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # Write VERSION file so the app knows its version
       - name: Set VERSION file
@@ -121,7 +121,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Get version
         id: version
@@ -373,7 +373,7 @@ jobs:
     if: ${{ !contains(github.ref_name, '-') }}  # Skip pre-releases (e.g., v1.0.0-beta.1)
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v5
         with:
