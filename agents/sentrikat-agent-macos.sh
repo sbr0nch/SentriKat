@@ -1479,6 +1479,30 @@ install_agent() {
         exit 1
     fi
 
+    # Detect and handle existing installation (upgrade path)
+    if launchctl list 2>/dev/null | grep -q com.sentrikat || [[ -f "$CONFIG_FILE" ]]; then
+        echo ""
+        echo "  Existing SentriKat Agent detected — upgrading automatically."
+        log_info "Existing agent detected, performing upgrade..."
+
+        # Unload old daemons
+        sudo launchctl unload "$LAUNCHDAEMON_PLIST" 2>/dev/null || true
+        sudo launchctl unload "$HEARTBEAT_PLIST" 2>/dev/null || true
+
+        # Preserve agent ID from old config
+        if [[ -f "$CONFIG_FILE" ]]; then
+            local old_agent_id
+            old_agent_id=$(grep '^AGENT_ID=' "$CONFIG_FILE" | cut -d'"' -f2)
+            if [[ -n "$old_agent_id" && -z "$AGENT_ID" ]]; then
+                AGENT_ID="$old_agent_id"
+                log_info "Preserved agent ID from previous installation: $AGENT_ID"
+            fi
+            cp "$CONFIG_FILE" "${CONFIG_FILE}.bak" 2>/dev/null || true
+        fi
+
+        echo "  Old agent stopped. Installing new version..."
+    fi
+
     save_config
 
     # Copy script to system location
