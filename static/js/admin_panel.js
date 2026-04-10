@@ -1755,7 +1755,7 @@ async function loadOrganizations() {
         tbody.innerHTML = `
             <tr>
                 <td colspan="6" class="text-center text-danger py-4">
-                    <i class="bi bi-exclamation-triangle text-danger"></i> Error loading organizations: ${error.message}
+                    <i class="bi bi-exclamation-triangle text-danger"></i> Error loading organizations: ${escapeHtml(error.message || '')}
                 </td>
             </tr>
         `;
@@ -6968,7 +6968,7 @@ async function loadAgentKeys() {
             <tr>
                 <td colspan="9" class="text-center py-4 text-danger">
                     <i class="bi bi-exclamation-triangle text-danger"></i>
-                    <span class="ms-2">Error loading agent keys: ${error.message}</span>
+                    <span class="ms-2">Error loading agent keys: ${escapeHtml(error.message || '')}</span>
                 </td>
             </tr>
         `;
@@ -10084,7 +10084,7 @@ async function loadDiscoveryAgents() {
                 <td class="fw-semibold">${escapeHtml(agent.hostname)}</td>
                 <td>
                     <span class="badge bg-${agent.os_type === 'windows' ? 'primary' : 'warning'}">
-                        ${agent.os_type}
+                        ${escapeHtml(agent.os_type || '')}
                     </span>
                     <small class="text-muted ms-1">${escapeHtml(agent.os_version || '')}</small>
                 </td>

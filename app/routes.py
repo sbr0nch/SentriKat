@@ -2791,9 +2791,8 @@ def get_vulnerability_stats():
     ).count()
 
     # Calculate priority-based stats (both CVE counts and match counts)
-    # Use selectinload to eagerly load relationships and avoid column mapping issues
+    # Only load vulnerability relationship (needed for priority calc), NOT product (saves ~50% memory)
     all_matches = unacknowledged_query.options(
-        selectinload(VulnerabilityMatch.product),
         selectinload(VulnerabilityMatch.vulnerability)
     ).all()
 

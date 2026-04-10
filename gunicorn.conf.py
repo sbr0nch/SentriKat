@@ -89,7 +89,7 @@ limit_request_fields = 100
 tmp_upload_dir = None
 
 # Server header
-forwarded_allow_ips = '*'  # Trust X-Forwarded-For from nginx
+forwarded_allow_ips = os.environ.get('FORWARDED_ALLOW_IPS', '127.0.0.1,::1,172.16.0.0/12,10.0.0.0/8')  # Trust X-Forwarded-For from nginx/Docker only
 proxy_protocol = False
 
 
