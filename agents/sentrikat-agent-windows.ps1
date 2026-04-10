@@ -1837,52 +1837,54 @@ function Install-WindowsService {
 
     # Create a service wrapper script that runs the agent in a loop
     $wrapperPath = "$env:ProgramData\SentriKat\sentrikat-service.ps1"
-    $wrapperContent = @"
+    $wrapperContent = @'
 # SentriKat Agent Service Wrapper
 # This script runs as a Windows service via sc.exe
 # It manages both inventory scans and heartbeat polling
 
-`$ErrorActionPreference = "Continue"
-`$AgentScript = "$scriptPath"
-`$HeartbeatInterval = $HeartbeatIntervalMinutes
-`$ScanInterval = $($Config.IntervalMinutes)
-`$LogFile = "$env:ProgramData\SentriKat\service.log"
+$ErrorActionPreference = "Continue"
+$LogFile = "$env:ProgramData\SentriKat\service.log"
 
-function Write-ServiceLog(`$msg) {
-    `$ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    Add-Content -Path `$LogFile -Value "[`$ts] `$msg" -ErrorAction SilentlyContinue
+function Write-ServiceLog($msg) {
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Add-Content -Path $LogFile -Value "[$ts] $msg" -ErrorAction SilentlyContinue
 }
 
 Write-ServiceLog "SentriKat service wrapper started"
 
-`$lastScan = [DateTime]::MinValue
-`$lastHeartbeat = [DateTime]::MinValue
+# Read config for intervals
+$configPath = "$env:ProgramData\SentriKat\config.json"
+$config = Get-Content $configPath | ConvertFrom-Json
+$AgentScript = "$env:ProgramData\SentriKat\sentrikat-agent.ps1"
+$HeartbeatInterval = 5
+$ScanInterval = $config.IntervalMinutes
 
-while (`$true) {
+$lastScan = [DateTime]::MinValue
+$lastHeartbeat = [DateTime]::MinValue
+
+while ($true) {
     try {
-        `$now = Get-Date
+        $now = Get-Date
 
-        # Run heartbeat every `$HeartbeatInterval minutes
-        if ((`$now - `$lastHeartbeat).TotalMinutes -ge `$HeartbeatInterval) {
+        if (($now - $lastHeartbeat).TotalMinutes -ge $HeartbeatInterval) {
             Write-ServiceLog "Running heartbeat..."
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `$AgentScript -Heartbeat 2>&1 | Out-Null
-            `$lastHeartbeat = `$now
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $AgentScript -Heartbeat 2>&1 | Out-Null
+            $lastHeartbeat = $now
         }
 
-        # Run full scan every `$ScanInterval minutes
-        if ((`$now - `$lastScan).TotalMinutes -ge `$ScanInterval) {
+        if (($now - $lastScan).TotalMinutes -ge $ScanInterval) {
             Write-ServiceLog "Running full inventory scan..."
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `$AgentScript -RunOnce 2>&1 | Out-Null
-            `$lastScan = `$now
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $AgentScript -RunOnce 2>&1 | Out-Null
+            $lastScan = $now
         }
 
         Start-Sleep -Seconds 60
     } catch {
-        Write-ServiceLog "Error: `$_"
+        Write-ServiceLog "Error: $_"
         Start-Sleep -Seconds 30
     }
 }
-"@
+'@
     Set-Content -Path $wrapperPath -Value $wrapperContent -Force
 
     # Create the service using sc.exe with powershell.exe as the binary
