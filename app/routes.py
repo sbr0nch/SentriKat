@@ -78,13 +78,23 @@ bp = Blueprint('main', __name__)
 csrf.exempt(bp)
 
 
-def _super_admin_unrestricted():
-    """Check if current user has unrestricted cross-org super_admin access.
+def _super_admin_unrestricted(user=None):
+    """Check if user has unrestricted cross-org super_admin access.
 
     In SaaS mode: returns False — super_admin is always scoped to their org.
     In on-prem mode: returns True — super_admin has full cross-org access.
+
+    Args:
+        user: User object. If None, fetched from session.
     """
-    return current_user.is_super_admin() and not is_saas_mode()
+    if user is None:
+        user_id = session.get('user_id')
+        if not user_id:
+            return False
+        user = User.query.get(user_id)
+    if not user:
+        return False
+    return user.is_super_admin() and not is_saas_mode()
 
 
 # =============================================================================
