@@ -314,6 +314,17 @@ def start_scheduler(app):
     )
     logger.info("Stuck job recovery scheduled every 10 minutes")
 
+    # Schedule exploit enrichment (every 6 hours)
+    # Checks GitHub for public PoC/exploits for CRITICAL/HIGH CVEs
+    scheduler.add_job(
+        func=lambda: _run_with_lock('exploit_enrichment', exploit_enrichment_job, app),
+        trigger=IntervalTrigger(hours=6),
+        id='exploit_enrichment',
+        name='Exploit PoC Enrichment (GitHub)',
+        replace_existing=True
+    )
+    logger.info("Exploit enrichment scheduled every 6 hours")
+
     # Schedule asset type auto-detection (daily at 06:00)
     scheduler.add_job(
         func=lambda: _run_with_lock('auto_detect_asset_type', auto_detect_asset_type_job, app),
@@ -1245,6 +1256,17 @@ def stuck_job_recovery_job(app):
                 db.session.rollback()
             except Exception:
                 pass
+
+
+def exploit_enrichment_job(app):
+    """Enrich CVEs with public exploit availability data from GitHub."""
+    with app.app_context():
+        try:
+            from app.exploit_enrichment import enrich_exploit_data
+            count = enrich_exploit_data()
+            logger.info(f"Exploit enrichment completed: {count} CVEs enriched")
+        except Exception as e:
+            logger.error(f"Exploit enrichment failed: {e}")
 
 
 def auto_detect_asset_type_job(app):

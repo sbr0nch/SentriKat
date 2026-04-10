@@ -531,6 +531,13 @@ class Vulnerability(db.Model):
     epss_percentile = db.Column(db.Float, nullable=True)
     epss_fetched_at = db.Column(db.DateTime, nullable=True)
 
+    # Public exploit availability — set by ExploitDB/GitHub PoC enrichment.
+    # Different from is_actively_exploited: this means a PoC EXISTS publicly,
+    # not necessarily that it's being used in the wild.
+    exploit_public = db.Column(db.Boolean, default=False, index=True)
+    exploit_source = db.Column(db.String(100), nullable=True)  # e.g. "exploitdb", "github_poc"
+    exploit_url = db.Column(db.String(500), nullable=True)  # Link to the public exploit
+
     def calculate_priority(self):
         """
         Calculate priority based on multiple factors:
@@ -688,6 +695,9 @@ class Vulnerability(db.Model):
             'cvss_source': self.cvss_source,
             'source': self.source or 'cisa_kev',
             'is_actively_exploited': bool(self.is_actively_exploited),
+            'exploit_public': bool(self.exploit_public),
+            'exploit_source': self.exploit_source,
+            'exploit_url': self.exploit_url,
             'priority': self.calculate_priority(),
             'days_old': (date.today() - self.date_added).days if self.date_added else None,
             'has_cpe_data': self.has_cpe_data(),
