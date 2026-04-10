@@ -1261,7 +1261,8 @@
                 // Default product-based stats (All, Server, Client)
                 document.getElementById('totalVulns').textContent = formatNumber(stats.total_vulnerabilities);
                 document.getElementById('totalMatches').textContent = formatNumber(stats.total_matches);
-                document.getElementById('unacknowledged').textContent = formatNumber(stats.unacknowledged_cves || stats.unacknowledged);
+                document.getElementById('unacknowledged').textContent = formatNumber(stats.needs_review || 0);
+                document.getElementById('unacknowledged').title = `${stats.needs_review || 0} medium-confidence matches on dangerous CVEs that need manual verification`;
                 document.getElementById('productsTracked').textContent = formatNumber(stats.products_tracked);
 
                 // EPSS risk indicator
@@ -3191,6 +3192,9 @@
                             <a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(vuln.cve_id)}" target="_blank" class="text-decoration-none">
                                 <span class="badge bg-dark fs-6 me-1">${escapeHtml(vuln.cve_id)}</span>
                             </a>
+                            ${vuln.exploit_public ? `<a href="${escapeHtml(vuln.exploit_url || '#')}" target="_blank" class="badge bg-danger text-decoration-none ms-1" title="Public exploit available (${escapeHtml(vuln.exploit_source || 'unknown')})"><i class="bi bi-bug-fill me-1"></i>Exploit</a>` : ''}
+                            ${group.affected_products.some(p => p.risk_score >= 80) ? `<span class="badge bg-danger ms-1" title="Risk Score: ${Math.max(...group.affected_products.map(p => p.risk_score || 0))}/100"><i class="bi bi-speedometer2 me-1"></i>${Math.max(...group.affected_products.map(p => p.risk_score || 0))}</span>` : group.affected_products.some(p => p.risk_score >= 50) ? `<span class="badge bg-warning text-dark ms-1" title="Risk Score: ${Math.max(...group.affected_products.map(p => p.risk_score || 0))}/100"><i class="bi bi-speedometer2 me-1"></i>${Math.max(...group.affected_products.map(p => p.risk_score || 0))}</span>` : ''}
+                            ${group.affected_products.some(p => p.needs_review) ? '<span class="badge bg-warning text-dark ms-1" title="Medium-confidence match on dangerous CVE — verify manually"><i class="bi bi-eye me-1"></i>Needs Review</span>' : ''}
                             <span class="badge bg-secondary" style="font-size: 0.7rem;"><i class="bi bi-calendar3"></i> ${formatDate(vuln.date_added)}</span>
                             ${vuln.is_zero_day ? '<span class="badge" style="background: linear-gradient(135deg, #6d47a8, #9b4d7c); color: white; font-size: 0.7rem;" title="Zero-day: detected by SentriKat before CISA KEV publication"><i class="bi bi-lightning-fill me-1"></i>0-DAY</span>' : ''}
                             ${vuln.nvd_data_incomplete ? `<span class="badge bg-warning text-dark" style="font-size: 0.7rem;" title="NVD status: ${escapeHtml(vuln.nvd_status || 'Unknown')} — CPE data may be incomplete"><i class="bi bi-hourglass-split me-1"></i>${escapeHtml(vuln.nvd_status || 'Pending')}</span>` : ''}

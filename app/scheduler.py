@@ -314,6 +314,17 @@ def start_scheduler(app):
     )
     logger.info("Stuck job recovery scheduled every 10 minutes")
 
+    # Schedule CVE description parser (every 4 hours)
+    # Parses unanalyzed CVE descriptions to extract vendor/product/version
+    scheduler.add_job(
+        func=lambda: _run_with_lock('cve_description_parser', cve_description_parser_job, app),
+        trigger=IntervalTrigger(hours=4),
+        id='cve_description_parser',
+        name='CVE Description Parser (Awaiting Analysis)',
+        replace_existing=True
+    )
+    logger.info("CVE description parser scheduled every 4 hours")
+
     # Schedule exploit enrichment (every 6 hours)
     # Checks GitHub for public PoC/exploits for CRITICAL/HIGH CVEs
     scheduler.add_job(
@@ -1256,6 +1267,17 @@ def stuck_job_recovery_job(app):
                 db.session.rollback()
             except Exception:
                 pass
+
+
+def cve_description_parser_job(app):
+    """Parse CVE descriptions for 'Awaiting Analysis' CVEs to extract vendor/product."""
+    with app.app_context():
+        try:
+            from app.cve_description_parser import enrich_unanalyzed_cves
+            count = enrich_unanalyzed_cves()
+            logger.info(f"CVE description parser completed: {count} CVEs enriched")
+        except Exception as e:
+            logger.error(f"CVE description parser failed: {e}")
 
 
 def exploit_enrichment_job(app):

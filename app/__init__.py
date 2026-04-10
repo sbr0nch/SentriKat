@@ -129,6 +129,9 @@ def _apply_schema_migrations(logger, db_uri):
         ('vulnerabilities', 'exploit_url', 'VARCHAR(500)', 'VARCHAR(500)'),
     ]
 
+    # Create new tables (remediation_assignments, sla_policies) if they don't exist
+    # db.create_all() handles this for new tables — existing tables are not touched
+
     is_sqlite = db_uri.startswith('sqlite')
 
     # Use a completely isolated engine for migrations
@@ -370,6 +373,8 @@ def create_app(config_class=Config):
     app.register_blueprint(provision_api.provision_bp)
     app.register_blueprint(metrics_api.metrics_bp)
     app.register_blueprint(gdpr_api.gdpr_bp)
+    from app import remediation_api
+    app.register_blueprint(remediation_api.bp)
 
     # Error handlers: return JSON for API routes, HTML for browser routes
     # Global helper: sanitize error messages in production to prevent info leakage
