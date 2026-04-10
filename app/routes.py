@@ -78,6 +78,15 @@ bp = Blueprint('main', __name__)
 csrf.exempt(bp)
 
 
+def _super_admin_unrestricted():
+    """Check if current user has unrestricted cross-org super_admin access.
+
+    In SaaS mode: returns False — super_admin is always scoped to their org.
+    In on-prem mode: returns True — super_admin has full cross-org access.
+    """
+    return current_user.is_super_admin() and not is_saas_mode()
+
+
 # =============================================================================
 # Static File Serving (Persistent uploads from data volume)
 # =============================================================================
@@ -1133,7 +1142,7 @@ def get_products():
     # Fetch IDs first to avoid scalar_subquery issues with connection pool
     query = Product.query
 
-    if current_user.is_super_admin():
+    if _super_admin_unrestricted():
         logger.info("get_products: super_admin sees all products")
 
         # Super admin can filter by specific organization
@@ -1573,7 +1582,7 @@ def create_product():
     # Security: validate organization_id to prevent cross-tenant product creation
     requested_org_id = data.get('organization_id', org_id)
     if requested_org_id and requested_org_id != org_id:
-        if not current_user.is_super_admin():
+        if not _super_admin_unrestricted():
             # Non-super-admins can only create products in their own org
             user_org_ids = {current_user.organization_id}
             try:
@@ -1643,7 +1652,7 @@ def get_product(product_id):
     # Organization isolation: verify user has access to this product's org
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
-    if current_user and current_user.role != 'super_admin':
+    if current_user and not _super_admin_unrestricted():
         user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
         product_org_ids = [org.id for org in product.organizations.all()]
         if product.organization_id:
@@ -1669,7 +1678,7 @@ def update_product(product_id):
     product = Product.query.get_or_404(product_id)
 
     # Permission check: org admins can only edit products in their org
-    if not current_user.is_super_admin():
+    if not _super_admin_unrestricted():
         # Check if product belongs to user's org (via primary or multi-org assignment)
         product_org_ids = [org.id for org in product.organizations.all()]
         if product.organization_id:
@@ -1812,7 +1821,7 @@ def delete_product(product_id):
         product_org_ids.append(product.organization_id)
 
     # Permission check: non-super-admins can only manage products in their org
-    if not current_user.is_super_admin():
+    if not _super_admin_unrestricted():
         if user_org_id not in product_org_ids:
             return jsonify({'error': 'You can only delete products in your organization'}), 403
 
@@ -1826,7 +1835,7 @@ def delete_product(product_id):
     }
 
     try:
-        if current_user.is_super_admin():
+        if _super_admin_unrestricted():
             # Determine target orgs based on scope
             if scope == 'all':
                 target_org_ids = product_org_ids[:]
