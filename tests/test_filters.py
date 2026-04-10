@@ -173,15 +173,17 @@ class TestCPEMatch:
         assert len(match_reasons) == 0, "Versioned product should not match via inference"
 
     def test_cpe_cached_match(self):
-        """Test CPE matching with cached CPE data."""
+        """Test CPE matching with cached CPE data (version range)."""
         from app.filters import check_cpe_match
 
         self.vulnerability.get_cpe_entries = MagicMock(return_value=[
             {
                 'vendor': 'apache',
                 'product': 'tomcat',
-                'version_start': None,
-                'version_end': None
+                'version_start': '10.0.0',
+                'version_end': '11.0.0',
+                'version_start_type': 'including',
+                'version_end_type': 'excluding'
             }
         ])
 

@@ -1643,8 +1643,8 @@ def create_product():
                     new_value={'vendor': product.vendor, 'product': product.product_name,
                                'version': product.version, 'cpe': f"{cpe_vendor}:{cpe_product}"})
 
-    # Re-run matching for new product
-    match_vulnerabilities_to_products()
+    # Re-run matching for new product (scoped to this product only, not full rematch)
+    match_vulnerabilities_to_products(target_products=[product])
 
     # Return product with CPE match info
     response = product.to_dict()
@@ -1789,8 +1789,8 @@ def update_product(product_id):
                     details={'vendor': product.vendor, 'product': product.product_name,
                              'version': product.version, 'updated_by': current_user_id})
 
-    # Re-run matching after update
-    match_vulnerabilities_to_products()
+    # Re-run matching after update (scoped to this product only, not full rematch)
+    match_vulnerabilities_to_products(target_products=[product])
 
     return jsonify(product.to_dict())
 
@@ -2788,26 +2788,30 @@ def get_vulnerability_stats():
     products_tracked = products_tracked_query.count()
 
     # Count products without CPE mapping (blind spots)
-    products_unmapped = Product.query.filter(
+    unmapped_query = Product.query.filter(
         Product.active == True,
-        Product.id.in_(org_product_ids),
         db.or_(
             Product.cpe_vendor.is_(None),
             Product.cpe_vendor == '',
             Product.cpe_product.is_(None),
             Product.cpe_product == ''
         )
-    ).count()
+    )
+    if org_id:
+        unmapped_query = unmapped_query.filter(Product.id.in_(org_product_ids))
+    products_unmapped = unmapped_query.count()
 
     # Products without version (cannot verify CVE ranges)
-    products_no_version = Product.query.filter(
+    no_version_query = Product.query.filter(
         Product.active == True,
-        Product.id.in_(org_product_ids),
         db.or_(
             Product.version.is_(None),
             Product.version == ''
         )
-    ).count()
+    )
+    if org_id:
+        no_version_query = no_version_query.filter(Product.id.in_(org_product_ids))
+    products_no_version = no_version_query.count()
 
     # Calculate priority-based stats (both CVE counts and match counts)
     # Only load vulnerability relationship (needed for priority calc), NOT product (saves ~50% memory)
