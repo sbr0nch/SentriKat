@@ -949,6 +949,12 @@ function Send-Inventory {
 
             Write-Log "Attempt $i failed: $errorMsg" -Level "WARN"
 
+            # Don't retry on auth errors - key is invalid
+            if ($_.Exception.Response -and $_.Exception.Response.StatusCode -eq 401) {
+                Write-Log "API key is invalid or revoked. Check your key in config.json" -Level "ERROR"
+                break
+            }
+
             if ($i -lt $maxRetries) {
                 Write-Log "Retrying in $retryDelay seconds..."
                 Start-Sleep -Seconds $retryDelay
@@ -1102,6 +1108,12 @@ function Send-Heartbeat {
             }
 
             Write-Log "Heartbeat attempt $attempt failed: $errorDetail" -Level "WARN"
+
+            # Don't retry on auth errors
+            if ($_.Exception.Response -and $_.Exception.Response.StatusCode -eq 401) {
+                Write-Log "API key is invalid or revoked. Check your key in config.json" -Level "ERROR"
+                return $false
+            }
 
             if ($attempt -lt $maxRetries) {
                 Write-Log "Retrying heartbeat in $retryDelay seconds..." -Level "WARN"

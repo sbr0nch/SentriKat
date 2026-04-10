@@ -187,7 +187,8 @@ save_config() {
         cp "$CONFIG_FILE" "${CONFIG_FILE}.bak" 2>/dev/null || true
     fi
 
-    cat > "$CONFIG_FILE" << EOF
+    # Create config with restricted permissions from the start (no race window)
+    (umask 077; cat > "$CONFIG_FILE" << EOF
 # SentriKat Agent Configuration
 SERVER_URL="${SERVER_URL}"
 API_KEY="${API_KEY}"
@@ -197,8 +198,7 @@ AGENT_ID="${AGENT_ID}"
 SCAN_EXTENSIONS=${SCAN_EXTENSIONS}
 SCAN_DEPENDENCIES=${SCAN_DEPENDENCIES}
 EOF
-
-    chmod 600 "$CONFIG_FILE"
+    )
 }
 
 # ============================================================================
@@ -1212,6 +1212,13 @@ send_inventory() {
         else
             log_warn "Attempt $i failed: HTTP $http_code - $body"
 
+            # Don't retry on auth errors - key is invalid
+            if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
+                log_error "API key is invalid or revoked. Check your config."
+                rm -f "$tmpfile"
+                return 1
+            fi
+
             if [[ $i -lt $max_retries ]]; then
                 log_info "Retrying in $retry_delay seconds..."
                 sleep $retry_delay
@@ -1296,6 +1303,12 @@ send_heartbeat() {
         if [[ "$http_code" == "200" || "$http_code" == "202" ]]; then
             log_info "Heartbeat sent successfully (HTTP $http_code)"
             return 0
+        fi
+
+        # Don't retry on auth errors
+        if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
+            log_error "API key is invalid or revoked (HTTP $http_code). Check your config."
+            return 1
         fi
 
         if [[ $attempt -lt $max_retries ]]; then
@@ -1569,6 +1582,7 @@ Description=Run SentriKat Agent periodically
 OnBootSec=5min
 OnUnitActiveSec=${INTERVAL_HOURS}h
 RandomizedDelaySec=10min
+Persistent=true
 
 [Install]
 WantedBy=timers.target
@@ -1625,6 +1639,7 @@ Description=Run SentriKat Agent periodically
 OnBootSec=5min
 OnUnitActiveSec=${INTERVAL_HOURS}h
 RandomizedDelaySec=10min
+Persistent=true
 
 [Install]
 WantedBy=timers.target
@@ -1657,6 +1672,7 @@ Description=SentriKat Agent Heartbeat Timer
 OnBootSec=2min
 OnUnitActiveSec=${HEARTBEAT_MINUTES}min
 RandomizedDelaySec=30s
+Persistent=true
 
 [Install]
 WantedBy=timers.target
