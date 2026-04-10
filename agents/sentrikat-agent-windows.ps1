@@ -949,6 +949,12 @@ function Send-Inventory {
 
             Write-Log "Attempt $i failed: $errorMsg" -Level "WARN"
 
+            # Don't retry on auth errors - key is invalid
+            if ($_.Exception.Response -and $_.Exception.Response.StatusCode -eq 401) {
+                Write-Log "API key is invalid or revoked. Check your key in config.json" -Level "ERROR"
+                break
+            }
+
             if ($i -lt $maxRetries) {
                 Write-Log "Retrying in $retryDelay seconds..."
                 Start-Sleep -Seconds $retryDelay
@@ -1102,6 +1108,12 @@ function Send-Heartbeat {
             }
 
             Write-Log "Heartbeat attempt $attempt failed: $errorDetail" -Level "WARN"
+
+            # Don't retry on auth errors
+            if ($_.Exception.Response -and $_.Exception.Response.StatusCode -eq 401) {
+                Write-Log "API key is invalid or revoked. Check your key in config.json" -Level "ERROR"
+                return $false
+            }
 
             if ($attempt -lt $maxRetries) {
                 Write-Log "Retrying heartbeat in $retryDelay seconds..." -Level "WARN"
@@ -1735,16 +1747,16 @@ function Install-ScheduledTask {
 
     # Main inventory scan task
     $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`" -RunOnce"
-    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $Config.IntervalMinutes)
+    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $Config.IntervalMinutes) -RepetitionDuration ([TimeSpan]::MaxValue)
     $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RunOnlyIfNetworkAvailable
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RunOnlyIfNetworkAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 
     Unregister-ScheduledTask -TaskName "SentriKat Agent" -Confirm:$false -ErrorAction SilentlyContinue
     Register-ScheduledTask -TaskName "SentriKat Agent" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "SentriKat Software Inventory Agent"
 
-    # Heartbeat task (every 5 minutes)
+    # Heartbeat task (every 5 minutes, runs indefinitely)
     $heartbeatAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`" -Heartbeat"
-    $heartbeatTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes $HeartbeatIntervalMinutes)
+    $heartbeatTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes $HeartbeatIntervalMinutes) -RepetitionDuration ([TimeSpan]::MaxValue)
 
     Unregister-ScheduledTask -TaskName "SentriKat Agent Heartbeat" -Confirm:$false -ErrorAction SilentlyContinue
     Register-ScheduledTask -TaskName "SentriKat Agent Heartbeat" -Action $heartbeatAction -Trigger $heartbeatTrigger -Principal $principal -Settings $settings -Description "SentriKat Agent Heartbeat - Checks for commands"
