@@ -2345,6 +2345,20 @@ def agent_heartbeat():
     new_version = data.get('agent_version')
     if new_version:
         asset.agent_version = new_version
+
+    # Store running services and listening ports in metadata (no schema migration needed)
+    runtime_data = {}
+    if data.get('running_services'):
+        runtime_data['running_services'] = data['running_services']
+    if data.get('listening_ports'):
+        runtime_data['listening_ports'] = data['listening_ports']
+    if runtime_data:
+        try:
+            existing_meta = json.loads(asset.metadata_json) if asset.metadata_json else {}
+        except (json.JSONDecodeError, TypeError):
+            existing_meta = {}
+        existing_meta.update(runtime_data)
+        asset.metadata_json = json.dumps(existing_meta)
     try:
         # Log reconnection event when transitioning from offline/stale to online
         if previous_status in ('offline', 'stale'):

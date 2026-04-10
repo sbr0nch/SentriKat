@@ -317,6 +317,61 @@ function Get-SystemInfo {
 }
 
 # ============================================================================
+# Running Services and Listening Ports Collection
+# ============================================================================
+
+function Get-RunningServices {
+    $services = @()
+    try {
+        Get-Service | Where-Object { $_.Status -eq 'Running' } | Select-Object -First 200 | ForEach-Object {
+            $svc = $_
+            $processId = 0
+            $userName = "SYSTEM"
+            try {
+                $wmiSvc = Get-WmiObject -Class Win32_Service -Filter "Name='$($svc.Name)'" -ErrorAction SilentlyContinue
+                if ($wmiSvc) {
+                    $processId = $wmiSvc.ProcessId
+                    $userName = $wmiSvc.StartName
+                }
+            } catch {}
+            $services += @{
+                name = $svc.Name
+                display_name = $svc.DisplayName
+                user = $userName
+                state = "running"
+                pid = $processId
+            }
+        }
+    } catch {
+        Write-Log "Failed to collect running services: $_" -Level "WARN"
+    }
+    return $services
+}
+
+function Get-ListeningPorts {
+    $ports = @()
+    try {
+        Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Select-Object -First 100 | ForEach-Object {
+            $conn = $_
+            $processName = "unknown"
+            try {
+                $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+                if ($proc) { $processName = $proc.ProcessName }
+            } catch {}
+            $ports += @{
+                proto = "tcp"
+                address = $conn.LocalAddress
+                port = $conn.LocalPort
+                process = $processName
+            }
+        }
+    } catch {
+        Write-Log "Failed to collect listening ports: $_" -Level "WARN"
+    }
+    return $ports
+}
+
+# ============================================================================
 # Software Inventory Collection
 # ============================================================================
 
@@ -1084,6 +1139,12 @@ function Send-Heartbeat {
         $uptimeSeconds = [math]::Floor(((Get-Date) - $lastBoot).TotalSeconds)
     } catch {}
 
+    # Collect running services and listening ports
+    $runningServices = @()
+    $listeningPorts = @()
+    try { $runningServices = Get-RunningServices } catch { Write-Log "Service collection failed: $_" -Level "WARN" }
+    try { $listeningPorts = Get-ListeningPorts } catch { Write-Log "Port collection failed: $_" -Level "WARN" }
+
     $payload = @{
         hostname = $SystemInfo.hostname
         agent_id = $SystemInfo.agent.id
@@ -1092,6 +1153,8 @@ function Send-Heartbeat {
         last_scan_time = $lastScanTime
         config_version = $configVersion
         uptime_seconds = $uptimeSeconds
+        running_services = $runningServices
+        listening_ports = $listeningPorts
     }
 
     if ($HealthStatus) {

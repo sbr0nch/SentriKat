@@ -283,6 +283,61 @@ EOF
 }
 
 # ============================================================================
+# Running Services Collection
+# ============================================================================
+
+collect_running_services() {
+    local svc_json="["
+    local first=true
+
+    # Get running LaunchDaemons and LaunchAgents
+    while IFS=$'\t' read -r pid status label; do
+        [[ -z "$label" || "$label" == "-" ]] && continue
+        [[ "$pid" == "-" ]] && continue  # Not running
+        # Skip Apple system services to reduce noise
+        [[ "$label" == com.apple.* ]] && continue
+
+        [[ "$first" == "true" ]] && first=false || svc_json+=","
+        svc_json+="{\"name\":\"$(json_escape "$label")\",\"pid\":$((pid + 0)),\"state\":\"running\"}"
+    done < <(launchctl list 2>/dev/null | tail -n +2 | head -200)
+
+    svc_json+="]"
+    echo "$svc_json"
+}
+
+# ============================================================================
+# Listening Ports Collection
+# ============================================================================
+
+collect_listening_ports() {
+    local ports="["
+    local first=true
+
+    if command -v lsof &>/dev/null; then
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            local process_name pid proto addr port
+            process_name=$(echo "$line" | awk '{print $1}')
+            pid=$(echo "$line" | awk '{print $2}')
+            proto=$(echo "$line" | awk '{print $8}' | tr '[:upper:]' '[:lower:]')
+            local name_field
+            name_field=$(echo "$line" | awk '{print $9}')
+            addr=$(echo "$name_field" | rev | cut -d: -f2- | rev)
+            port=$(echo "$name_field" | rev | cut -d: -f1 | rev)
+
+            # Skip non-numeric ports
+            [[ ! "$port" =~ ^[0-9]+$ ]] && continue
+
+            [[ "$first" == "true" ]] && first=false || ports+=","
+            ports+="{\"proto\":\"$(json_escape "$proto")\",\"address\":\"$(json_escape "$addr")\",\"port\":$((port + 0)),\"process\":\"$(json_escape "$process_name")\"}"
+        done < <(lsof -i -P -n -sTCP:LISTEN 2>/dev/null | tail -n +2 | head -100)
+    fi
+
+    ports+="]"
+    echo "$ports"
+}
+
+# ============================================================================
 # Software Inventory Collection
 # ============================================================================
 
@@ -1203,12 +1258,18 @@ send_heartbeat() {
     local uptime_seconds
     uptime_seconds=$(awk '{print int($1)}' /proc/uptime 2>/dev/null || sysctl -n kern.boottime 2>/dev/null | awk '{print systime() - $4}' | tr -d ',')
 
+    # Collect running services and listening ports
+    local running_services
+    running_services=$(collect_running_services) || true
+    local listening_ports
+    listening_ports=$(collect_listening_ports) || true
+
     while [[ $attempt -le $max_retries ]]; do
         local http_code
         http_code=$(_curl -s -o /dev/null -w "%{http_code}" -X POST "$endpoint" \
             -H "X-Agent-Key: $API_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"hostname\": \"$(hostname -s 2>/dev/null || hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\", \"health_status\": \"${HEALTH_STATUS:-unknown}\", \"uptime_seconds\": ${uptime_seconds:-0}}" \
+            -d "{\"hostname\": \"$(hostname -s 2>/dev/null || hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\", \"health_status\": \"${HEALTH_STATUS:-unknown}\", \"uptime_seconds\": ${uptime_seconds:-0}, \"running_services\": ${running_services:-[]}, \"listening_ports\": ${listening_ports:-[]}}" \
             --max-time 30 2>/dev/null) || http_code="000"
 
         if [[ "$http_code" =~ ^2 ]]; then

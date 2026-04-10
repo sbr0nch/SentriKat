@@ -283,6 +283,78 @@ EOF
 }
 
 # ============================================================================
+# Running Services Collection
+# ============================================================================
+
+collect_running_services() {
+    local services="[]"
+
+    if command -v systemctl &>/dev/null; then
+        local svc_json="["
+        local first=true
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            local svc_name pid main_pid
+            svc_name=$(echo "$line" | awk '{print $1}')
+            # Get service details
+            local user=$(systemctl show "$svc_name" --property=User --value 2>/dev/null)
+            [[ -z "$user" || "$user" == "[not set]" ]] && user="root"
+            local state=$(systemctl show "$svc_name" --property=ActiveState --value 2>/dev/null)
+            local exe=$(systemctl show "$svc_name" --property=ExecMainStartTimestamp --value 2>/dev/null)
+            main_pid=$(systemctl show "$svc_name" --property=MainPID --value 2>/dev/null)
+            [[ ! "$main_pid" =~ ^[0-9]+$ ]] && main_pid=0
+
+            [[ "$first" == "true" ]] && first=false || svc_json+=","
+            svc_json+="{\"name\":\"$(json_escape "$svc_name")\",\"user\":\"$(json_escape "$user")\",\"state\":\"$(json_escape "$state")\",\"pid\":$((main_pid + 0))}"
+        done < <(systemctl list-units --type=service --state=running --no-pager --no-legend 2>/dev/null | head -200)
+        svc_json+="]"
+        services="$svc_json"
+    fi
+
+    echo "$services"
+}
+
+# ============================================================================
+# Listening Ports Collection
+# ============================================================================
+
+collect_listening_ports() {
+    local ports="["
+    local first=true
+
+    if command -v ss &>/dev/null; then
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            local proto local_addr local_port pid_name process_name
+            proto=$(echo "$line" | awk '{print $1}')
+            local_addr=$(echo "$line" | awk '{print $4}' | rev | cut -d: -f2- | rev)
+            local_port=$(echo "$line" | awk '{print $4}' | rev | cut -d: -f1 | rev)
+            pid_name=$(echo "$line" | awk '{print $6}')
+            # Extract process name from users:(("name",pid,fd))
+            process_name=$(echo "$pid_name" | grep -oP '"\K[^"]+' | head -1)
+
+            [[ "$first" == "true" ]] && first=false || ports+=","
+            ports+="{\"proto\":\"$(json_escape "$proto")\",\"address\":\"$(json_escape "$local_addr")\",\"port\":$((local_port + 0)),\"process\":\"$(json_escape "${process_name:-unknown}")\"}"
+        done < <(ss -tlnp 2>/dev/null | tail -n +2 | head -100)
+    elif command -v netstat &>/dev/null; then
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            local proto local_addr local_port pid_prog
+            proto=$(echo "$line" | awk '{print $1}')
+            local_addr=$(echo "$line" | awk '{print $4}' | rev | cut -d: -f2- | rev)
+            local_port=$(echo "$line" | awk '{print $4}' | rev | cut -d: -f1 | rev)
+            pid_prog=$(echo "$line" | awk '{print $7}')
+
+            [[ "$first" == "true" ]] && first=false || ports+=","
+            ports+="{\"proto\":\"$(json_escape "$proto")\",\"address\":\"$(json_escape "$local_addr")\",\"port\":$((local_port + 0)),\"process\":\"$(json_escape "${pid_prog:-unknown}")\"}"
+        done < <(netstat -tlnp 2>/dev/null | grep LISTEN | head -100)
+    fi
+
+    ports+="]"
+    echo "$ports"
+}
+
+# ============================================================================
 # Software Inventory Collection
 # ============================================================================
 
@@ -1319,12 +1391,21 @@ send_heartbeat() {
     local uptime_seconds
     uptime_seconds=$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo "0")
 
+    # Collect running services and listening ports
+    local services_json
+    services_json=$(collect_running_services) || services_json="[]"
+    local ports_json
+    ports_json=$(collect_listening_ports) || ports_json="[]"
+
+    local heartbeat_payload
+    heartbeat_payload="{\"hostname\": \"$(hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\", \"health_status\": \"$HEALTH_STATUS\", \"uptime_seconds\": $uptime_seconds, \"running_services\": $services_json, \"listening_ports\": $ports_json}"
+
     for ((attempt=1; attempt<=max_retries; attempt++)); do
         local http_code
         http_code=$(_curl -s -o /dev/null -w "%{http_code}" -X POST "$endpoint" \
             -H "X-Agent-Key: $API_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"hostname\": \"$(hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\", \"health_status\": \"$HEALTH_STATUS\", \"uptime_seconds\": $uptime_seconds}" \
+            -d "$heartbeat_payload" \
             --max-time 30 2>/dev/null) || http_code="000"
 
         if [[ "$http_code" == "200" || "$http_code" == "202" ]]; then
