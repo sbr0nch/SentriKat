@@ -1734,6 +1734,43 @@ function Invoke-DependencyScan {
 function Install-ScheduledTask {
     param($Config)
 
+    # Detect and handle existing installation (upgrade path)
+    $existingConfig = "$env:ProgramData\SentriKat\config.json"
+    $existingTask = Get-ScheduledTask -TaskName "SentriKat Agent" -ErrorAction SilentlyContinue
+    if ($existingTask -or (Test-Path $existingConfig)) {
+        Write-Host ""
+        Write-Host "  Existing SentriKat Agent detected — upgrading automatically." -ForegroundColor Yellow
+        Write-Log "Existing agent detected, performing upgrade..."
+
+        # Remove old scheduled tasks
+        Unregister-ScheduledTask -TaskName "SentriKat Agent" -Confirm:$false -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName "SentriKat Agent Heartbeat" -Confirm:$false -ErrorAction SilentlyContinue
+
+        # Remove old Windows Service if exists
+        $oldService = Get-Service -Name "SentriKatAgent" -ErrorAction SilentlyContinue
+        if ($oldService) {
+            Stop-Service -Name "SentriKatAgent" -Force -ErrorAction SilentlyContinue
+            & sc.exe delete "SentriKatAgent" 2>&1 | Out-Null
+            Write-Log "Removed old SentriKat Windows service"
+        }
+
+        # Backup old config (keep agent_id for continuity)
+        if (Test-Path $existingConfig) {
+            try {
+                $oldConfig = Get-Content $existingConfig | ConvertFrom-Json
+                if ($oldConfig.AgentId -and !$Config.AgentId) {
+                    $Config.AgentId = $oldConfig.AgentId
+                    Write-Log "Preserved agent ID from previous installation: $($Config.AgentId)"
+                }
+            } catch {
+                Write-Log "Could not read old config: $_" -Level "WARN"
+            }
+            Copy-Item $existingConfig "${existingConfig}.bak" -Force -ErrorAction SilentlyContinue
+        }
+
+        Write-Host "  Old agent removed. Installing new version..." -ForegroundColor Green
+    }
+
     Write-Log "Installing scheduled tasks..."
 
     # Save config
