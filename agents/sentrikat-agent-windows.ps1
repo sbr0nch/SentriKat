@@ -56,7 +56,13 @@ param(
     [switch]$VerboseOutput,
 
     [Parameter(Mandatory=$false)]
-    [switch]$AllowHttp
+    [switch]$AllowHttp,
+
+    [Parameter(Mandatory=$false)]
+    [string]$ProxyUrl,
+
+    [Parameter(Mandatory=$false)]
+    [string]$CaCertPath
 )
 
 # Use Stop so unexpected errors are visible; individual cmdlets use -ErrorAction SilentlyContinue where intended
@@ -126,6 +132,20 @@ function Write-Log {
 }
 
 # ============================================================================
+# Proxy Helper (applies proxy settings to web requests)
+# ============================================================================
+
+function Get-ProxyParams {
+    param($Config)
+    $params = @{}
+    if ($Config.ProxyUrl) {
+        $params['Proxy'] = $Config.ProxyUrl
+        $params['ProxyUseDefaultCredentials'] = $true
+    }
+    return $params
+}
+
+# ============================================================================
 # Configuration Management
 # ============================================================================
 
@@ -135,6 +155,8 @@ function Get-AgentConfig {
         ApiKey = $ApiKey
         IntervalMinutes = $IntervalMinutes
         AgentId = $null
+        ProxyUrl = $ProxyUrl
+        CaCertPath = $CaCertPath
         ScanExtensions = $true
         ScanDependencies = $true
     }
@@ -147,6 +169,8 @@ function Get-AgentConfig {
             if ($savedConfig.ApiKey -and !$ApiKey) { $config.ApiKey = $savedConfig.ApiKey }
             if ($savedConfig.IntervalMinutes) { $config.IntervalMinutes = $savedConfig.IntervalMinutes }
             if ($savedConfig.AgentId) { $config.AgentId = $savedConfig.AgentId }
+            if ($savedConfig.ProxyUrl -and !$ProxyUrl) { $config.ProxyUrl = $savedConfig.ProxyUrl }
+            if ($savedConfig.CaCertPath -and !$CaCertPath) { $config.CaCertPath = $savedConfig.CaCertPath }
             if ($null -ne $savedConfig.ScanExtensions) { $config.ScanExtensions = [bool]$savedConfig.ScanExtensions }
             if ($null -ne $savedConfig.ScanDependencies) { $config.ScanDependencies = [bool]$savedConfig.ScanDependencies }
         } catch {
@@ -2003,6 +2027,27 @@ function Main {
 
     # Load configuration
     $config = Get-AgentConfig
+
+    # Configure proxy at .NET level (applies to all Invoke-RestMethod/WebRequest calls)
+    if ($config.ProxyUrl) {
+        Write-Log "Using proxy: $($config.ProxyUrl)"
+        [System.Net.WebRequest]::DefaultWebProxy = New-Object System.Net.WebProxy($config.ProxyUrl)
+        [System.Net.WebRequest]::DefaultWebProxy.UseDefaultCredentials = $true
+    }
+
+    # Import custom CA certificate if specified (for SSL inspection proxies)
+    if ($config.CaCertPath -and (Test-Path $config.CaCertPath)) {
+        try {
+            $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($config.CaCertPath)
+            $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("Root", "CurrentUser")
+            $store.Open("ReadWrite")
+            $store.Add($cert)
+            $store.Close()
+            Write-Log "Imported custom CA certificate from $($config.CaCertPath)"
+        } catch {
+            Write-Log "Failed to import CA certificate: $_" -Level "WARN"
+        }
+    }
 
     # Validate configuration
     if (!$config.ServerUrl -or !$config.ApiKey) {
