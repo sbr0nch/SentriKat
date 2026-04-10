@@ -2788,26 +2788,30 @@ def get_vulnerability_stats():
     products_tracked = products_tracked_query.count()
 
     # Count products without CPE mapping (blind spots)
-    products_unmapped = Product.query.filter(
+    unmapped_query = Product.query.filter(
         Product.active == True,
-        Product.id.in_(org_product_ids),
         db.or_(
             Product.cpe_vendor.is_(None),
             Product.cpe_vendor == '',
             Product.cpe_product.is_(None),
             Product.cpe_product == ''
         )
-    ).count()
+    )
+    if org_id:
+        unmapped_query = unmapped_query.filter(Product.id.in_(org_product_ids))
+    products_unmapped = unmapped_query.count()
 
     # Products without version (cannot verify CVE ranges)
-    products_no_version = Product.query.filter(
+    no_version_query = Product.query.filter(
         Product.active == True,
-        Product.id.in_(org_product_ids),
         db.or_(
             Product.version.is_(None),
             Product.version == ''
         )
-    ).count()
+    )
+    if org_id:
+        no_version_query = no_version_query.filter(Product.id.in_(org_product_ids))
+    products_no_version = no_version_query.count()
 
     # Calculate priority-based stats (both CVE counts and match counts)
     # Only load vulnerability relationship (needed for priority calc), NOT product (saves ~50% memory)
