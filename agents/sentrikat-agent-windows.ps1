@@ -1754,13 +1754,30 @@ function Install-ScheduledTask {
             Write-Log "Removed old SentriKat Windows service"
         }
 
-        # Backup old config (keep agent_id for continuity)
+        # Backup old config (keep agent_id, revoke old key)
         if (Test-Path $existingConfig) {
             try {
                 $oldConfig = Get-Content $existingConfig | ConvertFrom-Json
                 if ($oldConfig.AgentId -and !$Config.AgentId) {
                     $Config.AgentId = $oldConfig.AgentId
                     Write-Log "Preserved agent ID from previous installation: $($Config.AgentId)"
+                }
+                # Revoke old API key on server if it's different from new key
+                if ($oldConfig.ApiKey -and $Config.ApiKey -and $oldConfig.ApiKey -ne $Config.ApiKey) {
+                    Write-Log "Revoking old API key on server..."
+                    try {
+                        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+                        $revokePayload = @{ old_api_key = $oldConfig.ApiKey } | ConvertTo-Json
+                        $revokeHeaders = @{
+                            "X-Agent-Key" = $Config.ApiKey
+                            "Content-Type" = "application/json"
+                        }
+                        $null = Invoke-RestMethod -Uri "$($Config.ServerUrl)/api/agent/revoke-old-key" -Method Post -Headers $revokeHeaders -Body $revokePayload -TimeoutSec 10
+                        Write-Log "Old API key revoked successfully"
+                        Write-Host "  Old API key revoked on server." -ForegroundColor Green
+                    } catch {
+                        Write-Log "Could not revoke old key (non-fatal): $_" -Level "WARN"
+                    }
                 }
             } catch {
                 Write-Log "Could not read old config: $_" -Level "WARN"

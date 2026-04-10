@@ -1489,13 +1489,25 @@ install_agent() {
         sudo launchctl unload "$LAUNCHDAEMON_PLIST" 2>/dev/null || true
         sudo launchctl unload "$HEARTBEAT_PLIST" 2>/dev/null || true
 
-        # Preserve agent ID from old config
+        # Preserve agent ID and revoke old key
         if [[ -f "$CONFIG_FILE" ]]; then
-            local old_agent_id
+            local old_agent_id old_api_key
             old_agent_id=$(grep '^AGENT_ID=' "$CONFIG_FILE" | cut -d'"' -f2)
+            old_api_key=$(grep '^API_KEY=' "$CONFIG_FILE" | cut -d'"' -f2)
             if [[ -n "$old_agent_id" && -z "$AGENT_ID" ]]; then
                 AGENT_ID="$old_agent_id"
                 log_info "Preserved agent ID from previous installation: $AGENT_ID"
+            fi
+            # Revoke old API key on server if different from new key
+            if [[ -n "$old_api_key" && -n "$API_KEY" && "$old_api_key" != "$API_KEY" ]]; then
+                log_info "Revoking old API key on server..."
+                curl -s -X POST "${SERVER_URL}/api/agent/revoke-old-key" \
+                    -H "X-Agent-Key: $API_KEY" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"old_api_key\": \"$old_api_key\"}" \
+                    --max-time 10 >/dev/null 2>&1 && \
+                    log_info "Old API key revoked successfully" || \
+                    log_warn "Could not revoke old key (non-fatal)"
             fi
             cp "$CONFIG_FILE" "${CONFIG_FILE}.bak" 2>/dev/null || true
         fi
