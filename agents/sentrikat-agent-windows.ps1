@@ -56,7 +56,13 @@ param(
     [switch]$VerboseOutput,
 
     [Parameter(Mandatory=$false)]
-    [switch]$AllowHttp
+    [switch]$AllowHttp,
+
+    [Parameter(Mandatory=$false)]
+    [string]$ProxyUrl,
+
+    [Parameter(Mandatory=$false)]
+    [string]$CaCertPath
 )
 
 # Use Stop so unexpected errors are visible; individual cmdlets use -ErrorAction SilentlyContinue where intended
@@ -126,6 +132,20 @@ function Write-Log {
 }
 
 # ============================================================================
+# Proxy Helper (applies proxy settings to web requests)
+# ============================================================================
+
+function Get-ProxyParams {
+    param($Config)
+    $params = @{}
+    if ($Config.ProxyUrl) {
+        $params['Proxy'] = $Config.ProxyUrl
+        $params['ProxyUseDefaultCredentials'] = $true
+    }
+    return $params
+}
+
+# ============================================================================
 # Configuration Management
 # ============================================================================
 
@@ -135,6 +155,8 @@ function Get-AgentConfig {
         ApiKey = $ApiKey
         IntervalMinutes = $IntervalMinutes
         AgentId = $null
+        ProxyUrl = $ProxyUrl
+        CaCertPath = $CaCertPath
         ScanExtensions = $true
         ScanDependencies = $true
     }
@@ -147,6 +169,8 @@ function Get-AgentConfig {
             if ($savedConfig.ApiKey -and !$ApiKey) { $config.ApiKey = $savedConfig.ApiKey }
             if ($savedConfig.IntervalMinutes) { $config.IntervalMinutes = $savedConfig.IntervalMinutes }
             if ($savedConfig.AgentId) { $config.AgentId = $savedConfig.AgentId }
+            if ($savedConfig.ProxyUrl -and !$ProxyUrl) { $config.ProxyUrl = $savedConfig.ProxyUrl }
+            if ($savedConfig.CaCertPath -and !$CaCertPath) { $config.CaCertPath = $savedConfig.CaCertPath }
             if ($null -ne $savedConfig.ScanExtensions) { $config.ScanExtensions = [bool]$savedConfig.ScanExtensions }
             if ($null -ne $savedConfig.ScanDependencies) { $config.ScanDependencies = [bool]$savedConfig.ScanDependencies }
         } catch {
@@ -290,6 +314,61 @@ function Get-SystemInfo {
             version = $AgentVersion
         }
     }
+}
+
+# ============================================================================
+# Running Services and Listening Ports Collection
+# ============================================================================
+
+function Get-RunningServices {
+    $services = @()
+    try {
+        Get-Service | Where-Object { $_.Status -eq 'Running' } | Select-Object -First 200 | ForEach-Object {
+            $svc = $_
+            $processId = 0
+            $userName = "SYSTEM"
+            try {
+                $wmiSvc = Get-WmiObject -Class Win32_Service -Filter "Name='$($svc.Name)'" -ErrorAction SilentlyContinue
+                if ($wmiSvc) {
+                    $processId = $wmiSvc.ProcessId
+                    $userName = $wmiSvc.StartName
+                }
+            } catch {}
+            $services += @{
+                name = $svc.Name
+                display_name = $svc.DisplayName
+                user = $userName
+                state = "running"
+                pid = $processId
+            }
+        }
+    } catch {
+        Write-Log "Failed to collect running services: $_" -Level "WARN"
+    }
+    return $services
+}
+
+function Get-ListeningPorts {
+    $ports = @()
+    try {
+        Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Select-Object -First 100 | ForEach-Object {
+            $conn = $_
+            $processName = "unknown"
+            try {
+                $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+                if ($proc) { $processName = $proc.ProcessName }
+            } catch {}
+            $ports += @{
+                proto = "tcp"
+                address = $conn.LocalAddress
+                port = $conn.LocalPort
+                process = $processName
+            }
+        }
+    } catch {
+        Write-Log "Failed to collect listening ports: $_" -Level "WARN"
+    }
+    return $ports
 }
 
 # ============================================================================
@@ -1060,6 +1139,12 @@ function Send-Heartbeat {
         $uptimeSeconds = [math]::Floor(((Get-Date) - $lastBoot).TotalSeconds)
     } catch {}
 
+    # Collect running services and listening ports
+    $runningServices = @()
+    $listeningPorts = @()
+    try { $runningServices = Get-RunningServices } catch { Write-Log "Service collection failed: $_" -Level "WARN" }
+    try { $listeningPorts = Get-ListeningPorts } catch { Write-Log "Port collection failed: $_" -Level "WARN" }
+
     $payload = @{
         hostname = $SystemInfo.hostname
         agent_id = $SystemInfo.agent.id
@@ -1068,6 +1153,8 @@ function Send-Heartbeat {
         last_scan_time = $lastScanTime
         config_version = $configVersion
         uptime_seconds = $uptimeSeconds
+        running_services = $runningServices
+        listening_ports = $listeningPorts
     }
 
     if ($HealthStatus) {
@@ -2003,6 +2090,27 @@ function Main {
 
     # Load configuration
     $config = Get-AgentConfig
+
+    # Configure proxy at .NET level (applies to all Invoke-RestMethod/WebRequest calls)
+    if ($config.ProxyUrl) {
+        Write-Log "Using proxy: $($config.ProxyUrl)"
+        [System.Net.WebRequest]::DefaultWebProxy = New-Object System.Net.WebProxy($config.ProxyUrl)
+        [System.Net.WebRequest]::DefaultWebProxy.UseDefaultCredentials = $true
+    }
+
+    # Import custom CA certificate if specified (for SSL inspection proxies)
+    if ($config.CaCertPath -and (Test-Path $config.CaCertPath)) {
+        try {
+            $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($config.CaCertPath)
+            $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("Root", "CurrentUser")
+            $store.Open("ReadWrite")
+            $store.Add($cert)
+            $store.Close()
+            Write-Log "Imported custom CA certificate from $($config.CaCertPath)"
+        } catch {
+            Write-Log "Failed to import CA certificate: $_" -Level "WARN"
+        }
+    }
 
     # Validate configuration
     if (!$config.ServerUrl -or !$config.ApiKey) {

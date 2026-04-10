@@ -2826,10 +2826,13 @@ def get_vulnerability_stats():
     from collections import defaultdict
     cve_priorities = defaultdict(list)  # cve_id -> list of priorities
 
+    needs_review_count = 0
     for match in all_matches:
         priority = match.calculate_effective_priority()
         priority_counts[priority] = priority_counts.get(priority, 0) + 1
         cve_priorities[match.vulnerability.cve_id].append(priority)
+        if match.needs_review():
+            needs_review_count += 1
 
     # Calculate CVE-level priority counts (use highest priority per CVE)
     priority_order = {'critical': 4, 'high': 3, 'medium': 2, 'low': 1}
@@ -2981,6 +2984,7 @@ def get_vulnerability_stats():
         'products_tracked': products_tracked,
         'products_unmapped': products_unmapped,  # Products without CPE (blind spots)
         'products_no_version': products_no_version,  # Products without version (can't verify CVE ranges)
+        'needs_review': needs_review_count,  # Medium-confidence matches on dangerous CVEs
         'priority_breakdown': priority_counts,
         'cve_priority_breakdown': cve_priority_counts,  # CVE-level counts
         'critical_count': priority_counts['critical'],

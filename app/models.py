@@ -531,6 +531,13 @@ class Vulnerability(db.Model):
     epss_percentile = db.Column(db.Float, nullable=True)
     epss_fetched_at = db.Column(db.DateTime, nullable=True)
 
+    # Public exploit availability — set by ExploitDB/GitHub PoC enrichment.
+    # Different from is_actively_exploited: this means a PoC EXISTS publicly,
+    # not necessarily that it's being used in the wild.
+    exploit_public = db.Column(db.Boolean, default=False, index=True)
+    exploit_source = db.Column(db.String(100), nullable=True)  # e.g. "exploitdb", "github_poc"
+    exploit_url = db.Column(db.String(500), nullable=True)  # Link to the public exploit
+
     def calculate_priority(self):
         """
         Calculate priority based on multiple factors:
@@ -688,6 +695,9 @@ class Vulnerability(db.Model):
             'cvss_source': self.cvss_source,
             'source': self.source or 'cisa_kev',
             'is_actively_exploited': bool(self.is_actively_exploited),
+            'exploit_public': bool(self.exploit_public),
+            'exploit_source': self.exploit_source,
+            'exploit_url': self.exploit_url,
             'priority': self.calculate_priority(),
             'days_old': (date.today() - self.date_added).days if self.date_added else None,
             'has_cpe_data': self.has_cpe_data(),
@@ -757,9 +767,32 @@ class VulnerabilityMatch(db.Model):
         """
         return self.vulnerability.calculate_priority()
 
+    def needs_review(self):
+        """Flag matches that are low-confidence but potentially dangerous.
+
+        A medium/low confidence match on a CRITICAL/HIGH CVE with active
+        exploitation or high EPSS could be hiding a real threat. These
+        should be surfaced to the admin for manual verification.
+        """
+        confidence = self.match_confidence or 'medium'
+        if confidence == 'high':
+            return False
+
+        vuln = self.vulnerability
+        severity = (vuln.severity or '').upper()
+        epss = vuln.epss_score or 0
+        is_exploited = bool(vuln.known_ransomware) or bool(getattr(vuln, 'date_added', None))
+
+        # Medium confidence + dangerous CVE = needs review
+        if severity in ('CRITICAL', 'HIGH') or epss > 0.4 or is_exploited:
+            return True
+        return False
+
     def to_dict(self):
         vuln_dict = self.vulnerability.to_dict()
         product_dict = self.product.to_dict()
+
+        review_needed = self.needs_review()
 
         return {
             'id': self.id,
@@ -768,6 +801,7 @@ class VulnerabilityMatch(db.Model):
             'match_reason': self.match_reason,
             'match_method': self.match_method or 'keyword',
             'match_confidence': self.match_confidence or 'medium',
+            'needs_review': review_needed,
             'acknowledged': self.acknowledged,
             'auto_acknowledged': self.auto_acknowledged,
             'resolution_reason': self.resolution_reason,

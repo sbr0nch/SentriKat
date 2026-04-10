@@ -35,8 +35,21 @@ API_KEY=""
 INTERVAL_HOURS=4
 HEARTBEAT_MINUTES=5
 AGENT_ID=""
+PROXY_URL=""                                       # HTTP/HTTPS/SOCKS proxy (e.g., http://proxy:3128)
+CA_CERT_PATH=""                                    # Custom CA certificate bundle for SSL inspection proxies
 SCAN_EXTENSIONS="${SCAN_EXTENSIONS:-true}"         # Extension scanning (VS Code, browsers, IDEs)
 SCAN_DEPENDENCIES="${SCAN_DEPENDENCIES:-true}"     # Code library dependency scanning
+
+# ============================================================================
+# Curl Wrapper (applies proxy + custom CA cert to all outbound requests)
+# ============================================================================
+
+_curl() {
+    local extra_opts=()
+    [[ -n "${PROXY_URL:-}" ]] && extra_opts+=(--proxy "$PROXY_URL")
+    [[ -n "${CA_CERT_PATH:-}" && -f "${CA_CERT_PATH}" ]] && extra_opts+=(--cacert "$CA_CERT_PATH")
+    curl "${extra_opts[@]}" "$@"
+}
 
 # ============================================================================
 # Cleanup Handler for Graceful Shutdown
@@ -170,6 +183,8 @@ load_config() {
 
     [[ -n "${ARG_SERVER_URL:-}" ]] && SERVER_URL="$ARG_SERVER_URL"
     [[ -n "${ARG_API_KEY:-}" ]] && API_KEY="$ARG_API_KEY"
+    [[ -n "${ARG_PROXY_URL:-}" ]] && PROXY_URL="$ARG_PROXY_URL"
+    [[ -n "${ARG_CA_CERT_PATH:-}" ]] && CA_CERT_PATH="$ARG_CA_CERT_PATH"
 
     if [[ -z "$AGENT_ID" ]]; then
         # macOS hardware UUID
@@ -198,6 +213,8 @@ API_KEY="${API_KEY}"
 INTERVAL_HOURS=${INTERVAL_HOURS}
 HEARTBEAT_MINUTES=${HEARTBEAT_MINUTES}
 AGENT_ID="${AGENT_ID}"
+PROXY_URL="${PROXY_URL}"
+CA_CERT_PATH="${CA_CERT_PATH}"
 SCAN_EXTENSIONS=${SCAN_EXTENSIONS}
 SCAN_DEPENDENCIES=${SCAN_DEPENDENCIES}
 EOF
@@ -263,6 +280,61 @@ get_system_info() {
     }
 }
 EOF
+}
+
+# ============================================================================
+# Running Services Collection
+# ============================================================================
+
+collect_running_services() {
+    local svc_json="["
+    local first=true
+
+    # Get running LaunchDaemons and LaunchAgents
+    while IFS=$'\t' read -r pid status label; do
+        [[ -z "$label" || "$label" == "-" ]] && continue
+        [[ "$pid" == "-" ]] && continue  # Not running
+        # Skip Apple system services to reduce noise
+        [[ "$label" == com.apple.* ]] && continue
+
+        [[ "$first" == "true" ]] && first=false || svc_json+=","
+        svc_json+="{\"name\":\"$(json_escape "$label")\",\"pid\":$((pid + 0)),\"state\":\"running\"}"
+    done < <(launchctl list 2>/dev/null | tail -n +2 | head -200)
+
+    svc_json+="]"
+    echo "$svc_json"
+}
+
+# ============================================================================
+# Listening Ports Collection
+# ============================================================================
+
+collect_listening_ports() {
+    local ports="["
+    local first=true
+
+    if command -v lsof &>/dev/null; then
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            local process_name pid proto addr port
+            process_name=$(echo "$line" | awk '{print $1}')
+            pid=$(echo "$line" | awk '{print $2}')
+            proto=$(echo "$line" | awk '{print $8}' | tr '[:upper:]' '[:lower:]')
+            local name_field
+            name_field=$(echo "$line" | awk '{print $9}')
+            addr=$(echo "$name_field" | rev | cut -d: -f2- | rev)
+            port=$(echo "$name_field" | rev | cut -d: -f1 | rev)
+
+            # Skip non-numeric ports
+            [[ ! "$port" =~ ^[0-9]+$ ]] && continue
+
+            [[ "$first" == "true" ]] && first=false || ports+=","
+            ports+="{\"proto\":\"$(json_escape "$proto")\",\"address\":\"$(json_escape "$addr")\",\"port\":$((port + 0)),\"process\":\"$(json_escape "$process_name")\"}"
+        done < <(lsof -i -P -n -sTCP:LISTEN 2>/dev/null | tail -n +2 | head -100)
+    fi
+
+    ports+="]"
+    echo "$ports"
 }
 
 # ============================================================================
@@ -819,7 +891,7 @@ install_trivy() {
     local download_url="https://github.com/aquasecurity/trivy/releases/download/v${trivy_version}/trivy_${trivy_version}_${arch}.tar.gz"
 
     log_info "Downloading Trivy v${trivy_version}..."
-    if curl -sfL --max-time 120 "$download_url" -o "$tmpdir/trivy.tar.gz" 2>/dev/null; then
+    if _curl -sfL --max-time 120 "$download_url" -o "$tmpdir/trivy.tar.gz" 2>/dev/null; then
         tar xzf "$tmpdir/trivy.tar.gz" -C "$tmpdir" trivy 2>/dev/null
         if [[ -f "$tmpdir/trivy" ]]; then
             mv "$tmpdir/trivy" "$TRIVY_BIN"
@@ -949,7 +1021,7 @@ scan_container_images() {
     printf '}' >> "$tmpfile"
     rm -f "$results_file"
 
-    curl -s -X POST "$endpoint" \
+    _curl -s -X POST "$endpoint" \
         -H "X-Agent-Key: $API_KEY" \
         -H "Content-Type: application/json" \
         -H "User-Agent: SentriKat-Agent/$AGENT_VERSION (macOS)" \
@@ -1042,7 +1114,7 @@ collect_and_send_lockfiles() {
 
     local endpoint="${SERVER_URL}/api/agent/dependency-scan"
 
-    curl -s -X POST "$endpoint" \
+    _curl -s -X POST "$endpoint" \
         -H "X-Agent-Key: $API_KEY" \
         -H "Content-Type: application/json" \
         -H "User-Agent: SentriKat-Agent/$AGENT_VERSION (macOS)" \
@@ -1082,7 +1154,7 @@ send_inventory() {
         local response
         local http_code
 
-        response=$(curl -s -w "\n%{http_code}" -X POST "$endpoint" \
+        response=$(_curl -s -w "\n%{http_code}" -X POST "$endpoint" \
             -H "X-Agent-Key: $API_KEY" \
             -H "Content-Type: application/json" \
             -H "User-Agent: SentriKat-Agent/$AGENT_VERSION (macOS)" \
@@ -1186,12 +1258,18 @@ send_heartbeat() {
     local uptime_seconds
     uptime_seconds=$(awk '{print int($1)}' /proc/uptime 2>/dev/null || sysctl -n kern.boottime 2>/dev/null | awk '{print systime() - $4}' | tr -d ',')
 
+    # Collect running services and listening ports
+    local running_services
+    running_services=$(collect_running_services) || true
+    local listening_ports
+    listening_ports=$(collect_listening_ports) || true
+
     while [[ $attempt -le $max_retries ]]; do
         local http_code
-        http_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$endpoint" \
+        http_code=$(_curl -s -o /dev/null -w "%{http_code}" -X POST "$endpoint" \
             -H "X-Agent-Key: $API_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"hostname\": \"$(hostname -s 2>/dev/null || hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\", \"health_status\": \"${HEALTH_STATUS:-unknown}\", \"uptime_seconds\": ${uptime_seconds:-0}}" \
+            -d "{\"hostname\": \"$(hostname -s 2>/dev/null || hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\", \"health_status\": \"${HEALTH_STATUS:-unknown}\", \"uptime_seconds\": ${uptime_seconds:-0}, \"running_services\": ${running_services:-[]}, \"listening_ports\": ${listening_ports:-[]}}" \
             --max-time 30 2>/dev/null) || http_code="000"
 
         if [[ "$http_code" =~ ^2 ]]; then
@@ -1225,7 +1303,7 @@ check_commands() {
     log_info "Checking for commands from server..."
 
     local response
-    response=$(curl -s -X GET "$endpoint" \
+    response=$(_curl -s -X GET "$endpoint" \
         -H "X-Agent-Key: $API_KEY" \
         -H "Content-Type: application/json" \
         --max-time 30 2>&1) || {
@@ -1295,7 +1373,7 @@ report_update_status() {
 {"agent_id":"${AGENT_ID}","hostname":"$(hostname)","status":"${status}","old_version":"${old_ver}","new_version":"${new_ver}","error":"${error_msg}"}
 EOJSON
 )
-    curl -s -X POST "$endpoint" \
+    _curl -s -X POST "$endpoint" \
         -H "X-Agent-Key: $API_KEY" \
         -H "Content-Type: application/json" \
         -d "$payload" \
@@ -1307,7 +1385,7 @@ verify_agent_health() {
     local endpoint="${SERVER_URL}/api/agent/commands?agent_id=${AGENT_ID}&hostname=$(hostname)&version=${1}&platform=macos"
 
     local http_code
-    http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+    http_code=$(_curl -s -o /dev/null -w "%{http_code}" \
         -H "X-Agent-Key: $API_KEY" \
         --max-time 15 "$endpoint" 2>/dev/null)
 
@@ -1333,7 +1411,7 @@ auto_update_agent() {
     local http_code header_file
     header_file=$(mktemp /tmp/sentrikat-headers-XXXXXX)
     register_temp_file "$header_file"
-    http_code=$(curl -s -w "%{http_code}" -o "$tmp_script" -D "$header_file" \
+    http_code=$(_curl -s -w "%{http_code}" -o "$tmp_script" -D "$header_file" \
         -H "X-Agent-Key: $API_KEY" \
         --max-time 60 "$download_url" 2>/dev/null)
 
@@ -1499,7 +1577,7 @@ install_agent() {
             # Revoke old API key on server if different from new key
             if [[ -n "$old_api_key" && -n "$API_KEY" && "$old_api_key" != "$API_KEY" ]]; then
                 log_info "Revoking old API key on server..."
-                curl -s -X POST "${SERVER_URL}/api/agent/revoke-old-key" \
+                _curl -s -X POST "${SERVER_URL}/api/agent/revoke-old-key" \
                     -H "X-Agent-Key: $API_KEY" \
                     -H "Content-Type: application/json" \
                     -d "{\"old_api_key\": \"$old_api_key\"}" \
@@ -1675,6 +1753,8 @@ Options:
   --server-url URL     SentriKat server URL (required)
   --api-key KEY        Agent API key (required)
   --interval HOURS     Scan interval in hours (default: 4)
+  --proxy-url URL      HTTP/HTTPS/SOCKS proxy (e.g., http://proxy:3128)
+  --ca-cert PATH       Custom CA certificate bundle for SSL inspection proxies
   --install            Install as LaunchDaemon (includes heartbeat)
   --uninstall          Uninstall agent
   --run-once           Run inventory collection once and exit
@@ -1773,6 +1853,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --interval)
             INTERVAL_HOURS="$2"
+            shift 2
+            ;;
+        --proxy-url)
+            ARG_PROXY_URL="$2"
+            shift 2
+            ;;
+        --ca-cert)
+            ARG_CA_CERT_PATH="$2"
             shift 2
             ;;
         --install)
