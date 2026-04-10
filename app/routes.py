@@ -4380,7 +4380,7 @@ def unacknowledge_by_cve(cve_id):
 
 def _authorize_container_vuln(current_user, vuln):
     """Check user has access to the container vulnerability's organization."""
-    if _super_admin_unrestricted():
+    if _super_admin_unrestricted(current_user):
         return True
     image = ContainerImage.query.get(vuln.container_image_id)
     if not image:
