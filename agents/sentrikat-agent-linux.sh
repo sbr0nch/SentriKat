@@ -308,7 +308,7 @@ get_installed_software() {
             version=$(json_escape "$version")
             # Send full distro version as distro_package_version for confidence scoring
             products+=("{\"vendor\": \"$vendor\", \"product\": \"$name\", \"version\": \"$version\", \"distro_package_version\": \"$version\"}")
-            ((count++))
+            ((count++)) || true
         done < <(dpkg-query -W -f='${Package}\t${Version}\n' 2>/dev/null)
     fi
 
@@ -325,7 +325,7 @@ get_installed_software() {
             vendor=$(json_escape "$vendor")
             # Send full distro version as distro_package_version for confidence scoring
             products+=("{\"vendor\": \"$vendor\", \"product\": \"$name\", \"version\": \"$version\", \"distro_package_version\": \"$version\"}")
-            ((count++))
+            ((count++)) || true
         done < <(rpm -qa --queryformat '%{NAME}\t%{VERSION}-%{RELEASE}\t%{VENDOR}\n' 2>/dev/null)
     fi
 
@@ -347,7 +347,7 @@ get_installed_software() {
             pkg_name=$(json_escape "$pkg_name")
             pkg_version=$(json_escape "$pkg_version")
             products+=("{\"vendor\": \"$vendor\", \"product\": \"$pkg_name\", \"version\": \"$pkg_version\", \"source_type\": \"os\", \"ecosystem\": \"apk\"}")
-            ((count++))
+            ((count++)) || true
         done < <(apk info -v 2>/dev/null)
     fi
 
@@ -359,7 +359,7 @@ get_installed_software() {
             name=$(json_escape "$name")
             version=$(json_escape "$version")
             products+=("{\"vendor\": \"Arch\", \"product\": \"$name\", \"version\": \"$version\"}")
-            ((count++))
+            ((count++)) || true
         done < <(pacman -Q 2>/dev/null)
     fi
 
@@ -370,7 +370,7 @@ get_installed_software() {
             name=$(json_escape "$name")
             version=$(json_escape "$version")
             products+=("{\"vendor\": \"Snap\", \"product\": \"$name\", \"version\": \"$version\"}")
-            ((count++))
+            ((count++)) || true
         done < <(snap list 2>/dev/null | awk 'NR>1 {print $1, $2}')
     fi
 
@@ -382,7 +382,7 @@ get_installed_software() {
             version=$(json_escape "$version")
             origin=$(json_escape "${origin:-Flatpak}")
             products+=("{\"vendor\": \"$origin\", \"product\": \"$name\", \"version\": \"$version\"}")
-            ((count++))
+            ((count++)) || true
         done < <(flatpak list --columns=name,version,origin 2>/dev/null)
     fi
 
@@ -880,15 +880,13 @@ scan_container_images() {
         local trivy_tmpfile
         trivy_tmpfile=$(mktemp)
         register_temp_file "$trivy_tmpfile"
-        "$TRIVY_BIN" image \
+        if ! "$TRIVY_BIN" image \
             --format json \
             --severity HIGH,CRITICAL \
             --cache-dir "$TRIVY_CACHE_DIR" \
             --quiet \
             --timeout 5m \
-            "$image_ref" > "$trivy_tmpfile" 2>/dev/null
-
-        if [[ $? -ne 0 || ! -s "$trivy_tmpfile" ]]; then
+            "$image_ref" > "$trivy_tmpfile" 2>/dev/null || [[ ! -s "$trivy_tmpfile" ]]; then
             log_warn "Trivy scan failed for $image_ref"
             rm -f "$trivy_tmpfile"
             continue
@@ -915,7 +913,7 @@ scan_container_images() {
         printf '}' >> "$results_file"
 
         rm -f "$trivy_tmpfile"
-        ((image_count++))
+        ((image_count++)) || true
 
         if [[ $image_count -ge 50 ]]; then
             log_warn "Reached 50 image limit, skipping remaining images"
@@ -983,6 +981,12 @@ send_container_scan_results() {
             return 0
         else
             log_warn "Container scan upload attempt $i failed: HTTP $http_code - $body"
+            # Don't retry on auth errors - key is invalid or revoked
+            if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
+                log_error "API key is invalid or revoked. Check your key in agent.conf"
+                rm -f "$tmpfile"
+                return 1
+            fi
             if [[ $i -lt $max_retries ]]; then
                 sleep $retry_delay
                 retry_delay=$((retry_delay * 2))
@@ -1144,6 +1148,12 @@ collect_and_send_lockfiles() {
             return 0
         else
             log_warn "Dependency scan upload attempt $i failed: HTTP $http_code"
+            # Don't retry on auth errors - key is invalid or revoked
+            if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
+                log_error "API key is invalid or revoked. Check your key in agent.conf"
+                rm -f "$tmpfile"
+                return 1
+            fi
             if [[ $i -lt $max_retries ]]; then
                 sleep $retry_delay
                 retry_delay=$((retry_delay * 2))

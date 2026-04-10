@@ -298,7 +298,7 @@ get_installed_software() {
                     esc_vendor=$(json_escape "${current_vendor:-Unknown}")
                     esc_path=$(json_escape "${current_path:-}")
                     products+=("{\"vendor\": \"$esc_vendor\", \"product\": \"$esc_name\", \"version\": \"$esc_version\", \"path\": \"$esc_path\"}")
-                    ((count++))
+                    ((count++)) || true
                 fi
                 current_name="${line%%:*}"
                 current_name="${current_name#"${current_name%%[![:space:]]*}"}"  # Trim leading whitespace
@@ -328,7 +328,7 @@ get_installed_software() {
             esc_vendor=$(json_escape "${current_vendor:-Unknown}")
             esc_path=$(json_escape "${current_path:-}")
             products+=("{\"vendor\": \"$esc_vendor\", \"product\": \"$esc_name\", \"version\": \"$esc_version\", \"path\": \"$esc_path\"}")
-            ((count++))
+            ((count++)) || true
         fi
     fi
 
@@ -368,8 +368,8 @@ get_installed_software() {
         pkg_vendor=$(json_escape "$pkg_vendor")
 
         products+=("{\"vendor\": \"$pkg_vendor\", \"product\": \"$pkg_name\", \"version\": \"$pkg_version\"}")
-        ((count++))
-        ((pkg_count++))
+        ((count++)) || true
+        ((pkg_count++)) || true
     done < <(pkgutil --pkgs 2>/dev/null | grep -v '^com\.apple\.' || true)
     # Note: we skip com.apple.* system packages to avoid massive noise (500+ entries)
     # Apple OS vulnerabilities are tracked by macOS version, not individual pkg receipts
@@ -389,8 +389,8 @@ get_installed_software() {
             name=$(json_escape "$name")
             version=$(json_escape "$version")
             products+=("{\"vendor\": \"Homebrew\", \"product\": \"$name\", \"version\": \"$version\"}")
-            ((count++))
-            ((brew_count++))
+            ((count++)) || true
+            ((brew_count++)) || true
         done < <(brew list --formula --versions 2>/dev/null || true)
 
         # Casks (GUI apps installed via Homebrew)
@@ -399,8 +399,8 @@ get_installed_software() {
             name=$(json_escape "$name")
             version=$(json_escape "$version")
             products+=("{\"vendor\": \"Homebrew Cask\", \"product\": \"$name\", \"version\": \"$version\"}")
-            ((count++))
-            ((brew_count++))
+            ((count++)) || true
+            ((brew_count++)) || true
         done < <(brew list --cask --versions 2>/dev/null || true)
 
         log_info "Found $brew_count Homebrew packages"
@@ -425,8 +425,8 @@ get_installed_software() {
             version=$(json_escape "${version:-unknown}")
 
             products+=("{\"vendor\": \"MacPorts\", \"product\": \"$name\", \"version\": \"$version\"}")
-            ((count++))
-            ((port_count++))
+            ((count++)) || true
+            ((port_count++)) || true
         done < <(port installed 2>/dev/null | tail -n +2 || true)
 
         log_info "Found $port_count MacPorts packages"
@@ -883,15 +883,13 @@ scan_container_images() {
         local trivy_tmpfile
         trivy_tmpfile=$(mktemp)
         register_temp_file "$trivy_tmpfile"
-        "$TRIVY_BIN" image \
+        if ! "$TRIVY_BIN" image \
             --format json \
             --severity HIGH,CRITICAL \
             --cache-dir "$TRIVY_CACHE_DIR" \
             --quiet \
             --timeout 5m \
-            "$image_ref" > "$trivy_tmpfile" 2>/dev/null
-
-        if [[ $? -ne 0 || ! -s "$trivy_tmpfile" ]]; then
+            "$image_ref" > "$trivy_tmpfile" 2>/dev/null || [[ ! -s "$trivy_tmpfile" ]]; then
             log_warn "Trivy scan failed for $image_ref"
             rm -f "$trivy_tmpfile"
             continue
@@ -917,7 +915,7 @@ scan_container_images() {
         printf '}' >> "$results_file"
 
         rm -f "$trivy_tmpfile"
-        ((image_count++))
+        ((image_count++)) || true
 
         if [[ $image_count -ge 50 ]]; then
             log_warn "Reached 50 image limit, skipping remaining images"
@@ -1569,7 +1567,10 @@ EOF
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
     <key>StandardOutPath</key>
     <string>/Library/Logs/sentrikat-heartbeat-stdout.log</string>
     <key>StandardErrorPath</key>
