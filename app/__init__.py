@@ -123,6 +123,10 @@ def _apply_schema_migrations(logger, db_uri):
         # Managed email (SaaS Resend integration)
         ('organizations', 'use_managed_email', 'BOOLEAN DEFAULT 1', 'BOOLEAN DEFAULT TRUE'),
         ('organizations', 'email_reply_to', 'VARCHAR(255)', 'VARCHAR(255)'),
+        # Public exploit availability (GitHub PoC enrichment)
+        ('vulnerabilities', 'exploit_public', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
+        ('vulnerabilities', 'exploit_source', 'VARCHAR(100)', 'VARCHAR(100)'),
+        ('vulnerabilities', 'exploit_url', 'VARCHAR(500)', 'VARCHAR(500)'),
     ]
 
     is_sqlite = db_uri.startswith('sqlite')
