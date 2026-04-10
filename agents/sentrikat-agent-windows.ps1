@@ -372,6 +372,131 @@ function Get-ListeningPorts {
 }
 
 # ============================================================================
+# Pending Patches Collection
+# ============================================================================
+
+function Get-PendingPatches {
+    $patches = @()
+    try {
+        # Get last installed update date
+        $lastUpdate = $null
+        try {
+            $lastHotfix = Get-HotFix -ErrorAction SilentlyContinue | Sort-Object -Property InstalledOn -Descending | Select-Object -First 1
+            if ($lastHotfix -and $lastHotfix.InstalledOn) {
+                $lastUpdate = $lastHotfix.InstalledOn.ToString("yyyy-MM-dd")
+            }
+        } catch {}
+
+        # Check for pending updates via COM object
+        try {
+            $updateSession = New-Object -ComObject Microsoft.Update.Session -ErrorAction SilentlyContinue
+            if ($updateSession) {
+                $updateSearcher = $updateSession.CreateUpdateSearcher()
+                $searchResult = $updateSearcher.Search("IsInstalled=0 AND IsHidden=0")
+                $count = 0
+                foreach ($update in $searchResult.Updates) {
+                    if ($count -ge 100) { break }
+                    $updateType = "update"
+                    if ($update.MsrcSeverity) { $updateType = "security" }
+                    $patches += @{
+                        name = $update.Title
+                        available_version = ""
+                        type = $updateType
+                    }
+                    $count++
+                }
+            }
+        } catch {
+            Write-Log "COM Windows Update query failed (non-critical): $_" -Level "DEBUG"
+        }
+
+        # If no COM results, check if auto-update is enabled as a fallback indicator
+        if ($patches.Count -eq 0 -and $lastUpdate) {
+            $patches += @{
+                name = "_meta_last_update"
+                available_version = $lastUpdate
+                type = "info"
+            }
+        }
+    } catch {
+        Write-Log "Failed to collect pending patches: $_" -Level "WARN"
+    }
+    return $patches
+}
+
+# ============================================================================
+# Security Posture Collection
+# ============================================================================
+
+function Get-SecurityPosture {
+    $posture = @{}
+
+    # Windows Firewall
+    try {
+        $fwProfiles = Get-NetFirewallProfile -ErrorAction SilentlyContinue
+        if ($fwProfiles) {
+            $fwStatus = @{}
+            foreach ($profile in $fwProfiles) {
+                $fwStatus[$profile.Name] = if ($profile.Enabled) { "enabled" } else { "disabled" }
+            }
+            $posture["firewall"] = $fwStatus
+        } else {
+            $posture["firewall"] = "unknown"
+        }
+    } catch {
+        $posture["firewall"] = "unknown"
+    }
+
+    # Windows Defender
+    try {
+        $defender = Get-MpComputerStatus -ErrorAction SilentlyContinue
+        if ($defender) {
+            $posture["defender"] = @{
+                antivirus_enabled = [bool]$defender.AntivirusEnabled
+                realtime_protection = [bool]$defender.RealTimeProtectionEnabled
+                antispyware_enabled = [bool]$defender.AntispywareEnabled
+                signature_age_days = $defender.AntivirusSignatureAge
+            }
+        } else {
+            $posture["defender"] = "unavailable"
+        }
+    } catch {
+        $posture["defender"] = "unavailable"
+    }
+
+    # UAC
+    try {
+        $uacKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+        $enableLUA = (Get-ItemProperty -Path $uacKey -Name "EnableLUA" -ErrorAction SilentlyContinue).EnableLUA
+        $consentPrompt = (Get-ItemProperty -Path $uacKey -Name "ConsentPromptBehaviorAdmin" -ErrorAction SilentlyContinue).ConsentPromptBehaviorAdmin
+        $posture["uac"] = @{
+            enabled = ($enableLUA -eq 1)
+            consent_prompt_level = $consentPrompt
+        }
+    } catch {
+        $posture["uac"] = "unknown"
+    }
+
+    # BitLocker
+    try {
+        $bitlocker = Get-BitLockerVolume -ErrorAction SilentlyContinue
+        if ($bitlocker) {
+            $blStatus = @{}
+            foreach ($vol in $bitlocker) {
+                $blStatus[$vol.MountPoint] = $vol.ProtectionStatus.ToString()
+            }
+            $posture["bitlocker"] = $blStatus
+        } else {
+            $posture["bitlocker"] = "unavailable"
+        }
+    } catch {
+        $posture["bitlocker"] = "unavailable"
+    }
+
+    return $posture
+}
+
+# ============================================================================
 # Software Inventory Collection
 # ============================================================================
 
@@ -1144,6 +1269,10 @@ function Send-Heartbeat {
     $listeningPorts = @()
     try { $runningServices = Get-RunningServices } catch { Write-Log "Service collection failed: $_" -Level "WARN" }
     try { $listeningPorts = Get-ListeningPorts } catch { Write-Log "Port collection failed: $_" -Level "WARN" }
+    $pendingPatches = @()
+    $securityPosture = @{}
+    try { $pendingPatches = Get-PendingPatches } catch { Write-Log "Patch collection failed: $_" -Level "WARN" }
+    try { $securityPosture = Get-SecurityPosture } catch { Write-Log "Security posture collection failed: $_" -Level "WARN" }
 
     $payload = @{
         hostname = $SystemInfo.hostname
@@ -1155,6 +1284,8 @@ function Send-Heartbeat {
         uptime_seconds = $uptimeSeconds
         running_services = $runningServices
         listening_ports = $listeningPorts
+        pending_patches = $pendingPatches
+        security_posture = $securityPosture
     }
 
     if ($HealthStatus) {

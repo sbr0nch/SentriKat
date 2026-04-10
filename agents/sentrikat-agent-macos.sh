@@ -338,6 +338,101 @@ collect_listening_ports() {
 }
 
 # ============================================================================
+# Pending Patches Collection
+# ============================================================================
+
+collect_pending_patches() {
+    local patches="[]"
+
+    if command -v softwareupdate &>/dev/null; then
+        local patch_json="["
+        local first=true
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            # softwareupdate -l lines look like: "* Label: macOS Ventura 13.4.1"
+            # or "* Label: Safari 16.5.1" followed by details
+            if [[ "$line" == *"Label:"* ]]; then
+                local pkg_name
+                pkg_name=$(echo "$line" | sed 's/.*Label: *//')
+                [[ -z "$pkg_name" ]] && continue
+                local update_type="update"
+                [[ "$line" == *"Security"* || "$line" == *"security"* ]] && update_type="security"
+                [[ "$first" == "true" ]] && first=false || patch_json+=","
+                patch_json+="{\"name\":\"$(json_escape "$pkg_name")\",\"available_version\":\"\",\"type\":\"$(json_escape "$update_type")\"}"
+            fi
+        done < <(softwareupdate -l 2>/dev/null | head -100)
+        patch_json+="]"
+        patches="$patch_json"
+    fi
+
+    echo "$patches"
+}
+
+# ============================================================================
+# Security Posture Collection
+# ============================================================================
+
+collect_security_posture() {
+    local posture="{"
+
+    # SIP (System Integrity Protection)
+    local sip="unknown"
+    if command -v csrutil &>/dev/null; then
+        local sip_output
+        sip_output=$(csrutil status 2>/dev/null || echo "unknown")
+        if echo "$sip_output" | grep -q "enabled"; then
+            sip="enabled"
+        elif echo "$sip_output" | grep -q "disabled"; then
+            sip="disabled"
+        fi
+    fi
+
+    # FileVault
+    local filevault="unknown"
+    if command -v fdesetup &>/dev/null; then
+        local fv_output
+        fv_output=$(fdesetup status 2>/dev/null || echo "unknown")
+        if echo "$fv_output" | grep -q "On"; then
+            filevault="enabled"
+        elif echo "$fv_output" | grep -q "Off"; then
+            filevault="disabled"
+        fi
+    fi
+
+    # Gatekeeper
+    local gatekeeper="unknown"
+    if command -v spctl &>/dev/null; then
+        local gk_output
+        gk_output=$(spctl --status 2>/dev/null || echo "unknown")
+        if echo "$gk_output" | grep -q "enabled"; then
+            gatekeeper="enabled"
+        elif echo "$gk_output" | grep -q "disabled"; then
+            gatekeeper="disabled"
+        fi
+    fi
+
+    # Firewall
+    local firewall="unknown"
+    if [[ -x /usr/libexec/ApplicationFirewall/socketfilterfw ]]; then
+        local fw_output
+        fw_output=$(/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2>/dev/null || echo "unknown")
+        if echo "$fw_output" | grep -q "enabled"; then
+            firewall="enabled"
+        elif echo "$fw_output" | grep -q "disabled"; then
+            firewall="disabled"
+        fi
+    fi
+
+    posture+="\"sip\":\"$(json_escape "$sip")\""
+    posture+=",\"filevault\":\"$(json_escape "$filevault")\""
+    posture+=",\"gatekeeper\":\"$(json_escape "$gatekeeper")\""
+    posture+=",\"firewall\":\"$(json_escape "$firewall")\""
+    posture+="}"
+
+    echo "$posture"
+}
+
+# ============================================================================
 # Software Inventory Collection
 # ============================================================================
 
@@ -1263,13 +1358,17 @@ send_heartbeat() {
     running_services=$(collect_running_services) || true
     local listening_ports
     listening_ports=$(collect_listening_ports) || true
+    local pending_patches
+    pending_patches=$(collect_pending_patches) || true
+    local security_posture
+    security_posture=$(collect_security_posture) || true
 
     while [[ $attempt -le $max_retries ]]; do
         local http_code
         http_code=$(_curl -s -o /dev/null -w "%{http_code}" -X POST "$endpoint" \
             -H "X-Agent-Key: $API_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"hostname\": \"$(hostname -s 2>/dev/null || hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\", \"health_status\": \"${HEALTH_STATUS:-unknown}\", \"uptime_seconds\": ${uptime_seconds:-0}, \"running_services\": ${running_services:-[]}, \"listening_ports\": ${listening_ports:-[]}}" \
+            -d "{\"hostname\": \"$(hostname -s 2>/dev/null || hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\", \"health_status\": \"${HEALTH_STATUS:-unknown}\", \"uptime_seconds\": ${uptime_seconds:-0}, \"running_services\": ${running_services:-[]}, \"listening_ports\": ${listening_ports:-[]}, \"pending_patches\": ${pending_patches:-[]}, \"security_posture\": ${security_posture:-{}}}" \
             --max-time 30 2>/dev/null) || http_code="000"
 
         if [[ "$http_code" =~ ^2 ]]; then

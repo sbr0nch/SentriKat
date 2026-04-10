@@ -355,6 +355,110 @@ collect_listening_ports() {
 }
 
 # ============================================================================
+# Pending Patches Collection
+# ============================================================================
+
+collect_pending_patches() {
+    local patches="[]"
+
+    if command -v apt &>/dev/null; then
+        local patch_json="["
+        local first=true
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            local pkg_name pkg_version
+            pkg_name=$(echo "$line" | awk -F/ '{print $1}')
+            pkg_version=$(echo "$line" | awk '{print $2}')
+            [[ -z "$pkg_name" ]] && continue
+            [[ "$first" == "true" ]] && first=false || patch_json+=","
+            patch_json+="{\"name\":\"$(json_escape "$pkg_name")\",\"available_version\":\"$(json_escape "$pkg_version")\",\"type\":\"security\"}"
+        done < <(apt list --upgradable 2>/dev/null | grep -i security | head -100)
+        patch_json+="]"
+        patches="$patch_json"
+    elif command -v yum &>/dev/null; then
+        local patch_json="["
+        local first=true
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            local pkg_name=$(echo "$line" | awk '{print $1}')
+            local pkg_version=$(echo "$line" | awk '{print $2}')
+            [[ -z "$pkg_name" ]] && continue
+            [[ "$first" == "true" ]] && first=false || patch_json+=","
+            patch_json+="{\"name\":\"$(json_escape "$pkg_name")\",\"available_version\":\"$(json_escape "$pkg_version")\",\"type\":\"update\"}"
+        done < <(yum check-update --quiet 2>/dev/null | grep -v '^$\|^Obsoleting' | head -100)
+        patch_json+="]"
+        patches="$patch_json"
+    elif command -v dnf &>/dev/null; then
+        local patch_json="["
+        local first=true
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            local pkg_name=$(echo "$line" | awk '{print $1}')
+            local pkg_version=$(echo "$line" | awk '{print $2}')
+            [[ -z "$pkg_name" ]] && continue
+            [[ "$first" == "true" ]] && first=false || patch_json+=","
+            patch_json+="{\"name\":\"$(json_escape "$pkg_name")\",\"available_version\":\"$(json_escape "$pkg_version")\",\"type\":\"update\"}"
+        done < <(dnf check-update --quiet 2>/dev/null | grep -v '^$\|^Obsoleting' | head -100)
+        patch_json+="]"
+        patches="$patch_json"
+    fi
+
+    echo "$patches"
+}
+
+# ============================================================================
+# Security Posture Collection
+# ============================================================================
+
+collect_security_posture() {
+    local posture="{"
+
+    # SELinux/AppArmor
+    local selinux="disabled"
+    if command -v getenforce &>/dev/null; then
+        selinux=$(getenforce 2>/dev/null || echo "unknown")
+    fi
+    local apparmor="disabled"
+    if command -v aa-status &>/dev/null; then
+        apparmor=$(aa-status --enabled 2>/dev/null && echo "enabled" || echo "disabled")
+    elif [[ -d /sys/kernel/security/apparmor ]]; then
+        apparmor="enabled"
+    fi
+
+    # Firewall
+    local firewall="unknown"
+    if command -v ufw &>/dev/null; then
+        firewall=$(ufw status 2>/dev/null | head -1 | awk '{print $2}')
+    elif command -v firewall-cmd &>/dev/null; then
+        firewall=$(firewall-cmd --state 2>/dev/null || echo "inactive")
+    elif command -v iptables &>/dev/null; then
+        local rule_count=$(iptables -L -n 2>/dev/null | grep -c -v '^Chain\|^target\|^$' || echo "0")
+        firewall=$([[ "$rule_count" -gt 0 ]] && echo "active ($rule_count rules)" || echo "no rules")
+    fi
+
+    # Auto-updates
+    local auto_update="unknown"
+    if [[ -f /etc/apt/apt.conf.d/20auto-upgrades ]]; then
+        auto_update=$(grep -q 'Unattended-Upgrade "1"' /etc/apt/apt.conf.d/20auto-upgrades 2>/dev/null && echo "enabled" || echo "disabled")
+    fi
+
+    # Disk encryption
+    local encryption="unknown"
+    if command -v lsblk &>/dev/null; then
+        encryption=$(lsblk -o TYPE 2>/dev/null | grep -q "crypt" && echo "encrypted" || echo "unencrypted")
+    fi
+
+    posture+="\"selinux\":\"$(json_escape "$selinux")\""
+    posture+=",\"apparmor\":\"$(json_escape "$apparmor")\""
+    posture+=",\"firewall\":\"$(json_escape "$firewall")\""
+    posture+=",\"auto_update\":\"$(json_escape "$auto_update")\""
+    posture+=",\"disk_encryption\":\"$(json_escape "$encryption")\""
+    posture+="}"
+
+    echo "$posture"
+}
+
+# ============================================================================
 # Software Inventory Collection
 # ============================================================================
 
@@ -1396,9 +1500,13 @@ send_heartbeat() {
     services_json=$(collect_running_services) || services_json="[]"
     local ports_json
     ports_json=$(collect_listening_ports) || ports_json="[]"
+    local patches_json
+    patches_json=$(collect_pending_patches) || patches_json="[]"
+    local posture_json
+    posture_json=$(collect_security_posture) || posture_json="{}"
 
     local heartbeat_payload
-    heartbeat_payload="{\"hostname\": \"$(hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\", \"health_status\": \"$HEALTH_STATUS\", \"uptime_seconds\": $uptime_seconds, \"running_services\": $services_json, \"listening_ports\": $ports_json}"
+    heartbeat_payload="{\"hostname\": \"$(hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\", \"health_status\": \"$HEALTH_STATUS\", \"uptime_seconds\": $uptime_seconds, \"running_services\": $services_json, \"listening_ports\": $ports_json, \"pending_patches\": $patches_json, \"security_posture\": $posture_json}"
 
     for ((attempt=1; attempt<=max_retries; attempt++)); do
         local http_code

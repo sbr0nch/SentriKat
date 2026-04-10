@@ -767,6 +767,58 @@ class VulnerabilityMatch(db.Model):
         """
         return self.vulnerability.calculate_priority()
 
+    def calculate_risk_score(self):
+        """Calculate unified risk score (0-100) combining multiple factors.
+
+        Formula:
+          Base (40%): CVSS score normalized to 0-40
+          Exploit (25%): EPSS + active exploitation + public PoC
+          Asset (20%): Asset criticality context
+          Confidence (15%): Match confidence level
+
+        Returns: int 0-100, where 100 = maximum risk
+        """
+        vuln = self.vulnerability
+        product = self.product
+
+        # Base score from CVSS (0-40 points)
+        cvss = vuln.cvss_score or 0
+        base_score = (cvss / 10.0) * 40
+
+        # Exploit factor (0-25 points)
+        exploit_score = 0
+        epss = vuln.epss_score or 0
+        exploit_score += epss * 12  # EPSS 1.0 = 12 points
+        if vuln.is_actively_exploited:
+            exploit_score += 8  # Active exploitation = 8 points
+        if getattr(vuln, 'exploit_public', False):
+            exploit_score += 5  # Public PoC = 5 points
+        exploit_score = min(exploit_score, 25)
+
+        # Asset criticality (0-20 points)
+        asset_score = 10  # Default: medium
+        # Check if any installation is on a critical/high asset
+        try:
+            from sqlalchemy import exists
+            critical_install = ProductInstallation.query.filter(
+                ProductInstallation.product_id == product.id
+            ).join(Asset).filter(
+                Asset.criticality.in_(['critical', 'high'])
+            ).first()
+            if critical_install:
+                crit = critical_install.asset.criticality
+                asset_score = 20 if crit == 'critical' else 15
+        except Exception:
+            pass
+
+        # Confidence factor (0-15 points)
+        confidence = self.match_confidence or 'medium'
+        confidence_map = {'high': 15, 'medium': 8, 'low': 3}
+        confidence_score = confidence_map.get(confidence, 8)
+
+        total = int(min(base_score + exploit_score + asset_score + confidence_score, 100))
+        return total
+
     def needs_review(self):
         """Flag matches that are low-confidence but potentially dangerous.
 
@@ -809,7 +861,8 @@ class VulnerabilityMatch(db.Model):
             'acknowledged_at': self.acknowledged_at.isoformat() if self.acknowledged_at else None,
             'snoozed_until': self.snoozed_until.isoformat() if self.snoozed_until else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'effective_priority': self.calculate_effective_priority()
+            'effective_priority': self.calculate_effective_priority(),
+            'risk_score': self.calculate_risk_score()
         }
 
 
@@ -3979,3 +4032,88 @@ class SaasLog(db.Model):
         except Exception:
             db.session.rollback()
         return entry
+
+
+# ============================================================================
+# Remediation Assignment (Sprint 3 #23)
+# ============================================================================
+
+class RemediationAssignment(db.Model):
+    """Assign a vulnerability match to a user for remediation with a due date."""
+    __tablename__ = 'remediation_assignments'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
+    match_id = db.Column(db.Integer, db.ForeignKey('vulnerability_matches.id', ondelete='CASCADE'), nullable=True, index=True)
+    # OR assign by product (covers all CVEs for that product)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), nullable=True, index=True)
+    # OR assign by CVE (covers all products affected by this CVE)
+    cve_id = db.Column(db.String(20), nullable=True, index=True)
+
+    assigned_to = db.Column(db.String(200), nullable=False)  # Email or username
+    assigned_by = db.Column(db.String(200), nullable=False)
+    due_date = db.Column(db.Date, nullable=True)
+    status = db.Column(db.String(20), default='open')  # open, in_progress, resolved, accepted_risk
+    priority = db.Column(db.String(20), default='medium')  # critical, high, medium, low
+    notes = db.Column(db.Text, nullable=True)
+    resolution_notes = db.Column(db.Text, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    resolved_at = db.Column(db.DateTime, nullable=True)
+
+    # Relationships
+    match = db.relationship('VulnerabilityMatch', backref=db.backref('assignments', lazy='dynamic'))
+    product = db.relationship('Product', backref=db.backref('assignments', lazy='dynamic'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'match_id': self.match_id,
+            'product_id': self.product_id,
+            'cve_id': self.cve_id,
+            'assigned_to': self.assigned_to,
+            'assigned_by': self.assigned_by,
+            'due_date': self.due_date.isoformat() if self.due_date else None,
+            'status': self.status,
+            'priority': self.priority,
+            'notes': self.notes,
+            'resolution_notes': self.resolution_notes,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'resolved_at': self.resolved_at.isoformat() if self.resolved_at else None,
+            'is_overdue': self.due_date and self.due_date < date.today() and self.status in ('open', 'in_progress'),
+        }
+
+
+# ============================================================================
+# SLA Policy (Sprint 3 #25)
+# ============================================================================
+
+class SlaPolicy(db.Model):
+    """Define SLA rules: "CRITICAL CVEs must be remediated within 14 days"."""
+    __tablename__ = 'sla_policies'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
+    name = db.Column(db.String(200), nullable=False)
+    severity = db.Column(db.String(20), nullable=False)  # critical, high, medium, low
+    max_days = db.Column(db.Integer, nullable=False)  # Days to remediate
+    enabled = db.Column(db.Boolean, default=True)
+    notify_on_breach = db.Column(db.Boolean, default=True)  # Send alert when SLA breached
+    escalate_to = db.Column(db.String(200), nullable=True)  # Email to escalate to on breach
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'name': self.name,
+            'severity': self.severity,
+            'max_days': self.max_days,
+            'enabled': self.enabled,
+            'notify_on_breach': self.notify_on_breach,
+            'escalate_to': self.escalate_to,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }

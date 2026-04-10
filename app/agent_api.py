@@ -2346,12 +2346,11 @@ def agent_heartbeat():
     if new_version:
         asset.agent_version = new_version
 
-    # Store running services and listening ports in metadata (no schema migration needed)
+    # Store runtime data in metadata (no schema migration needed)
     runtime_data = {}
-    if data.get('running_services'):
-        runtime_data['running_services'] = data['running_services']
-    if data.get('listening_ports'):
-        runtime_data['listening_ports'] = data['listening_ports']
+    for key in ('running_services', 'listening_ports', 'pending_patches', 'security_posture'):
+        if data.get(key):
+            runtime_data[key] = data[key]
     if runtime_data:
         try:
             existing_meta = json.loads(asset.metadata_json) if asset.metadata_json else {}
