@@ -757,9 +757,32 @@ class VulnerabilityMatch(db.Model):
         """
         return self.vulnerability.calculate_priority()
 
+    def needs_review(self):
+        """Flag matches that are low-confidence but potentially dangerous.
+
+        A medium/low confidence match on a CRITICAL/HIGH CVE with active
+        exploitation or high EPSS could be hiding a real threat. These
+        should be surfaced to the admin for manual verification.
+        """
+        confidence = self.match_confidence or 'medium'
+        if confidence == 'high':
+            return False
+
+        vuln = self.vulnerability
+        severity = (vuln.severity or '').upper()
+        epss = vuln.epss_score or 0
+        is_exploited = bool(vuln.known_ransomware) or bool(getattr(vuln, 'date_added', None))
+
+        # Medium confidence + dangerous CVE = needs review
+        if severity in ('CRITICAL', 'HIGH') or epss > 0.4 or is_exploited:
+            return True
+        return False
+
     def to_dict(self):
         vuln_dict = self.vulnerability.to_dict()
         product_dict = self.product.to_dict()
+
+        review_needed = self.needs_review()
 
         return {
             'id': self.id,
@@ -768,6 +791,7 @@ class VulnerabilityMatch(db.Model):
             'match_reason': self.match_reason,
             'match_method': self.match_method or 'keyword',
             'match_confidence': self.match_confidence or 'medium',
+            'needs_review': review_needed,
             'acknowledged': self.acknowledged,
             'auto_acknowledged': self.auto_acknowledged,
             'resolution_reason': self.resolution_reason,
