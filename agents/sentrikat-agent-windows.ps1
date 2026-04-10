@@ -1747,7 +1747,7 @@ function Install-ScheduledTask {
 
     # Main inventory scan task
     $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`" -RunOnce"
-    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $Config.IntervalMinutes) -RepetitionDuration ([TimeSpan]::MaxValue)
+    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $Config.IntervalMinutes) -RepetitionDuration (New-TimeSpan -Days 3650)
     $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RunOnlyIfNetworkAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 
@@ -1756,7 +1756,7 @@ function Install-ScheduledTask {
 
     # Heartbeat task (every 5 minutes, runs indefinitely)
     $heartbeatAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`" -Heartbeat"
-    $heartbeatTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes $HeartbeatIntervalMinutes) -RepetitionDuration ([TimeSpan]::MaxValue)
+    $heartbeatTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(2) -RepetitionInterval (New-TimeSpan -Minutes $HeartbeatIntervalMinutes) -RepetitionDuration (New-TimeSpan -Days 3650)
 
     Unregister-ScheduledTask -TaskName "SentriKat Agent Heartbeat" -Confirm:$false -ErrorAction SilentlyContinue
     Register-ScheduledTask -TaskName "SentriKat Agent Heartbeat" -Action $heartbeatAction -Trigger $heartbeatTrigger -Principal $principal -Settings $settings -Description "SentriKat Agent Heartbeat - Checks for commands"
