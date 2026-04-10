@@ -1711,7 +1711,7 @@ def _read_agent_script(filename):
     script_path = os.path.join(agents_dir, filename)
     if not os.path.exists(script_path):
         return None
-    with open(script_path, 'r') as f:
+    with open(script_path, 'r', encoding='utf-8') as f:
         return f.read()
 
 
@@ -1771,10 +1771,12 @@ def download_windows_agent():
             1
         )
 
+    # Encode as UTF-8 with BOM for PowerShell compatibility
+    script_bytes = b'\xef\xbb\xbf' + script.encode('utf-8')
     return Response(
-        script,
-        mimetype='application/octet-stream',
-        headers={'Content-Disposition': 'attachment; filename=sentrikat-agent-windows.ps1'}
+        script_bytes,
+        mimetype='text/plain; charset=utf-8',
+        headers={'Content-Disposition': 'attachment; filename=sentrikat-agent.ps1'}
     )
 
 
@@ -1803,9 +1805,9 @@ def download_linux_agent():
         script = script.replace('API_KEY=""', f'API_KEY="{safe_key}"', 1)
 
     return Response(
-        script,
-        mimetype='application/octet-stream',
-        headers={'Content-Disposition': 'attachment; filename=sentrikat-agent-linux.sh'}
+        script.encode('utf-8'),
+        mimetype='text/plain; charset=utf-8',
+        headers={'Content-Disposition': 'attachment; filename=sentrikat-agent.sh'}
     )
 
 
@@ -1834,8 +1836,8 @@ def download_macos_agent():
         script = script.replace('API_KEY=""', f'API_KEY="{safe_key}"', 1)
 
     return Response(
-        script,
-        mimetype='application/octet-stream',
+        script.encode('utf-8'),
+        mimetype='text/plain; charset=utf-8',
         headers={'Content-Disposition': 'attachment; filename=sentrikat-agent-macos.sh'}
     )
 
