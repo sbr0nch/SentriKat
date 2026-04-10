@@ -3158,6 +3158,43 @@ def create_agent_key():
     return jsonify(result), 201
 
 
+@agent_bp.route('/api/agent/revoke-old-key', methods=['POST'])
+@agent_auth_required
+def agent_revoke_old_key():
+    """Allow an agent to revoke a previous API key for the same device.
+
+    Called during agent upgrade when a new key replaces an old one.
+    The agent authenticates with the NEW key and provides the OLD key
+    to revoke. Only revokes keys belonging to the same organization.
+    """
+    data = request.get_json() or {}
+    old_key_raw = data.get('old_api_key', '').strip()
+    if not old_key_raw:
+        return jsonify({'error': 'old_api_key is required'}), 400
+
+    # Hash the old key to find it
+    old_key_hash = AgentApiKey.hash_key(old_key_raw)
+    old_key = AgentApiKey.query.filter_by(key_hash=old_key_hash, active=True).first()
+
+    if not old_key:
+        return jsonify({'status': 'not_found', 'message': 'Old key not found or already revoked'})
+
+    # Security: only revoke if same organization as the new key
+    new_key = request.agent_key  # Set by @agent_auth_required
+    if old_key.organization_id != new_key.organization_id:
+        return jsonify({'error': 'Cannot revoke key from different organization'}), 403
+
+    # Don't let the agent revoke its own current key
+    if old_key.id == new_key.id:
+        return jsonify({'error': 'Cannot revoke the key you are using'}), 400
+
+    old_key.active = False
+    db.session.commit()
+    logger.info(f"Agent revoked old API key id={old_key.id} (replaced by id={new_key.id})")
+
+    return jsonify({'status': 'revoked', 'message': f'Old key {old_key.key_prefix}... revoked'})
+
+
 @agent_bp.route('/api/agent-keys/<int:key_id>', methods=['DELETE'])
 @login_required
 def delete_agent_key(key_id):
