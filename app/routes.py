@@ -3111,6 +3111,145 @@ def _chart_remediation_actions(org_product_ids):
     return jsonify({'actions': actions})
 
 
+@bp.route('/api/remediation/actions', methods=['GET'])
+@login_required
+def get_remediation_actions():
+    """Remediation grouping: group CVEs by product update action.
+
+    Instead of showing 200 individual CVEs, shows:
+    "Update Apache HTTP Server 2.4.49 → 2.4.54 to fix 12 CVEs (3 CRITICAL, 5 HIGH)"
+
+    Returns actions sorted by impact (critical count first, then total).
+    """
+    from sqlalchemy import func as sa_func, select
+    from sqlalchemy.orm import selectinload
+
+    org_id = session.get('organization_id')
+    if not org_id:
+        default_org = Organization.query.filter_by(name='default').first()
+        org_id = default_org.id if default_org else None
+
+    # Get org product IDs
+    org_product_ids = []
+    if org_id:
+        from app.models import product_organizations
+        org_product_ids = db.session.execute(
+            select(product_organizations.c.product_id).where(
+                product_organizations.c.organization_id == org_id
+            )
+        ).scalars().all()
+
+    if not org_product_ids:
+        return jsonify({'actions': [], 'total': 0})
+
+    # Get all unacknowledged matches with product and vulnerability data
+    matches = db.session.query(
+        Product.id.label('product_id'),
+        Product.vendor,
+        Product.product_name,
+        Product.version,
+        Product.cpe_vendor,
+        Product.cpe_product,
+        Vulnerability.id.label('vuln_id'),
+        Vulnerability.cve_id,
+        Vulnerability.severity,
+        Vulnerability.epss_score,
+        Vulnerability.is_actively_exploited,
+        Vulnerability.exploit_public,
+    ).join(
+        VulnerabilityMatch, VulnerabilityMatch.product_id == Product.id
+    ).join(
+        Vulnerability, Vulnerability.id == VulnerabilityMatch.vulnerability_id
+    ).filter(
+        Product.id.in_(org_product_ids),
+        VulnerabilityMatch.acknowledged == False
+    ).all()
+
+    # Group by product
+    product_groups = {}
+    for m in matches:
+        key = m.product_id
+        if key not in product_groups:
+            product_groups[key] = {
+                'product_id': m.product_id,
+                'vendor': m.vendor,
+                'product_name': m.product_name,
+                'current_version': m.version,
+                'cves': [],
+                'critical': 0,
+                'high': 0,
+                'medium': 0,
+                'low': 0,
+                'actively_exploited': 0,
+                'exploit_public': 0,
+                'max_epss': 0,
+            }
+        g = product_groups[key]
+        g['cves'].append(m.cve_id)
+        sev = (m.severity or 'MEDIUM').upper()
+        if sev == 'CRITICAL':
+            g['critical'] += 1
+        elif sev == 'HIGH':
+            g['high'] += 1
+        elif sev == 'MEDIUM':
+            g['medium'] += 1
+        else:
+            g['low'] += 1
+        if m.is_actively_exploited:
+            g['actively_exploited'] += 1
+        if m.exploit_public:
+            g['exploit_public'] += 1
+        if m.epss_score and m.epss_score > g['max_epss']:
+            g['max_epss'] = m.epss_score
+
+    # Build actions with fix versions and impact score
+    actions = []
+    for g in product_groups.values():
+        total_cves = len(g['cves'])
+        # Impact score: weighted sum for sorting
+        impact_score = (g['critical'] * 10) + (g['high'] * 5) + (g['medium'] * 2) + (g['actively_exploited'] * 20) + (g['exploit_public'] * 8)
+
+        actions.append({
+            'product_id': g['product_id'],
+            'vendor': g['vendor'],
+            'product_name': g['product_name'],
+            'current_version': g['current_version'],
+            'total_cves': total_cves,
+            'cve_ids': g['cves'][:10],  # Cap at 10 for response size
+            'critical': g['critical'],
+            'high': g['high'],
+            'medium': g['medium'],
+            'low': g['low'],
+            'actively_exploited': g['actively_exploited'],
+            'exploit_public': g['exploit_public'],
+            'max_epss': round(g['max_epss'], 4) if g['max_epss'] else None,
+            'impact_score': impact_score,
+            'action': f"Update {g['vendor']} {g['product_name']}" + (f" from {g['current_version']}" if g['current_version'] else ""),
+        })
+
+    # Sort by impact score descending
+    actions.sort(key=lambda x: x['impact_score'], reverse=True)
+
+    # Limit response
+    per_page = min(request.args.get('per_page', 25, type=int), 100)
+    page = request.args.get('page', 1, type=int)
+    start = (page - 1) * per_page
+    paginated = actions[start:start + per_page]
+
+    return jsonify({
+        'actions': paginated,
+        'total': len(actions),
+        'page': page,
+        'per_page': per_page,
+        'summary': {
+            'total_products_affected': len(actions),
+            'total_cves': sum(a['total_cves'] for a in actions),
+            'total_critical': sum(a['critical'] for a in actions),
+            'total_actively_exploited': sum(a['actively_exploited'] for a in actions),
+        }
+    })
+
+
 def _chart_top_vendors(org_product_ids):
     """Top 10 vendors by unacknowledged vulnerability count."""
     query = db.session.query(
