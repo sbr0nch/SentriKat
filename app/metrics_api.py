@@ -23,8 +23,15 @@ def _is_allowed():
     """Allow metrics from localhost, Docker networks, or with valid API key."""
     remote = request.remote_addr or ''
     # Allow localhost and Docker internal networks
-    if remote in ('127.0.0.1', '::1', 'localhost') or remote.startswith('172.16.') or remote.startswith('172.17.') or remote.startswith('172.18.') or remote.startswith('172.19.') or remote.startswith('172.2') or remote.startswith('172.3') or remote.startswith('10.') or remote.startswith('192.168.'):
+    if remote in ('127.0.0.1', '::1', 'localhost'):
         return True
+    # Check RFC1918 private ranges: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+    try:
+        import ipaddress
+        if ipaddress.ip_address(remote).is_private:
+            return True
+    except (ValueError, TypeError):
+        pass
     # Allow with Bearer token matching SENTRIKAT_PROVISION_KEY (reuse existing key)
     import os
     metrics_key = os.environ.get('SENTRIKAT_METRICS_KEY', os.environ.get('SENTRIKAT_PROVISION_KEY', ''))
