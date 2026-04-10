@@ -2323,6 +2323,9 @@ def agent_heartbeat():
     asset = None
     if agent_id:
         asset = Asset.query.filter_by(agent_id=agent_id).first()
+        # Verify the asset belongs to the same organization as the API key
+        if asset and asset.organization_id != organization.id:
+            return jsonify({'error': 'Asset not found. Send full inventory first.'}), 404
     if not asset and hostname:
         asset = Asset.query.filter_by(
             organization_id=organization.id,

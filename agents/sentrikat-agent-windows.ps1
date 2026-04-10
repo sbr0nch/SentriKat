@@ -950,7 +950,7 @@ function Send-Inventory {
             Write-Log "Attempt $i failed: $errorMsg" -Level "WARN"
 
             # Don't retry on auth errors - key is invalid
-            if ($_.Exception.Response -and $_.Exception.Response.StatusCode -eq 401) {
+            if ($_.Exception.Response -and $_.Exception.Response.StatusCode -in @(401, 403)) {
                 Write-Log "API key is invalid or revoked. Check your key in config.json" -Level "ERROR"
                 break
             }
@@ -1110,7 +1110,7 @@ function Send-Heartbeat {
             Write-Log "Heartbeat attempt $attempt failed: $errorDetail" -Level "WARN"
 
             # Don't retry on auth errors
-            if ($_.Exception.Response -and $_.Exception.Response.StatusCode -eq 401) {
+            if ($_.Exception.Response -and $_.Exception.Response.StatusCode -in @(401, 403)) {
                 Write-Log "API key is invalid or revoked. Check your key in config.json" -Level "ERROR"
                 return $false
             }
@@ -1153,7 +1153,7 @@ function Report-UpdateStatus {
     }
 }
 
-function Test-AgentHealth {
+function Test-AgentConnectivity {
     param($Config, [string]$Version)
 
     # After update, verify the new agent can reach the server
@@ -1239,7 +1239,7 @@ function Update-Agent {
         Write-Log "Running post-update health check..."
         $healthOk = $false
         for ($attempt = 1; $attempt -le 3; $attempt++) {
-            if (Test-AgentHealth -Config $Config -Version $TargetVersion) {
+            if (Test-AgentConnectivity -Config $Config -Version $TargetVersion) {
                 $healthOk = $true
                 break
             }
@@ -1949,7 +1949,8 @@ function Uninstall-Agent {
     Remove-Item "$env:ProgramData\SentriKat\sentrikat-service.ps1" -Force -ErrorAction SilentlyContinue
 
     # Remove config and logs
-    Remove-Item "$env:ProgramData\SentriKat\agent.conf" -Force -ErrorAction SilentlyContinue
+    Remove-Item "$env:ProgramData\SentriKat\config.json" -Force -ErrorAction SilentlyContinue
+    Remove-Item "$env:ProgramData\SentriKat\config.json.bak" -Force -ErrorAction SilentlyContinue
     Remove-Item "$env:ProgramData\SentriKat\agent.log*" -Force -ErrorAction SilentlyContinue
     Remove-Item "$env:ProgramData\SentriKat\agent.lock" -Force -ErrorAction SilentlyContinue
     Remove-Item "$env:ProgramData\SentriKat\sentrikat-agent.backup.*.ps1" -Force -ErrorAction SilentlyContinue
