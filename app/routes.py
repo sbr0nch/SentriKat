@@ -1643,8 +1643,8 @@ def create_product():
                     new_value={'vendor': product.vendor, 'product': product.product_name,
                                'version': product.version, 'cpe': f"{cpe_vendor}:{cpe_product}"})
 
-    # Re-run matching for new product
-    match_vulnerabilities_to_products()
+    # Re-run matching for new product (scoped to this product only, not full rematch)
+    match_vulnerabilities_to_products(target_products=[product])
 
     # Return product with CPE match info
     response = product.to_dict()
@@ -1789,8 +1789,8 @@ def update_product(product_id):
                     details={'vendor': product.vendor, 'product': product.product_name,
                              'version': product.version, 'updated_by': current_user_id})
 
-    # Re-run matching after update
-    match_vulnerabilities_to_products()
+    # Re-run matching after update (scoped to this product only, not full rematch)
+    match_vulnerabilities_to_products(target_products=[product])
 
     return jsonify(product.to_dict())
 

@@ -538,18 +538,35 @@ def match_vulnerabilities_to_products(target_products=None, target_vulnerabiliti
 
     matches_count = 0
 
+    # Pre-load all existing matches into a set for O(1) lookup.
+    # This eliminates the N+1 query problem (was: one DB query per P×V pair).
+    product_ids = [p.id for p in products]
+    vuln_ids = [v.id for v in vulnerabilities]
+
+    existing_matches_query = VulnerabilityMatch.query
+    if product_ids and vuln_ids:
+        existing_matches_query = existing_matches_query.filter(
+            VulnerabilityMatch.product_id.in_(product_ids),
+            VulnerabilityMatch.vulnerability_id.in_(vuln_ids)
+        )
+    existing_match_set = set()
+    existing_match_map = {}
+    for m in existing_matches_query.all():
+        key = (m.product_id, m.vulnerability_id)
+        existing_match_set.add(key)
+        existing_match_map[key] = m
+
+    batch_size = 50
+    pending = 0
+
     for product in products:
         for vulnerability in vulnerabilities:
             match_reasons, match_method, match_confidence = check_match(vulnerability, product)
 
             if match_reasons:
-                # Check if match already exists
-                existing_match = VulnerabilityMatch.query.filter_by(
-                    product_id=product.id,
-                    vulnerability_id=vulnerability.id
-                ).first()
+                key = (product.id, vulnerability.id)
 
-                if not existing_match:
+                if key not in existing_match_set:
                     # Create new match
                     match = VulnerabilityMatch(
                         product_id=product.id,
@@ -559,7 +576,9 @@ def match_vulnerabilities_to_products(target_products=None, target_vulnerabiliti
                         match_confidence=match_confidence or 'medium'
                     )
                     db.session.add(match)
+                    existing_match_set.add(key)
                     matches_count += 1
+                    pending += 1
 
                     # Forward new match to SIEM if configured
                     try:
@@ -578,10 +597,17 @@ def match_vulnerabilities_to_products(target_products=None, target_vulnerabiliti
                         pass  # SIEM forwarding is best-effort, never block matching
                 else:
                     # Update existing match with new method/confidence if different
-                    if existing_match.match_method != match_method or existing_match.match_confidence != match_confidence:
+                    existing_match = existing_match_map.get(key)
+                    if existing_match and (existing_match.match_method != match_method or existing_match.match_confidence != match_confidence):
                         existing_match.match_reason = '; '.join(match_reasons)
                         existing_match.match_method = match_method or 'keyword'
                         existing_match.match_confidence = match_confidence or 'medium'
+                        pending += 1
+
+            # Batch commit to reduce lock contention
+            if pending >= batch_size:
+                db.session.flush()
+                pending = 0
 
     db.session.commit()
     return matches_count
@@ -615,49 +641,63 @@ def cleanup_invalid_matches():
         db.session.flush()
         logger.info(f"Re-tagged {retagged} products as not-security-relevant (updated skip list)")
 
-    # Eager-load product and vulnerability to avoid N+1 queries
-    all_matches = VulnerabilityMatch.query.options(
-        selectinload(VulnerabilityMatch.product),
-        selectinload(VulnerabilityMatch.vulnerability)
-    ).all()
+    # Process matches in batches to avoid loading entire table into memory.
+    # Uses keyset pagination (id > last_id) which is safe even when rows are deleted.
+    batch_size = 500
+    last_id = 0
     removed_count = 0
 
-    for match in all_matches:
-        product = match.product
-        vulnerability = match.vulnerability
+    while True:
+        batch = VulnerabilityMatch.query.options(
+            selectinload(VulnerabilityMatch.product),
+            selectinload(VulnerabilityMatch.vulnerability)
+        ).filter(
+            VulnerabilityMatch.id > last_id
+        ).order_by(VulnerabilityMatch.id).limit(batch_size).all()
 
-        # Skip if product or vulnerability was deleted
-        if not product or not vulnerability:
-            db.session.delete(match)
-            removed_count += 1
-            continue
+        if not batch:
+            break
 
-        # Skip inactive products - don't evaluate matches for disabled products
-        if not product.active:
-            continue
+        last_id = batch[-1].id
 
-        # Re-check if this match is still valid with current logic
-        match_reasons, new_method, new_confidence = check_match(vulnerability, product)
+        for match in batch:
+            product = match.product
+            vulnerability = match.vulnerability
 
-        if not match_reasons:
-            # Match no longer valid - remove it
-            if match.acknowledged:
-                logger.info(
-                    "Removing previously-acknowledged match %s <-> %s %s %s "
-                    "(no longer in affected version range)",
-                    vulnerability.cve_id, product.vendor,
-                    product.product_name, product.version or 'Any'
-                )
-            db.session.delete(match)
-            removed_count += 1
-        else:
-            # Match still valid — update confidence/method if NVD data
-            # has matured (e.g., medium→high when NVD completes analysis)
-            if new_method and new_confidence:
-                if match.match_confidence != new_confidence or match.match_method != new_method:
-                    match.match_confidence = new_confidence
-                    match.match_method = new_method
-                    match.match_reason = '; '.join(match_reasons)
+            # Skip if product or vulnerability was deleted
+            if not product or not vulnerability:
+                db.session.delete(match)
+                removed_count += 1
+                continue
+
+            # Skip inactive products - don't evaluate matches for disabled products
+            if not product.active:
+                continue
+
+            # Re-check if this match is still valid with current logic
+            match_reasons, new_method, new_confidence = check_match(vulnerability, product)
+
+            if not match_reasons:
+                # Match no longer valid - remove it
+                if match.acknowledged:
+                    logger.info(
+                        "Removing previously-acknowledged match %s <-> %s %s %s "
+                        "(no longer in affected version range)",
+                        vulnerability.cve_id, product.vendor,
+                        product.product_name, product.version or 'Any'
+                    )
+                db.session.delete(match)
+                removed_count += 1
+            else:
+                # Match still valid — update confidence/method if NVD data
+                # has matured (e.g., medium→high when NVD completes analysis)
+                if new_method and new_confidence:
+                    if match.match_confidence != new_confidence or match.match_method != new_method:
+                        match.match_confidence = new_confidence
+                        match.match_method = new_method
+                        match.match_reason = '; '.join(match_reasons)
+
+        db.session.flush()
 
     db.session.commit()
     return removed_count
