@@ -78,6 +78,15 @@ bp = Blueprint('main', __name__)
 csrf.exempt(bp)
 
 
+def _super_admin_unrestricted():
+    """Check if current user has unrestricted cross-org super_admin access.
+
+    In SaaS mode: returns False — super_admin is always scoped to their org.
+    In on-prem mode: returns True — super_admin has full cross-org access.
+    """
+    return current_user.is_super_admin() and not is_saas_mode()
+
+
 # =============================================================================
 # Static File Serving (Persistent uploads from data volume)
 # =============================================================================
@@ -1133,7 +1142,7 @@ def get_products():
     # Fetch IDs first to avoid scalar_subquery issues with connection pool
     query = Product.query
 
-    if current_user.is_super_admin():
+    if _super_admin_unrestricted():
         logger.info("get_products: super_admin sees all products")
 
         # Super admin can filter by specific organization
@@ -1573,7 +1582,7 @@ def create_product():
     # Security: validate organization_id to prevent cross-tenant product creation
     requested_org_id = data.get('organization_id', org_id)
     if requested_org_id and requested_org_id != org_id:
-        if not current_user.is_super_admin():
+        if not _super_admin_unrestricted():
             # Non-super-admins can only create products in their own org
             user_org_ids = {current_user.organization_id}
             try:
@@ -1643,7 +1652,7 @@ def get_product(product_id):
     # Organization isolation: verify user has access to this product's org
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
-    if current_user and current_user.role != 'super_admin':
+    if current_user and not _super_admin_unrestricted():
         user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
         product_org_ids = [org.id for org in product.organizations.all()]
         if product.organization_id:
@@ -1669,7 +1678,7 @@ def update_product(product_id):
     product = Product.query.get_or_404(product_id)
 
     # Permission check: org admins can only edit products in their org
-    if not current_user.is_super_admin():
+    if not _super_admin_unrestricted():
         # Check if product belongs to user's org (via primary or multi-org assignment)
         product_org_ids = [org.id for org in product.organizations.all()]
         if product.organization_id:
@@ -1812,7 +1821,7 @@ def delete_product(product_id):
         product_org_ids.append(product.organization_id)
 
     # Permission check: non-super-admins can only manage products in their org
-    if not current_user.is_super_admin():
+    if not _super_admin_unrestricted():
         if user_org_id not in product_org_ids:
             return jsonify({'error': 'You can only delete products in your organization'}), 403
 
@@ -1826,7 +1835,7 @@ def delete_product(product_id):
     }
 
     try:
-        if current_user.is_super_admin():
+        if _super_admin_unrestricted():
             # Determine target orgs based on scope
             if scope == 'all':
                 target_org_ids = product_org_ids[:]
@@ -2010,7 +2019,7 @@ def batch_delete_products():
     scope = data.get('scope', 'all')
 
     user_org_id = get_scoped_org_id(current_user)
-    is_super = current_user.is_super_admin()
+    is_super = _super_admin_unrestricted()
 
     deleted = 0
     removed = 0
@@ -2166,7 +2175,7 @@ def get_product_exclusions():
         return jsonify({'error': 'Unauthorized'}), 401
 
     query = ProductExclusion.query
-    if not user.is_super_admin():
+    if is_saas_mode() or not user.is_super_admin():
         accessible_org_ids = [o['id'] for o in user.get_all_organizations()]
         query = query.filter(ProductExclusion.organization_id.in_(accessible_org_ids))
 
@@ -2198,7 +2207,7 @@ def delete_product_exclusion(exclusion_id):
 
     exclusion = ProductExclusion.query.get_or_404(exclusion_id)
 
-    if not user.is_super_admin():
+    if is_saas_mode() or not user.is_super_admin():
         accessible_org_ids = [o['id'] for o in user.get_all_organizations()]
         if exclusion.organization_id not in accessible_org_ids:
             return jsonify({'error': 'Access denied'}), 403
@@ -2232,7 +2241,7 @@ def create_product_exclusion():
     if not vendor or not product_name:
         return jsonify({'error': 'vendor and product_name required'}), 400
 
-    if not user.is_super_admin():
+    if is_saas_mode() or not user.is_super_admin():
         accessible_org_ids = [o['id'] for o in user.get_all_organizations()]
         if org_id and org_id not in accessible_org_ids:
             return jsonify({'error': 'Access denied to this organization'}), 403
@@ -2272,7 +2281,7 @@ def purge_products():
     from app.auth import get_current_user
     from app.logging_config import log_audit_event
     current_user = get_current_user()
-    if not current_user or not current_user.is_super_admin():
+    if not current_user or not _super_admin_unrestricted():
         return jsonify({'error': 'Super admin access required'}), 403
 
     data = request.get_json()
@@ -2392,7 +2401,7 @@ def get_product_organizations(product_id):
     # Organization isolation: verify user has access to this product
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
-    if current_user and current_user.role != 'super_admin':
+    if current_user and not _super_admin_unrestricted():
         user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
         product_org_ids = [org.id for org in product.organizations.all()]
         if product.organization_id:
@@ -2425,7 +2434,7 @@ def assign_product_organizations(product_id):
     # Organization isolation: verify user has access to this product
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
-    if current_user and current_user.role != 'super_admin':
+    if current_user and not _super_admin_unrestricted():
         user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
         product_org_ids = [org.id for org in product.organizations.all()]
         if product.organization_id:
@@ -2480,7 +2489,7 @@ def remove_product_organization(product_id, org_id):
     # Organization isolation: verify user is admin for the org being removed
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
-    if current_user and current_user.role != 'super_admin':
+    if current_user and not _super_admin_unrestricted():
         user_org_ids = [o['id'] for o in current_user.get_all_organizations()]
         if org_id not in user_org_ids:
             return jsonify({'error': 'You can only manage organizations you belong to'}), 403
@@ -2791,9 +2800,8 @@ def get_vulnerability_stats():
     ).count()
 
     # Calculate priority-based stats (both CVE counts and match counts)
-    # Use selectinload to eagerly load relationships and avoid column mapping issues
+    # Only load vulnerability relationship (needed for priority calc), NOT product (saves ~50% memory)
     all_matches = unacknowledged_query.options(
-        selectinload(VulnerabilityMatch.product),
         selectinload(VulnerabilityMatch.vulnerability)
     ).all()
 
@@ -3918,7 +3926,7 @@ def get_aggregated_product_view():
     current_user = User.query.get(current_user_id)
 
     # Build base query for installations accessible to user
-    if current_user.is_super_admin():
+    if _super_admin_unrestricted():
         org_filter = True  # No filter
     else:
         user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
@@ -4036,7 +4044,7 @@ def get_product_installations(product_id):
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
 
-    if not current_user.is_super_admin():
+    if not _super_admin_unrestricted():
         user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
         product_org_ids = [org.id for org in product.organizations.all()]
         if product.organization_id:
@@ -4091,7 +4099,7 @@ def acknowledge_match(match_id):
     match = VulnerabilityMatch.query.get_or_404(match_id)
 
     # Authorization: verify user can manage this product's matches
-    if not current_user.is_super_admin():
+    if not _super_admin_unrestricted():
         # Get all org IDs the product belongs to
         product_org_ids = [org.id for org in match.product.organizations.all()]
         if match.product.organization_id:
@@ -4116,7 +4124,7 @@ def unacknowledge_match(match_id):
     match = VulnerabilityMatch.query.get_or_404(match_id)
 
     # Authorization: verify user can manage this product's matches
-    if not current_user.is_super_admin():
+    if not _super_admin_unrestricted():
         # Get all org IDs the product belongs to
         product_org_ids = [org.id for org in match.product.organizations.all()]
         if match.product.organization_id:
@@ -4154,7 +4162,7 @@ def snooze_match(match_id):
     match = VulnerabilityMatch.query.get_or_404(match_id)
 
     # Authorization: verify user can manage this product's matches
-    if not current_user.is_super_admin():
+    if not _super_admin_unrestricted():
         product_org_ids = [org.id for org in match.product.organizations.all()]
         if match.product.organization_id:
             product_org_ids.append(match.product.organization_id)
@@ -4190,7 +4198,7 @@ def unsnooze_match(match_id):
     match = VulnerabilityMatch.query.get_or_404(match_id)
 
     # Authorization
-    if not current_user.is_super_admin():
+    if not _super_admin_unrestricted():
         product_org_ids = [org.id for org in match.product.organizations.all()]
         if match.product.organization_id:
             product_org_ids.append(match.product.organization_id)
@@ -4229,7 +4237,7 @@ def acknowledge_by_cve(cve_id):
     # Find all matches for this CVE that the user has permission to manage
     from app.models import product_organizations
 
-    if current_user.is_super_admin():
+    if _super_admin_unrestricted():
         # Super admin can acknowledge any match
         matches = VulnerabilityMatch.query.filter_by(
             vulnerability_id=vuln.id,
@@ -4304,7 +4312,7 @@ def unacknowledge_by_cve(cve_id):
     # Find all matches for this CVE that the user has permission to manage
     from app.models import product_organizations
 
-    if current_user.is_super_admin():
+    if _super_admin_unrestricted():
         matches = VulnerabilityMatch.query.filter_by(
             vulnerability_id=vuln.id,
             acknowledged=True
@@ -4362,7 +4370,7 @@ def unacknowledge_by_cve(cve_id):
 
 def _authorize_container_vuln(current_user, vuln):
     """Check user has access to the container vulnerability's organization."""
-    if current_user.is_super_admin():
+    if _super_admin_unrestricted():
         return True
     image = ContainerImage.query.get(vuln.container_image_id)
     if not image:
@@ -4468,7 +4476,7 @@ def acknowledge_container_vulns_by_cve(cve_id):
         ContainerVulnerability.vuln_id == cve_id,
         ContainerVulnerability.acknowledged == False,
     )
-    if not current_user.is_super_admin():
+    if not _super_admin_unrestricted():
         user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
         query = query.filter(ContainerImage.organization_id.in_(user_org_ids))
     elif org_id:
@@ -4503,7 +4511,7 @@ def unacknowledge_container_vulns_by_cve(cve_id):
         ContainerVulnerability.vuln_id == cve_id,
         ContainerVulnerability.acknowledged == True,
     )
-    if not current_user.is_super_admin():
+    if not _super_admin_unrestricted():
         user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
         query = query.filter(ContainerImage.organization_id.in_(user_org_ids))
     elif org_id:
@@ -5859,7 +5867,7 @@ def get_organization(org_id):
     current_user = User.query.get(current_user_id)
 
     # Permission check: non-super admins can only view their own orgs
-    if not current_user.is_super_admin():
+    if not _super_admin_unrestricted():
         if not current_user.has_access_to_org(org_id):
             return jsonify({'error': 'You do not have access to this organization'}), 403
 
@@ -5881,7 +5889,7 @@ def update_organization(org_id):
     org = Organization.query.get_or_404(org_id)
 
     # Permission check: org admins can only edit their own org
-    if not current_user.is_super_admin():
+    if not _super_admin_unrestricted():
         if not current_user.is_org_admin_for(org_id):
             return jsonify({'error': 'You can only edit your own organization'}), 403
 
@@ -6109,7 +6117,7 @@ def get_alert_logs(org_id):
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
 
-    if not current_user.is_super_admin():
+    if not _super_admin_unrestricted():
         # Check if user belongs to this organization
         user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
         if org_id not in user_org_ids:
@@ -6798,7 +6806,7 @@ def get_user_organizations(user_id):
     target_user = User.query.get_or_404(user_id)
 
     # Permission check: super admin or org admin for one of the user's orgs
-    if not current_user.is_super_admin():
+    if not _super_admin_unrestricted():
         # Org admins can view users in their org
         if not current_user.can_manage_user(target_user):
             return jsonify({'error': 'Insufficient permissions'}), 403
@@ -6855,7 +6863,7 @@ def add_user_organization(user_id):
 
     # Validate role
     valid_roles = ['user', 'manager', 'org_admin']
-    if current_user.is_super_admin():
+    if _super_admin_unrestricted():
         valid_roles.append('super_admin')
 
     if role not in valid_roles:
@@ -6915,7 +6923,7 @@ def update_user_organization_role(user_id, org_id):
 
     # Validate role
     valid_roles = ['user', 'manager', 'org_admin']
-    if current_user.is_super_admin():
+    if _super_admin_unrestricted():
         valid_roles.append('super_admin')
 
     if new_role not in valid_roles:
@@ -6982,7 +6990,7 @@ def remove_user_organization(user_id, org_id):
     target_user = User.query.get_or_404(user_id)
 
     # Permission checks
-    if not current_user.is_super_admin() and not current_user.is_org_admin_for(org_id):
+    if not _super_admin_unrestricted() and not current_user.is_org_admin_for(org_id):
         return jsonify({'error': 'Insufficient permissions'}), 403
 
     # Cannot remove from primary org this way
@@ -7077,7 +7085,7 @@ def get_audit_logs():
     current_user = User.query.get(current_user_id)
 
     # Only super admins can view audit logs
-    if not current_user or not current_user.is_super_admin():
+    if not current_user or not _super_admin_unrestricted():
         return jsonify({'error': 'Only super admins can view audit logs'}), 403
 
     # Get query parameters
@@ -7203,7 +7211,7 @@ def export_audit_logs():
     current_user = User.query.get(current_user_id)
 
     # Only super admins can export audit logs
-    if not current_user or not current_user.is_super_admin():
+    if not current_user or not _super_admin_unrestricted():
         return jsonify({'error': 'Only super admins can export audit logs'}), 403
 
     # Get query parameters
@@ -7355,7 +7363,7 @@ def generate_monthly_report():
         current_user = User.query.get(current_user_id)
 
         # Non-super admins can only see their organization
-        if current_user and not current_user.is_super_admin() and not current_user.can_view_all_orgs:
+        if current_user and not _super_admin_unrestricted() and not current_user.can_view_all_orgs:
             org_id = current_user.organization_id
 
         # Generate report
@@ -7412,7 +7420,7 @@ def generate_custom_report():
         current_user = User.query.get(current_user_id)
 
         # Non-super admins can only see their organization
-        if current_user and not current_user.is_super_admin() and not current_user.can_view_all_orgs:
+        if current_user and not _super_admin_unrestricted() and not current_user.can_view_all_orgs:
             org_id = current_user.organization_id
 
         # Generate report

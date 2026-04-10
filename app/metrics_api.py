@@ -23,7 +23,7 @@ def _is_allowed():
     """Allow metrics from localhost, Docker networks, or with valid API key."""
     remote = request.remote_addr or ''
     # Allow localhost and Docker internal networks
-    if remote in ('127.0.0.1', '::1', 'localhost') or remote.startswith('172.'):
+    if remote in ('127.0.0.1', '::1', 'localhost') or remote.startswith('172.16.') or remote.startswith('172.17.') or remote.startswith('172.18.') or remote.startswith('172.19.') or remote.startswith('172.2') or remote.startswith('172.3') or remote.startswith('10.') or remote.startswith('192.168.'):
         return True
     # Allow with Bearer token matching SENTRIKAT_PROVISION_KEY (reuse existing key)
     import os

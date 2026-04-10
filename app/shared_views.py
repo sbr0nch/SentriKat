@@ -48,7 +48,7 @@ class SharedView(db.Model):
     @staticmethod
     def generate_token():
         """Generate a unique share token"""
-        return str(uuid.uuid4())[:8]  # 8 character token
+        return str(uuid.uuid4()).replace('-', '')[:24]  # 24 character token
 
     def to_dict(self):
         """Convert to dictionary for JSON serialization"""
