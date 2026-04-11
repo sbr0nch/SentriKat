@@ -896,8 +896,9 @@ def test_subscription_plan_to_dict(db_session):
 
     features = {'email_alerts': True, 'webhooks': True}
 
+    # Use a unique plan name to avoid conflict with auto-seeded plans
     plan = SubscriptionPlan(
-        name='pro',
+        name='pro_todict_test',
         display_name='Professional',
         description='For teams',
         max_agents=100,
@@ -912,7 +913,7 @@ def test_subscription_plan_to_dict(db_session):
 
     result = plan.to_dict()
 
-    assert result['name'] == 'pro'
+    assert result['name'] == 'pro_todict_test'
     assert result['display_name'] == 'Professional'
     assert result['max_agents'] == 100
     assert result['price_monthly_cents'] == 9900

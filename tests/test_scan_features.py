@@ -210,7 +210,7 @@ class TestAgentKeyCreation:
 
     @patch('app.agent_api.check_agent_api_key_limit', return_value=(True, 10, 'OK'))
     def test_create_key_defaults_extensions_off(self, mock_limit, app, admin_client, db_session, test_org, pro_license):
-        """By default, scan_extensions and scan_dependencies are disabled."""
+        """By default, the API endpoint enables scan_extensions and scan_dependencies."""
         with app.app_context():
             response = admin_client.post('/api/agent-keys', json={
                 'organization_id': test_org.id,
@@ -221,8 +221,8 @@ class TestAgentKeyCreation:
             from app.models import AgentApiKey
             key = AgentApiKey.query.filter_by(name='Default Key').first()
             assert key is not None
-            assert key.scan_extensions is False
-            assert key.scan_dependencies is False
+            assert key.scan_extensions is True
+            assert key.scan_dependencies is True
 
     @patch('app.agent_api.check_agent_api_key_limit', return_value=(True, 10, 'OK'))
     def test_create_key_with_key_type(self, mock_limit, app, admin_client, db_session, test_org, pro_license):

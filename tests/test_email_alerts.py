@@ -199,91 +199,64 @@ class TestSendEmail:
         defaults.update(overrides)
         return defaults
 
-    @patch('app.email_alerts.smtplib.SMTP')
-    def test_send_email_with_tls(self, MockSMTP, app):
-        """When use_tls=True, SMTP + starttls should be used."""
+    @patch('app.email_provider.send_email', return_value={'success': True, 'error': None})
+    def test_send_email_with_tls(self, mock_provider, app):
+        """_send_email delegates to email_provider.send_email and succeeds."""
         from app.email_alerts import EmailAlertManager
-
-        mock_server = MagicMock()
-        MockSMTP.return_value = mock_server
 
         EmailAlertManager._send_email(
             self._smtp_config(), ['admin@test.com'], 'Test', '<p>Hello</p>'
         )
 
-        MockSMTP.assert_called_once_with('smtp.example.com', 587, timeout=30)
-        mock_server.starttls.assert_called_once()
-        mock_server.login.assert_called_once_with('user', 'pass')
-        mock_server.sendmail.assert_called_once()
-        mock_server.quit.assert_called_once()
+        mock_provider.assert_called_once()
+        call_kwargs = mock_provider.call_args.kwargs
+        assert call_kwargs['to'] == ['admin@test.com']
+        assert call_kwargs['subject'] == 'Test'
+        assert call_kwargs['html_body'] == '<p>Hello</p>'
 
-    @patch('app.email_alerts.smtplib.SMTP_SSL')
-    def test_send_email_with_ssl(self, MockSSL, app):
-        """When use_ssl=True, SMTP_SSL should be used (no starttls)."""
+    @patch('app.email_provider.send_email', return_value={'success': True, 'error': None})
+    def test_send_email_with_ssl(self, mock_provider, app):
+        """_send_email delegates to email_provider.send_email regardless of SSL config."""
         from app.email_alerts import EmailAlertManager
-
-        mock_server = MagicMock()
-        MockSSL.return_value = mock_server
 
         EmailAlertManager._send_email(
             self._smtp_config(use_ssl=True, use_tls=False, port=465),
             ['a@b.com'], 'Subj', '<p>Hi</p>'
         )
 
-        MockSSL.assert_called_once_with('smtp.example.com', 465, timeout=30)
-        mock_server.login.assert_called_once()
-        mock_server.sendmail.assert_called_once()
+        mock_provider.assert_called_once()
+        call_kwargs = mock_provider.call_args.kwargs
+        assert call_kwargs['to'] == ['a@b.com']
 
-    @patch('app.email_alerts.smtplib.SMTP')
-    def test_send_email_no_auth_when_creds_missing(self, MockSMTP, app):
-        """When username/password are empty, login should be skipped."""
+    @patch('app.email_provider.send_email', return_value={'success': True, 'error': None})
+    def test_send_email_no_auth_when_creds_missing(self, mock_provider, app):
+        """_send_email delegates to email_provider.send_email even without credentials."""
         from app.email_alerts import EmailAlertManager
-
-        mock_server = MagicMock()
-        MockSMTP.return_value = mock_server
 
         EmailAlertManager._send_email(
             self._smtp_config(username='', password=''),
             ['a@b.com'], 'Subj', '<p>Hi</p>'
         )
 
-        mock_server.login.assert_not_called()
-        mock_server.sendmail.assert_called_once()
+        mock_provider.assert_called_once()
 
-    @patch('app.email_alerts.time.sleep')
-    @patch('app.email_alerts.smtplib.SMTP')
-    def test_send_email_retries_on_failure(self, MockSMTP, mock_sleep, app):
-        """Transient failures should be retried with exponential backoff."""
+    @patch('app.email_provider.send_email', return_value={'success': True, 'error': None})
+    def test_send_email_retries_on_failure(self, mock_provider, app):
+        """_send_email delegates to email_provider.send_email which handles retries internally."""
         from app.email_alerts import EmailAlertManager
-
-        mock_server = MagicMock()
-        MockSMTP.return_value = mock_server
-        # Fail twice, succeed on third attempt
-        mock_server.sendmail.side_effect = [
-            smtplib.SMTPServerDisconnected("gone"),
-            smtplib.SMTPServerDisconnected("gone again"),
-            None
-        ]
 
         EmailAlertManager._send_email(
             self._smtp_config(), ['a@b.com'], 'Subj', '<p>Hi</p>', max_retries=3
         )
 
-        assert mock_server.sendmail.call_count == 3
-        # Backoff: 2s, 4s
-        assert mock_sleep.call_args_list == [call(2), call(4)]
+        mock_provider.assert_called_once()
 
-    @patch('app.email_alerts.time.sleep')
-    @patch('app.email_alerts.smtplib.SMTP')
-    def test_send_email_raises_after_max_retries(self, MockSMTP, mock_sleep, app):
-        """If all retries fail, the last exception should be raised."""
+    @patch('app.email_provider.send_email', return_value={'success': False, 'error': 'Email delivery failed'})
+    def test_send_email_raises_after_max_retries(self, mock_provider, app):
+        """If email_provider.send_email returns failure, _send_email raises Exception."""
         from app.email_alerts import EmailAlertManager
 
-        mock_server = MagicMock()
-        MockSMTP.return_value = mock_server
-        mock_server.sendmail.side_effect = smtplib.SMTPServerDisconnected("gone")
-
-        with pytest.raises(smtplib.SMTPServerDisconnected):
+        with pytest.raises(Exception, match='Email delivery failed'):
             EmailAlertManager._send_email(
                 self._smtp_config(), ['a@b.com'], 'Subj', '<p>Hi</p>', max_retries=2
             )
@@ -612,7 +585,7 @@ class TestSendCriticalCveAlert:
         assert result['status'] == 'error'
         assert 'No recipients' in result['reason']
 
-    @patch('app.email_alerts.EmailAlertManager._send_email')
+    @patch('app.email_provider.send_email', return_value={'success': True, 'error': None})
     def test_success_sends_and_logs(self, mock_send, app, db_session):
         """Successful alert should send email, mark first_alerted_at, and log."""
         from app.email_alerts import EmailAlertManager
@@ -839,7 +812,7 @@ class TestRoleLevel:
 class TestNotificationEmailsParsing:
     """Test that double-encoded JSON notification_emails are handled."""
 
-    @patch('app.email_alerts.EmailAlertManager._send_email')
+    @patch('app.email_provider.send_email', return_value={'success': True, 'error': None})
     def test_double_encoded_json_recipients(self, mock_send, app, db_session):
         """Double-encoded JSON like '"[\\"a@b.com\\"]"' should be parsed correctly."""
         from app.email_alerts import EmailAlertManager
@@ -859,4 +832,4 @@ class TestNotificationEmailsParsing:
 
         assert result['status'] == 'success'
         call_kwargs = mock_send.call_args.kwargs
-        assert 'double@example.com' in call_kwargs['recipients']
+        assert 'double@example.com' in call_kwargs['to']

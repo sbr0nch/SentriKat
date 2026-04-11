@@ -385,16 +385,19 @@ class TestCheckQuota:
 
         org = _create_org(db_session)
 
-        plan = SubscriptionPlan(
-            name='pro',
-            display_name='Pro Plan',
-            max_agents=10,
-            max_users=5,
-            max_products=100,
-            max_api_keys=3,
-        )
-        db_session.add(plan)
-        db_session.flush()
+        # Use existing seeded plan or create if not present
+        plan = SubscriptionPlan.query.filter_by(name='pro').first()
+        if not plan:
+            plan = SubscriptionPlan(
+                name='pro',
+                display_name='Pro Plan',
+                max_agents=10,
+                max_users=5,
+                max_products=100,
+                max_api_keys=3,
+            )
+            db_session.add(plan)
+            db_session.flush()
 
         subscription = Subscription(
             organization_id=org.id,
@@ -407,7 +410,7 @@ class TestCheckQuota:
         with patch.dict('os.environ', {'SENTRIKAT_MODE': 'saas'}):
             allowed, msg = check_quota(org.id, 'agents')
         assert allowed is True
-        assert '0/10' in msg
+        assert f'0/{plan.max_agents}' in msg
 
     def test_saas_mode_limit_reached(self, app, db_session):
         """In SaaS mode, exceeding the plan limit returns denied."""
@@ -415,16 +418,19 @@ class TestCheckQuota:
 
         org = _create_org(db_session)
 
-        plan = SubscriptionPlan(
-            name='starter',
-            display_name='Starter Plan',
-            max_agents=1,
-            max_users=1,
-            max_products=1,
-            max_api_keys=1,
-        )
-        db_session.add(plan)
-        db_session.flush()
+        # Use a unique plan name to avoid conflict with seeded plans
+        plan = SubscriptionPlan.query.filter_by(name='test_starter_limit').first()
+        if not plan:
+            plan = SubscriptionPlan(
+                name='test_starter_limit',
+                display_name='Starter Plan (test)',
+                max_agents=1,
+                max_users=1,
+                max_products=1,
+                max_api_keys=1,
+            )
+            db_session.add(plan)
+            db_session.flush()
 
         subscription = Subscription(
             organization_id=org.id,
@@ -447,16 +453,20 @@ class TestCheckQuota:
         from app.models import SubscriptionPlan, Subscription
 
         org = _create_org(db_session)
-        plan = SubscriptionPlan(
-            name='enterprise',
-            display_name='Enterprise',
-            max_agents=-1,
-            max_users=-1,
-            max_products=-1,
-            max_api_keys=-1,
-        )
-        db_session.add(plan)
-        db_session.flush()
+
+        # Use existing seeded enterprise plan or create if not present
+        plan = SubscriptionPlan.query.filter_by(name='enterprise').first()
+        if not plan:
+            plan = SubscriptionPlan(
+                name='enterprise',
+                display_name='Enterprise',
+                max_agents=-1,
+                max_users=-1,
+                max_products=-1,
+                max_api_keys=-1,
+            )
+            db_session.add(plan)
+            db_session.flush()
 
         subscription = Subscription(
             organization_id=org.id,
