@@ -385,7 +385,7 @@ class TestWelcomeEmail:
 
         mock_server = MagicMock()
 
-        with patch('app.settings_api.get_setting', side_effect=lambda key, default=None: settings.get(key, default)):
+        with patch('app.settings_api.get_setting', side_effect=lambda key, default=None, **kwargs: settings.get(key, default)):
             with patch('smtplib.SMTP', return_value=mock_server):
                 result = provision_tenant(**self.VALID_PARAMS)
 

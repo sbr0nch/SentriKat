@@ -2866,7 +2866,9 @@
 
             summary.textContent = `${data.summary.total_products_affected} products, ${data.summary.total_cves} CVEs`;
 
-            tbody.innerHTML = data.actions.map(a => {
+            window._remActions = {};
+            tbody.innerHTML = data.actions.map((a, idx) => {
+                window._remActions[idx] = a;
                 const impactColor = a.impact_score >= 80 ? 'danger' : a.impact_score >= 40 ? 'warning' : 'info';
                 const cveList = (a.cve_ids || []).map(c => escapeHtml(c)).join(', ');
                 return `<tr class="cursor-pointer" onclick="this.nextElementSibling.classList.toggle('d-none')" title="Click to expand CVE list">
@@ -2882,10 +2884,10 @@
                     <td class="text-center">${a.medium ? `<span class="badge bg-info">${a.medium}</span>` : '-'}</td>
                     <td class="text-center"><span class="badge bg-${impactColor}">${a.impact_score}</span></td>
                     <td class="text-center text-nowrap">
-                        <button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="event.stopPropagation(); openAssignModal(${a.product_id}, '${escapeHtml(a.action)}', ${JSON.stringify(a.cve_ids || [])}, '${a.critical > 0 ? 'critical' : a.high > 0 ? 'high' : 'medium'}')" title="Assign to someone">
+                        <button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="event.stopPropagation(); openAssignFromAction(${idx})" title="Assign to someone">
                             <i class="bi bi-person-plus"></i>
                         </button>
-                        <button class="btn btn-success btn-sm py-0 px-1" onclick="event.stopPropagation(); acknowledgeByCveList(${JSON.stringify(a.cve_ids || [])})" title="Acknowledge all CVEs">
+                        <button class="btn btn-success btn-sm py-0 px-1" onclick="event.stopPropagation(); ackFromAction(${idx})" title="Acknowledge all CVEs">
                             <i class="bi bi-check-all"></i>
                         </button>
                         <a href="/admin#products:${a.product_id}" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="event.stopPropagation()" title="View product">
@@ -2932,19 +2934,38 @@
         }
     }
 
+    // Open assign modal from remediation action index
+    function openAssignFromAction(idx) {
+        const a = window._remActions && window._remActions[idx];
+        if (!a) return;
+        const priority = a.critical > 0 ? 'critical' : a.high > 0 ? 'high' : 'medium';
+        openAssignModal(a.product_id, a.action, a.cve_ids || [], priority);
+    }
+
+    // Acknowledge from remediation action index
+    function ackFromAction(idx) {
+        const a = window._remActions && window._remActions[idx];
+        if (!a) return;
+        acknowledgeByCveList(a.cve_ids || []);
+    }
+
     // Acknowledge all CVEs in a list (from remediation table)
     async function acknowledgeByCveList(cveIds) {
         if (!cveIds || cveIds.length === 0) return;
         if (!confirm('Acknowledge all ' + cveIds.length + ' CVEs for this product?')) return;
 
-        let acked = 0;
+        let acked = 0, failed = 0;
         for (const cveId of cveIds) {
             try {
                 const resp = await fetch('/api/matches/acknowledge-by-cve/' + encodeURIComponent(cveId), {method: 'POST'});
                 if (resp.ok) acked++;
-            } catch(e) {}
+                else failed++;
+            } catch(e) { failed++; }
         }
-        if (typeof showToast === 'function') showToast(acked + ' CVEs acknowledged', 'success');
+        if (typeof showToast === 'function') {
+            if (failed > 0) showToast(acked + ' CVEs acknowledged, ' + failed + ' failed', 'warning');
+            else showToast(acked + ' CVEs acknowledged', 'success');
+        }
         loadRemediationActions();
         loadStats();
     }
@@ -2968,7 +2989,7 @@
             }
 
             container.innerHTML = data.compliance.map(c => {
-                const pct = c.compliance_percent;
+                const pct = Math.min(100, Math.max(0, c.compliance_percent));
                 const color = pct >= 90 ? 'success' : pct >= 70 ? 'warning' : 'danger';
                 const sev = c.policy.severity.toUpperCase();
                 const sevColor = sev === 'CRITICAL' ? 'danger' : sev === 'HIGH' ? 'warning' : sev === 'MEDIUM' ? 'info' : 'success';
@@ -3079,15 +3100,19 @@
                 })
             });
             if (resp.ok) {
-                bootstrap.Modal.getInstance(document.getElementById('assignRemediationModal')).hide();
+                const assignModal = bootstrap.Modal.getInstance(document.getElementById('assignRemediationModal'));
+                if (assignModal) assignModal.hide();
                 if (typeof showToast === 'function') showToast('Assigned to ' + assignTo, 'success');
                 loadAssignmentsSummary();
             } else {
-                const err = await resp.json();
-                alert('Error: ' + (err.error || 'Failed to create assignment'));
+                const err = await resp.json().catch(() => ({}));
+                const msg = err.error || 'Failed to create assignment';
+                if (typeof showToast === 'function') showToast(msg, 'danger');
+                else alert('Error: ' + msg);
             }
         } catch(e) {
-            alert('Error: ' + e.message);
+            if (typeof showToast === 'function') showToast('Network error: ' + e.message, 'danger');
+            else alert('Error: ' + e.message);
         }
     }
 
@@ -3149,7 +3174,8 @@
             } catch(e) { console.error('SLA save error:', e); }
         }
 
-        bootstrap.Modal.getInstance(document.getElementById('slaPolicyModal')).hide();
+        const slaModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('slaPolicyModal'));
+        slaModal.hide();
         if (typeof showToast === 'function') showToast(saved + ' SLA policies saved', 'success');
         loadSlaCompliance();
     }

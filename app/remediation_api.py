@@ -56,6 +56,7 @@ def list_assignments():
 
 @bp.route('/api/remediation/assignments', methods=['POST'])
 @login_required
+@org_admin_required
 def create_assignment():
     """Create a new remediation assignment."""
     org_id = session.get('organization_id')
@@ -89,6 +90,35 @@ def create_assignment():
             from datetime import timedelta
             due_date = date.today() + timedelta(days=policy.max_days)
 
+    # Validate product_id belongs to this organization (prevent cross-tenant leak)
+    if data.get('product_id'):
+        from app.models import product_organizations
+        from sqlalchemy import select
+        owns_product = db.session.execute(
+            select(product_organizations.c.product_id).where(
+                product_organizations.c.organization_id == org_id,
+                product_organizations.c.product_id == data['product_id']
+            )
+        ).first()
+        if not owns_product:
+            return jsonify({'error': 'Product not found in your organization'}), 403
+
+    # Validate match_id belongs to a product in this organization
+    if data.get('match_id'):
+        from app.models import product_organizations
+        from sqlalchemy import select
+        match = VulnerabilityMatch.query.get(data['match_id'])
+        if not match:
+            return jsonify({'error': 'Match not found'}), 404
+        owns_match = db.session.execute(
+            select(product_organizations.c.product_id).where(
+                product_organizations.c.organization_id == org_id,
+                product_organizations.c.product_id == match.product_id
+            )
+        ).first()
+        if not owns_match:
+            return jsonify({'error': 'Match does not belong to your organization'}), 403
+
     assignment = RemediationAssignment(
         organization_id=org_id,
         match_id=data.get('match_id'),
@@ -108,6 +138,7 @@ def create_assignment():
 
 @bp.route('/api/remediation/assignments/<int:assignment_id>', methods=['PUT'])
 @login_required
+@org_admin_required
 def update_assignment(assignment_id):
     """Update a remediation assignment (change status, add notes, etc)."""
     org_id = session.get('organization_id')
@@ -148,6 +179,7 @@ def update_assignment(assignment_id):
 
 @bp.route('/api/remediation/assignments/<int:assignment_id>', methods=['DELETE'])
 @login_required
+@org_admin_required
 def delete_assignment(assignment_id):
     """Delete a remediation assignment."""
     org_id = session.get('organization_id')

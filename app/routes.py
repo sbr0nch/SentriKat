@@ -26,6 +26,39 @@ _nvd_status_cache = {'status': None, 'checked_at': None}
 NVD_STATUS_CACHE_TTL = 300  # 5 minutes
 
 
+def _preload_asset_scores(matches):
+    """Batch-load asset criticality scores to avoid N+1 queries in calculate_risk_score().
+
+    Sets _preloaded_asset_score on each match object so calculate_risk_score()
+    can skip the per-match ProductInstallation query.
+    """
+    if not matches:
+        return
+    product_ids = list(set(m.product_id for m in matches if m.product_id))
+    if not product_ids:
+        return
+
+    # Single query: find products installed on critical/high assets
+    rows = db.session.query(
+        ProductInstallation.product_id,
+        func.min(db.case(
+            (Asset.criticality == 'critical', 1),
+            (Asset.criticality == 'high', 2),
+            else_=3
+        ))
+    ).join(Asset).filter(
+        ProductInstallation.product_id.in_(product_ids),
+        Asset.criticality.in_(['critical', 'high'])
+    ).group_by(ProductInstallation.product_id).all()
+
+    scores = {}
+    for pid, level in rows:
+        scores[pid] = 20 if level == 1 else 15
+
+    for m in matches:
+        m._preloaded_asset_score = scores.get(m.product_id, 10)
+
+
 def _get_cached_nvd_status():
     """Check NVD API reachability with 5-minute cache."""
     import urllib3
@@ -2626,6 +2659,9 @@ def get_vulnerabilities():
         # Check pagination params
         page_param = request.args.get('page', '0')  # Default to all (legacy)
         per_page = min(request.args.get('per_page', 50, type=int), 500)
+
+        # Batch preload asset scores to eliminate N+1 queries in risk_score calculation
+        _preload_asset_scores(matches)
 
         # If page=0 or page=all, return all results (legacy behavior)
         if page_param in ('0', 'all', ''):

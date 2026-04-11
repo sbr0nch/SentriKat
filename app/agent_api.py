@@ -2350,8 +2350,19 @@ def agent_heartbeat():
     runtime_data = {}
     for key in ('running_services', 'listening_ports', 'pending_patches', 'security_posture'):
         if data.get(key):
-            runtime_data[key] = data[key]
+            # Truncate large lists to prevent DB bloat
+            val = data[key]
+            if isinstance(val, list) and len(val) > 500:
+                val = val[:500]
+            runtime_data[key] = val
     if runtime_data:
+        # Enforce max metadata size (64KB per asset)
+        runtime_json = json.dumps(runtime_data)
+        if len(runtime_json) > 65536:
+            logger.warning(f"Runtime metadata too large for asset {asset.id} ({len(runtime_json)} bytes), truncating")
+            for key in ('running_services', 'listening_ports'):
+                if key in runtime_data and isinstance(runtime_data[key], list):
+                    runtime_data[key] = runtime_data[key][:100]
         try:
             existing_meta = json.loads(asset.metadata_json) if asset.metadata_json else {}
         except (json.JSONDecodeError, TypeError):
