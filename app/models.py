@@ -4061,6 +4061,10 @@ class RemediationAssignment(db.Model):
     notes = db.Column(db.Text, nullable=True)
     resolution_notes = db.Column(db.Text, nullable=True)
 
+    # External issue tracker link (Sprint 4 #30)
+    jira_issue_key = db.Column(db.String(100), nullable=True)  # e.g. "VULN-42"
+    jira_issue_url = db.Column(db.String(500), nullable=True)  # Full URL to the ticket
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     resolved_at = db.Column(db.DateTime, nullable=True)
@@ -4083,6 +4087,8 @@ class RemediationAssignment(db.Model):
             'priority': self.priority,
             'notes': self.notes,
             'resolution_notes': self.resolution_notes,
+            'jira_issue_key': self.jira_issue_key,
+            'jira_issue_url': self.jira_issue_url,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'resolved_at': self.resolved_at.isoformat() if self.resolved_at else None,
@@ -4118,5 +4124,85 @@ class SlaPolicy(db.Model):
             'enabled': self.enabled,
             'notify_on_breach': self.notify_on_breach,
             'escalate_to': self.escalate_to,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+# ============================================================================
+# Risk Exception (Sprint 4 #33)
+# ============================================================================
+
+class RiskException(db.Model):
+    """Accept risk for a vulnerability with justification and optional expiry."""
+    __tablename__ = 'risk_exceptions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
+    match_id = db.Column(db.Integer, db.ForeignKey('vulnerability_matches.id', ondelete='CASCADE'), nullable=True, index=True)
+    cve_id = db.Column(db.String(20), nullable=True, index=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), nullable=True, index=True)
+
+    justification = db.Column(db.Text, nullable=False)
+    approved_by = db.Column(db.String(200), nullable=False)
+    expires_at = db.Column(db.Date, nullable=True)  # None = permanent
+    status = db.Column(db.String(20), default='active')  # active, expired, revoked
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    match = db.relationship('VulnerabilityMatch', backref=db.backref('risk_exceptions', lazy='dynamic'))
+    product = db.relationship('Product', backref=db.backref('risk_exceptions', lazy='dynamic'))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'match_id': self.match_id,
+            'cve_id': self.cve_id,
+            'product_id': self.product_id,
+            'justification': self.justification,
+            'approved_by': self.approved_by,
+            'expires_at': self.expires_at.isoformat() if self.expires_at else None,
+            'status': self.status,
+            'is_expired': self.expires_at and self.expires_at < date.today() and self.status == 'active',
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+# ============================================================================
+# Product Alias (Sprint 4 #36)
+# ============================================================================
+
+class ProductAlias(db.Model):
+    """Map alternate vendor/product names to canonical products for deduplication."""
+    __tablename__ = 'product_aliases'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), nullable=False, index=True)
+    alias_vendor = db.Column(db.String(200), nullable=False)
+    alias_product = db.Column(db.String(200), nullable=False)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    product = db.relationship('Product', backref=db.backref('aliases', lazy='dynamic'))
+
+    __table_args__ = (
+        db.UniqueConstraint('organization_id', 'alias_vendor', 'alias_product', name='uq_product_alias'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'product_id': self.product_id,
+            'alias_vendor': self.alias_vendor,
+            'alias_product': self.alias_product,
+            'product': {
+                'id': self.product.id,
+                'vendor': self.product.vendor,
+                'product_name': self.product.product_name,
+            } if self.product else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }

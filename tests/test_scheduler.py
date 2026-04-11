@@ -19,7 +19,9 @@ def _reset_scheduler_globals():
     import app.scheduler as sched_mod
     sched_mod._scheduler = None
     sched_mod._app = None
-    sched_mod._sync_retry_count = 0
+    # _sync_retry_count removed — retry state now tracked via JobState DB model
+    if hasattr(sched_mod, '_sync_retry_count'):
+        sched_mod._sync_retry_count = 0
     with sched_mod._job_locks_lock:
         sched_mod._job_locks.clear()
 
@@ -236,9 +238,6 @@ class TestCisaSyncJob:
     def test_cisa_sync_job_success(self, mock_sync, mock_record, mock_cancel, app):
         """On success, sync_cisa_kev is called and retry state is cleared."""
         from app.scheduler import cisa_sync_job
-        import app.scheduler as sched_mod
-
-        sched_mod._sync_retry_count = 2  # pretend we had retries
 
         with app.app_context():
             # Need to mock the sub-steps that import app modules
@@ -251,7 +250,6 @@ class TestCisaSyncJob:
         mock_sync.assert_called_once()
         mock_cancel.assert_called_once()
         mock_record.assert_called_with('idle')
-        assert sched_mod._sync_retry_count == 0
 
     @patch('app.scheduler._schedule_sync_retry')
     @patch('app.scheduler.sync_cisa_kev', side_effect=Exception("Network error"))
@@ -274,19 +272,23 @@ class TestSyncRetryLogic:
 
     @patch('app.scheduler._record_sync_retry_status')
     def test_schedule_sync_retry_increments_count(self, mock_record, app):
-        """Each retry call should increment _sync_retry_count."""
+        """Each retry call should schedule a retry job via JobState."""
         import app.scheduler as sched_mod
         from app.scheduler import _schedule_sync_retry
 
         mock_scheduler = MagicMock()
         sched_mod._scheduler = mock_scheduler
-        sched_mod._sync_retry_count = 0
 
-        _schedule_sync_retry(app)
+        with app.app_context():
+            # Create JobState record so increment works
+            from app.models import JobState, db
+            state = JobState(job_name='cisa_sync', retry_count=0)
+            db.session.add(state)
+            db.session.commit()
 
-        assert sched_mod._sync_retry_count == 1
+            _schedule_sync_retry(app)
+
         mock_scheduler.add_job.assert_called_once()
-        # Verify the job id contains the retry number
         call_kwargs = mock_scheduler.add_job.call_args
         assert call_kwargs.kwargs['id'] == 'cisa_sync_retry_1'
 
@@ -299,15 +301,24 @@ class TestSyncRetryLogic:
         mock_scheduler = MagicMock()
         sched_mod._scheduler = mock_scheduler
 
-        for i in range(4):
-            sched_mod._sync_retry_count = i
-            _schedule_sync_retry(app)
-            # Verify recorded delay matches schedule
-            mock_record.assert_called_with(
-                'retry_scheduled', i + 1, _SYNC_RETRY_DELAYS[i]
-            )
-            mock_record.reset_mock()
-            mock_scheduler.reset_mock()
+        with app.app_context():
+            from app.models import JobState, db
+            # Ensure JobState record exists
+            state = JobState.query.get('cisa_sync')
+            if not state:
+                state = JobState(job_name='cisa_sync', retry_count=0)
+                db.session.add(state)
+                db.session.commit()
+
+            for i in range(4):
+                state.retry_count = i
+                db.session.commit()
+                _schedule_sync_retry(app)
+                mock_record.assert_called_with(
+                    'retry_scheduled', i + 1, _SYNC_RETRY_DELAYS[i]
+                )
+                mock_record.reset_mock()
+                mock_scheduler.reset_mock()
 
     @patch('app.scheduler._record_sync_retry_status')
     def test_schedule_sync_retry_stops_after_max_retries(self, mock_record, app):
@@ -317,13 +328,21 @@ class TestSyncRetryLogic:
 
         mock_scheduler = MagicMock()
         sched_mod._scheduler = mock_scheduler
-        sched_mod._sync_retry_count = _MAX_SYNC_RETRIES
 
-        _schedule_sync_retry(app)
+        with app.app_context():
+            from app.models import JobState, db
+            state = JobState.query.get('cisa_sync')
+            if not state:
+                state = JobState(job_name='cisa_sync', retry_count=_MAX_SYNC_RETRIES)
+                db.session.add(state)
+            else:
+                state.retry_count = _MAX_SYNC_RETRIES
+            db.session.commit()
+
+            _schedule_sync_retry(app)
 
         mock_scheduler.add_job.assert_not_called()
         mock_record.assert_called_with('exhausted')
-        assert sched_mod._sync_retry_count == 0
 
     def test_cancel_pending_sync_retries_removes_jobs(self):
         """_cancel_pending_sync_retries should try to remove all retry job IDs."""

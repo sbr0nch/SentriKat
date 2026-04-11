@@ -487,12 +487,104 @@
             </div>
             <!-- Assignments Summary -->
             <div class="card">
-                <div class="card-header py-2">
+                <div class="card-header py-2 d-flex justify-content-between align-items-center">
                     <span><i class="bi bi-person-check me-2"></i>Assignments</span>
+                    <button class="btn btn-sm btn-outline-primary py-0 px-2" onclick="toggleAssignmentsPanel()" title="View all assignments">
+                        <i class="bi bi-list-ul"></i>
+                    </button>
                 </div>
                 <div class="card-body py-2" id="assignmentsSummary">
                     <div class="text-center text-muted py-2 small">Loading...</div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Assignments Management Panel (Sprint 4 #29) -->
+    <div class="card mb-3 d-none" id="assignmentsPanel">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-person-check me-2"></i>Assignments Management</span>
+            <div class="d-flex gap-2 align-items-center">
+                <select class="form-select form-select-sm" id="assignFilterStatus" onchange="loadAssignmentsTable()" style="width:130px">
+                    <option value="">All Status</option>
+                    <option value="open">Open</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="resolved">Resolved</option>
+                    <option value="accepted_risk">Accepted Risk</option>
+                </select>
+                <select class="form-select form-select-sm" id="assignFilterPriority" onchange="loadAssignmentsTable()" style="width:120px">
+                    <option value="">All Priority</option>
+                    <option value="critical">Critical</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                </select>
+                <input type="text" class="form-control form-control-sm" id="assignFilterSearch" placeholder="Search..." onkeyup="debounceAssignSearch()" style="width:160px">
+                <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="toggleAssignmentsPanel()" title="Close">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width:40px"></th>
+                            <th>Assigned To</th>
+                            <th>Target</th>
+                            <th class="text-center" style="width:80px">Priority</th>
+                            <th class="text-center" style="width:100px">Status</th>
+                            <th style="width:100px">Due Date</th>
+                            <th style="width:80px">Ticket</th>
+                            <th class="text-center" style="width:120px">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="assignmentsTableBody">
+                        <tr><td colspan="8" class="text-center text-muted py-3">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="d-flex justify-content-between align-items-center px-3 py-2" id="assignmentsPagination" style="display:none!important">
+                <small class="text-muted" id="assignmentsPaginationInfo"></small>
+                <nav><ul class="pagination pagination-sm mb-0" id="assignmentsPaginationNav"></ul></nav>
+            </div>
+        </div>
+    </div>
+
+    <!-- Risk Exceptions Panel (Sprint 4 #33) -->
+    <div class="card mb-3 d-none" id="exceptionsPanel">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-shield-exclamation me-2"></i>Risk Exceptions</span>
+            <div class="d-flex gap-2 align-items-center">
+                <select class="form-select form-select-sm" id="exceptionFilterStatus" onchange="loadExceptionsTable()" style="width:120px">
+                    <option value="">All Status</option>
+                    <option value="active">Active</option>
+                    <option value="expired">Expired</option>
+                    <option value="revoked">Revoked</option>
+                </select>
+                <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="toggleExceptionsPanel()" title="Close">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>CVE / Product</th>
+                            <th>Justification</th>
+                            <th>Approved By</th>
+                            <th class="text-center">Status</th>
+                            <th>Expires</th>
+                            <th class="text-center" style="width:80px">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="exceptionsTableBody">
+                        <tr><td colspan="6" class="text-center text-muted py-3">Loading...</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -658,8 +750,16 @@
                         <button class="btn btn-outline-success btn-sm w-100 mb-1" onclick="exportCSV()">
                             <i class="bi bi-file-earmark-spreadsheet me-1"></i>Export CSV (Excel)
                         </button>
-                        <button class="btn btn-outline-info btn-sm w-100" onclick="exportExecutiveSummary()">
+                        <button class="btn btn-outline-info btn-sm w-100 mb-1" onclick="exportExecutiveSummary()">
                             <i class="bi bi-file-earmark-bar-graph me-1"></i>Executive Summary PDF
+                        </button>
+                        <hr class="my-2">
+                        <h6 class="dropdown-header px-0">SBOM Export</h6>
+                        <button class="btn btn-outline-dark btn-sm w-100 mb-1" onclick="exportSBOM('cyclonedx')">
+                            <i class="bi bi-file-earmark-code me-1"></i>CycloneDX 1.5 (JSON)
+                        </button>
+                        <button class="btn btn-outline-dark btn-sm w-100" onclick="exportSBOM('spdx')">
+                            <i class="bi bi-file-earmark-code me-1"></i>SPDX 2.3 (JSON)
                         </button>
                     </div>
                 </div>
@@ -879,11 +979,138 @@
                     <label for="assignNotes" class="form-label fw-semibold">Notes</label>
                     <textarea class="form-control" id="assignNotes" rows="2" placeholder="Optional instructions..."></textarea>
                 </div>
+                <div class="mb-3 d-none" id="assignJiraSection">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="assignCreateJira">
+                        <label class="form-check-label" for="assignCreateJira">
+                            <i class="bi bi-ticket-detailed me-1"></i>Also create issue tracker ticket
+                        </label>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-primary" onclick="submitAssignment()">
                     <i class="bi bi-send me-1"></i>Assign
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Assignment Detail/Edit Modal (Sprint 4 #29) -->
+<div class="modal fade" id="assignmentDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-person-check me-2"></i>Assignment Detail</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="detailAssignmentId">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Assigned To</label>
+                        <input type="email" class="form-control" id="detailAssignTo">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Assigned By</label>
+                        <input type="text" class="form-control" id="detailAssignBy" readonly>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold">Status</label>
+                        <select class="form-select" id="detailStatus">
+                            <option value="open">Open</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="resolved">Resolved</option>
+                            <option value="accepted_risk">Accepted Risk</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold">Priority</label>
+                        <select class="form-select" id="detailPriority">
+                            <option value="critical">Critical</option>
+                            <option value="high">High</option>
+                            <option value="medium">Medium</option>
+                            <option value="low">Low</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold">Due Date</label>
+                        <input type="date" class="form-control" id="detailDueDate">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Target</label>
+                        <div id="detailTarget" class="form-control-plaintext text-muted"></div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Ticket</label>
+                        <div id="detailTicket" class="form-control-plaintext"></div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fw-semibold">Notes</label>
+                        <textarea class="form-control" id="detailNotes" rows="2"></textarea>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fw-semibold">Resolution Notes</label>
+                        <textarea class="form-control" id="detailResolutionNotes" rows="2" placeholder="How was this resolved?"></textarea>
+                    </div>
+                    <div class="col-md-4">
+                        <small class="text-muted">Created: <span id="detailCreatedAt"></span></small>
+                    </div>
+                    <div class="col-md-4">
+                        <small class="text-muted">Updated: <span id="detailUpdatedAt"></span></small>
+                    </div>
+                    <div class="col-md-4">
+                        <small class="text-muted">Resolved: <span id="detailResolvedAt"></span></small>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                {% if session.get('is_admin') or session.get('role') == 'org_admin' %}
+                <button type="button" class="btn btn-danger me-auto" onclick="deleteAssignment()">
+                    <i class="bi bi-trash me-1"></i>Delete
+                </button>
+                {% endif %}
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveAssignmentDetail()">
+                    <i class="bi bi-check-lg me-1"></i>Save Changes
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Risk Exception Modal (Sprint 4 #33) -->
+<div class="modal fade" id="riskExceptionModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-shield-exclamation me-2"></i>Accept Risk</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="exceptionMatchId">
+                <input type="hidden" id="exceptionCveId">
+                <input type="hidden" id="exceptionProductId">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Vulnerability</label>
+                    <div id="exceptionVulnInfo" class="text-muted"></div>
+                </div>
+                <div class="mb-3">
+                    <label for="exceptionJustification" class="form-label fw-semibold">Justification <span class="text-danger">*</span></label>
+                    <textarea class="form-control" id="exceptionJustification" rows="3" placeholder="Explain why this risk is acceptable..." required></textarea>
+                </div>
+                <div class="mb-3">
+                    <label for="exceptionExpiry" class="form-label fw-semibold">Expiry Date</label>
+                    <input type="date" class="form-control" id="exceptionExpiry">
+                    <small class="text-muted">Leave empty for permanent exception</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-warning" onclick="submitRiskException()">
+                    <i class="bi bi-shield-check me-1"></i>Accept Risk
                 </button>
             </div>
         </div>
@@ -3010,28 +3237,34 @@
         }
     }
 
-    // Load Assignments Summary
+    // ====================================================================
+    // Assignments Management (Sprint 4 #29, #30)
+    // ====================================================================
+    let assignmentsPage = 1;
+    let _assignSearchTimer = null;
+
     async function loadAssignmentsSummary() {
         const container = document.getElementById('assignmentsSummary');
         if (!container) return;
         try {
-            const response = await fetch('/api/remediation/assignments');
+            const response = await fetch('/api/remediation/assignments?per_page=100');
             if (!response.ok) {
                 container.innerHTML = '<div class="text-center text-muted small py-2">No assignments yet</div>';
                 return;
             }
             const data = await response.json();
-            if (!data.assignments || data.assignments.length === 0) {
+            const assignments = data.assignments || [];
+            if (assignments.length === 0) {
                 container.innerHTML = `
                     <div class="text-center text-muted py-2">
                         <p class="small mb-1">No assignments yet</p>
-                        <small>Use the <i class="bi bi-check-all"></i> button in Remediation Actions to assign work</small>
+                        <small>Use the <i class="bi bi-person-plus"></i> button in Remediation Actions to assign work</small>
                     </div>`;
                 return;
             }
-            const open = data.assignments.filter(a => a.status === 'open').length;
-            const inProgress = data.assignments.filter(a => a.status === 'in_progress').length;
-            const resolved = data.assignments.filter(a => a.status === 'resolved' || a.status === 'accepted_risk').length;
+            const open = assignments.filter(a => a.status === 'open').length;
+            const inProgress = assignments.filter(a => a.status === 'in_progress').length;
+            const resolved = assignments.filter(a => a.status === 'resolved' || a.status === 'accepted_risk').length;
             const overdue = data.overdue || 0;
 
             container.innerHTML = `
@@ -3057,12 +3290,211 @@
         }
     }
 
+    function toggleAssignmentsPanel() {
+        const panel = document.getElementById('assignmentsPanel');
+        panel.classList.toggle('d-none');
+        if (!panel.classList.contains('d-none')) {
+            loadAssignmentsTable();
+        }
+    }
+
+    function debounceAssignSearch() {
+        clearTimeout(_assignSearchTimer);
+        _assignSearchTimer = setTimeout(() => loadAssignmentsTable(), 300);
+    }
+
+    function getStatusBadge(status) {
+        const map = {
+            'open': '<span class="badge bg-primary">Open</span>',
+            'in_progress': '<span class="badge bg-info">In Progress</span>',
+            'resolved': '<span class="badge bg-success">Resolved</span>',
+            'accepted_risk': '<span class="badge bg-secondary">Accepted Risk</span>'
+        };
+        return map[status] || `<span class="badge bg-light text-dark">${escapeHtml(status)}</span>`;
+    }
+
+    async function loadAssignmentsTable() {
+        const tbody = document.getElementById('assignmentsTableBody');
+        const status = document.getElementById('assignFilterStatus').value;
+        const priority = document.getElementById('assignFilterPriority').value;
+        const search = document.getElementById('assignFilterSearch').value.trim();
+
+        let url = `/api/remediation/assignments?page=${assignmentsPage}&per_page=25`;
+        if (status) url += `&status=${encodeURIComponent(status)}`;
+        if (priority) url += `&priority=${encodeURIComponent(priority)}`;
+        if (search) url += `&search=${encodeURIComponent(search)}`;
+
+        try {
+            const resp = await fetch(url);
+            if (!resp.ok) { tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Failed to load</td></tr>'; return; }
+            const data = await resp.json();
+            const items = data.assignments || [];
+
+            if (items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">No assignments found</td></tr>';
+                document.getElementById('assignmentsPagination').style.display = 'none';
+                return;
+            }
+
+            window._assignItems = {};
+            tbody.innerHTML = items.map((a, idx) => {
+                window._assignItems[idx] = a;
+                const overdueClass = a.is_overdue ? 'text-danger fw-bold' : '';
+                const target = a.cve_id ? escapeHtml(a.cve_id) : (a.product_name ? escapeHtml(a.product_name) : `Product #${a.product_id || '?'}`);
+                const dueDateStr = a.due_date || '-';
+                const ticketHtml = a.jira_issue_url
+                    ? `<a href="${escapeHtml(a.jira_issue_url)}" target="_blank" class="text-decoration-none" title="${escapeHtml(a.jira_issue_key || '')}">${escapeHtml(a.jira_issue_key || 'View')}</a>`
+                    : '<span class="text-muted">-</span>';
+
+                return `<tr>
+                    <td class="text-center"><span class="badge ${getPriorityBadgeClass(a.priority)}" style="font-size:0.6em"><i class="${getPriorityIcon(a.priority)}"></i></span></td>
+                    <td>${escapeHtml(a.assigned_to)}<br><small class="text-muted">by ${escapeHtml(a.assigned_by)}</small></td>
+                    <td>${target}</td>
+                    <td class="text-center"><span class="badge ${getPriorityBadgeClass(a.priority)}">${escapeHtml(a.priority)}</span></td>
+                    <td class="text-center">${getStatusBadge(a.status)}</td>
+                    <td class="${overdueClass}">${escapeHtml(dueDateStr)}${a.is_overdue ? ' <i class="bi bi-exclamation-triangle text-danger"></i>' : ''}</td>
+                    <td>${ticketHtml}</td>
+                    <td class="text-center text-nowrap">
+                        <button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="openAssignmentDetail(${idx})" title="View/Edit">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        ${a.status === 'open' ? `<button class="btn btn-outline-info btn-sm py-0 px-1" onclick="quickStatusChange(${a.id}, 'in_progress')" title="Start">
+                            <i class="bi bi-play"></i>
+                        </button>` : ''}
+                        ${a.status === 'in_progress' ? `<button class="btn btn-outline-success btn-sm py-0 px-1" onclick="quickStatusChange(${a.id}, 'resolved')" title="Resolve">
+                            <i class="bi bi-check-lg"></i>
+                        </button>` : ''}
+                    </td>
+                </tr>`;
+            }).join('');
+
+            // Pagination
+            const total = data.total || items.length;
+            const perPage = data.per_page || 25;
+            const totalPages = Math.ceil(total / perPage);
+            const pagDiv = document.getElementById('assignmentsPagination');
+            if (totalPages > 1) {
+                pagDiv.style.display = 'flex';
+                document.getElementById('assignmentsPaginationInfo').textContent = `Page ${assignmentsPage} of ${totalPages} (${total} total)`;
+                let nav = '';
+                nav += `<li class="page-item ${assignmentsPage === 1 ? 'disabled' : ''}"><a class="page-link" href="#" onclick="goToAssignPage(${assignmentsPage - 1}); return false;">&laquo;</a></li>`;
+                for (let i = Math.max(1, assignmentsPage - 2); i <= Math.min(totalPages, assignmentsPage + 2); i++) {
+                    nav += `<li class="page-item ${i === assignmentsPage ? 'active' : ''}"><a class="page-link" href="#" onclick="goToAssignPage(${i}); return false;">${i}</a></li>`;
+                }
+                nav += `<li class="page-item ${assignmentsPage === totalPages ? 'disabled' : ''}"><a class="page-link" href="#" onclick="goToAssignPage(${assignmentsPage + 1}); return false;">&raquo;</a></li>`;
+                document.getElementById('assignmentsPaginationNav').innerHTML = nav;
+            } else {
+                pagDiv.style.display = 'none';
+            }
+        } catch (e) {
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger py-3">Error: ${escapeHtml(e.message)}</td></tr>`;
+        }
+    }
+
+    function goToAssignPage(page) {
+        assignmentsPage = page;
+        loadAssignmentsTable();
+    }
+
+    async function quickStatusChange(id, newStatus) {
+        try {
+            const resp = await fetch(`/api/remediation/assignments/${id}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({status: newStatus})
+            });
+            if (resp.ok) {
+                showToast(`Status updated to ${newStatus.replace('_', ' ')}`, 'success');
+                loadAssignmentsTable();
+                loadAssignmentsSummary();
+            } else {
+                const err = await resp.json().catch(() => ({}));
+                showToast(err.error || 'Failed to update', 'danger');
+            }
+        } catch (e) { showToast('Network error', 'danger'); }
+    }
+
+    function openAssignmentDetail(idx) {
+        const a = window._assignItems[idx];
+        if (!a) return;
+        document.getElementById('detailAssignmentId').value = a.id;
+        document.getElementById('detailAssignTo').value = a.assigned_to || '';
+        document.getElementById('detailAssignBy').value = a.assigned_by || '';
+        document.getElementById('detailStatus').value = a.status || 'open';
+        document.getElementById('detailPriority').value = a.priority || 'medium';
+        document.getElementById('detailDueDate').value = a.due_date || '';
+        document.getElementById('detailNotes').value = a.notes || '';
+        document.getElementById('detailResolutionNotes').value = a.resolution_notes || '';
+        document.getElementById('detailCreatedAt').textContent = a.created_at ? new Date(a.created_at).toLocaleString() : '-';
+        document.getElementById('detailUpdatedAt').textContent = a.updated_at ? new Date(a.updated_at).toLocaleString() : '-';
+        document.getElementById('detailResolvedAt').textContent = a.resolved_at ? new Date(a.resolved_at).toLocaleString() : '-';
+
+        const target = a.cve_id || (a.product_name ? a.product_name : `Product #${a.product_id || '?'}`);
+        document.getElementById('detailTarget').textContent = target;
+
+        const ticketEl = document.getElementById('detailTicket');
+        if (a.jira_issue_url) {
+            ticketEl.innerHTML = `<a href="${escapeHtml(a.jira_issue_url)}" target="_blank">${escapeHtml(a.jira_issue_key || 'View Ticket')}</a>`;
+        } else {
+            ticketEl.innerHTML = '<span class="text-muted">No ticket linked</span>';
+        }
+
+        const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('assignmentDetailModal'));
+        modal.show();
+    }
+
+    async function saveAssignmentDetail() {
+        const id = document.getElementById('detailAssignmentId').value;
+        const payload = {
+            assigned_to: document.getElementById('detailAssignTo').value.trim(),
+            status: document.getElementById('detailStatus').value,
+            priority: document.getElementById('detailPriority').value,
+            due_date: document.getElementById('detailDueDate').value || null,
+            notes: document.getElementById('detailNotes').value.trim(),
+            resolution_notes: document.getElementById('detailResolutionNotes').value.trim(),
+        };
+        try {
+            const resp = await fetch(`/api/remediation/assignments/${id}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            if (resp.ok) {
+                const m = bootstrap.Modal.getInstance(document.getElementById('assignmentDetailModal'));
+                if (m) m.hide();
+                showToast('Assignment updated', 'success');
+                loadAssignmentsTable();
+                loadAssignmentsSummary();
+            } else {
+                const err = await resp.json().catch(() => ({}));
+                showToast(err.error || 'Failed to update', 'danger');
+            }
+        } catch (e) { showToast('Network error', 'danger'); }
+    }
+
+    async function deleteAssignment() {
+        const id = document.getElementById('detailAssignmentId').value;
+        if (!confirm('Delete this assignment?')) return;
+        try {
+            const resp = await fetch(`/api/remediation/assignments/${id}`, { method: 'DELETE' });
+            if (resp.ok) {
+                const m = bootstrap.Modal.getInstance(document.getElementById('assignmentDetailModal'));
+                if (m) m.hide();
+                showToast('Assignment deleted', 'success');
+                loadAssignmentsTable();
+                loadAssignmentsSummary();
+            } else {
+                showToast('Failed to delete', 'danger');
+            }
+        } catch (e) { showToast('Network error', 'danger'); }
+    }
+
     // Load remediation, SLA and assignments on page load
     loadRemediationActions();
     loadSlaCompliance();
     loadAssignmentsSummary();
 
-    // Open Assign Remediation modal
+    // Open Assign Remediation modal (enhanced with Jira option)
     function openAssignModal(productId, actionName, cveIds, priority) {
         document.getElementById('assignProductId').value = productId;
         document.getElementById('assignCveIds').value = JSON.stringify(cveIds);
@@ -3071,11 +3503,17 @@
         document.getElementById('assignTo').value = '';
         document.getElementById('assignDueDate').value = '';
         document.getElementById('assignNotes').value = '';
+        // Show Jira checkbox if issue tracker is configured
+        const jiraSection = document.getElementById('assignJiraSection');
+        if (jiraSection) {
+            jiraSection.classList.toggle('d-none', !(window.enabledTrackers && window.enabledTrackers.length > 0));
+            document.getElementById('assignCreateJira').checked = false;
+        }
         const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('assignRemediationModal'));
         modal.show();
     }
 
-    // Submit assignment
+    // Submit assignment (with optional Jira ticket creation)
     async function submitAssignment() {
         const assignTo = document.getElementById('assignTo').value.trim();
         if (!assignTo) { alert('Please enter an email address'); return; }
@@ -3085,6 +3523,7 @@
         const dueDate = document.getElementById('assignDueDate').value || null;
         const priority = document.getElementById('assignPriority').value;
         const notes = document.getElementById('assignNotes').value.trim();
+        const createJira = document.getElementById('assignCreateJira')?.checked || false;
 
         try {
             const resp = await fetch('/api/remediation/assignments', {
@@ -3096,24 +3535,134 @@
                     due_date: dueDate,
                     priority: priority,
                     severity: priority,
-                    notes: notes || ('Remediation for ' + cveIds.length + ' CVEs')
+                    notes: notes || ('Remediation for ' + cveIds.length + ' CVEs'),
+                    create_jira_ticket: createJira
                 })
             });
+            const result = await resp.json();
             if (resp.ok) {
                 const assignModal = bootstrap.Modal.getInstance(document.getElementById('assignRemediationModal'));
                 if (assignModal) assignModal.hide();
-                if (typeof showToast === 'function') showToast('Assigned to ' + assignTo, 'success');
+                let msg = 'Assigned to ' + escapeHtml(assignTo);
+                if (result.jira_issue_key) msg += ` (ticket: ${escapeHtml(result.jira_issue_key)})`;
+                if (result.jira_warning) msg += ` — Warning: ${escapeHtml(result.jira_warning)}`;
+                showToast(msg, 'success');
                 loadAssignmentsSummary();
+                if (!document.getElementById('assignmentsPanel').classList.contains('d-none')) loadAssignmentsTable();
             } else {
-                const err = await resp.json().catch(() => ({}));
-                const msg = err.error || 'Failed to create assignment';
-                if (typeof showToast === 'function') showToast(msg, 'danger');
-                else alert('Error: ' + msg);
+                const msg = result.error || 'Failed to create assignment';
+                showToast(msg, 'danger');
             }
         } catch(e) {
-            if (typeof showToast === 'function') showToast('Network error: ' + e.message, 'danger');
-            else alert('Error: ' + e.message);
+            showToast('Network error: ' + e.message, 'danger');
         }
+    }
+
+    // ====================================================================
+    // Risk Exceptions (Sprint 4 #33)
+    // ====================================================================
+    function toggleExceptionsPanel() {
+        const panel = document.getElementById('exceptionsPanel');
+        panel.classList.toggle('d-none');
+        if (!panel.classList.contains('d-none')) loadExceptionsTable();
+    }
+
+    function openRiskExceptionModal(matchId, cveId, productId, vulnName) {
+        document.getElementById('exceptionMatchId').value = matchId || '';
+        document.getElementById('exceptionCveId').value = cveId || '';
+        document.getElementById('exceptionProductId').value = productId || '';
+        document.getElementById('exceptionVulnInfo').textContent = vulnName || cveId || 'Unknown';
+        document.getElementById('exceptionJustification').value = '';
+        document.getElementById('exceptionExpiry').value = '';
+        const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('riskExceptionModal'));
+        modal.show();
+    }
+
+    async function submitRiskException() {
+        const justification = document.getElementById('exceptionJustification').value.trim();
+        if (!justification) { alert('Justification is required'); return; }
+
+        const payload = {
+            justification: justification,
+            expires_at: document.getElementById('exceptionExpiry').value || null,
+            match_id: parseInt(document.getElementById('exceptionMatchId').value) || null,
+            cve_id: document.getElementById('exceptionCveId').value || null,
+            product_id: parseInt(document.getElementById('exceptionProductId').value) || null,
+        };
+        try {
+            const resp = await fetch('/api/risk-exceptions', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            if (resp.ok) {
+                const m = bootstrap.Modal.getInstance(document.getElementById('riskExceptionModal'));
+                if (m) m.hide();
+                showToast('Risk exception created', 'success');
+                if (!document.getElementById('exceptionsPanel').classList.contains('d-none')) loadExceptionsTable();
+            } else {
+                const err = await resp.json().catch(() => ({}));
+                showToast(err.error || 'Failed to create exception', 'danger');
+            }
+        } catch (e) { showToast('Network error', 'danger'); }
+    }
+
+    async function loadExceptionsTable() {
+        const tbody = document.getElementById('exceptionsTableBody');
+        const status = document.getElementById('exceptionFilterStatus').value;
+        let url = '/api/risk-exceptions';
+        if (status) url += `?status=${encodeURIComponent(status)}`;
+        try {
+            const resp = await fetch(url);
+            if (!resp.ok) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Failed to load</td></tr>'; return; }
+            const data = await resp.json();
+            const items = data.exceptions || [];
+            if (items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No risk exceptions</td></tr>';
+                return;
+            }
+            tbody.innerHTML = items.map(e => {
+                const statusBadge = e.status === 'active' ? '<span class="badge bg-success">Active</span>'
+                    : e.status === 'revoked' ? '<span class="badge bg-danger">Revoked</span>'
+                    : '<span class="badge bg-secondary">Expired</span>';
+                const target = e.cve_id ? escapeHtml(e.cve_id) : `Product #${e.product_id || '?'}`;
+                const justShort = (e.justification || '').length > 60 ? escapeHtml(e.justification.substring(0, 60)) + '...' : escapeHtml(e.justification || '');
+                return `<tr>
+                    <td>${target}</td>
+                    <td title="${escapeHtml(e.justification || '')}">${justShort}</td>
+                    <td>${escapeHtml(e.approved_by)}</td>
+                    <td class="text-center">${statusBadge}${e.is_expired ? ' <i class="bi bi-exclamation-triangle text-warning" title="Expired"></i>' : ''}</td>
+                    <td>${e.expires_at || '<em>Permanent</em>'}</td>
+                    <td class="text-center">
+                        ${e.status === 'active' ? `<button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="revokeException(${e.id})" title="Revoke"><i class="bi bi-x-circle"></i></button>` : ''}
+                    </td>
+                </tr>`;
+            }).join('');
+        } catch (e) {
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-3">Error loading</td></tr>`;
+        }
+    }
+
+    async function revokeException(id) {
+        if (!confirm('Revoke this risk exception?')) return;
+        try {
+            const resp = await fetch(`/api/risk-exceptions/${id}`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({status: 'revoked'})
+            });
+            if (resp.ok) {
+                showToast('Exception revoked', 'success');
+                loadExceptionsTable();
+            } else { showToast('Failed to revoke', 'danger'); }
+        } catch (e) { showToast('Network error', 'danger'); }
+    }
+
+    // ====================================================================
+    // SBOM Export (Sprint 4 #32)
+    // ====================================================================
+    function exportSBOM(format) {
+        window.open(`/api/sbom/export/${format}`, '_blank');
     }
 
     // Open SLA Policy modal
