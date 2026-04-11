@@ -2338,7 +2338,7 @@ async function loadManagedEmailSettings() {
                 } else {
                     const pct = data.limit > 0 ? Math.round((data.used / data.limit) * 100) : 0;
                     const color = pct > 90 ? 'text-danger' : pct > 70 ? 'text-warning' : 'text-success';
-                    el.innerHTML = `<span class="${color} fw-semibold">${data.used} / ${data.limit}</span> emails used this month (${data.plan} plan)`;
+                    el.innerHTML = `<span class="${color} fw-semibold">${data.used} / ${data.limit}</span> emails used this month (${escapeHtml(data.plan)} plan)`;
                 }
             }
         }
@@ -2573,7 +2573,7 @@ async function checkNvdHealth() {
         } else {
             statusEl.innerHTML = '<i class="bi bi-exclamation-triangle-fill text-danger me-1"></i><span class="text-danger">Connection Failed</span>';
             if (detailsEl && result.error) {
-                detailsEl.innerHTML = `<span class="text-danger">${result.error}</span>`;
+                detailsEl.innerHTML = `<span class="text-danger">${escapeHtml(result.error)}</span>`;
                 detailsEl.classList.remove('d-none');
             }
         }
@@ -5676,16 +5676,6 @@ async function loadLastScheduledSync() {
     } catch (error) {
         console.error('Error loading last scheduled sync:', error);
     }
-}
-
-/**
- * Helper function to escape HTML
- */
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
 }
 
 // ============================================================================

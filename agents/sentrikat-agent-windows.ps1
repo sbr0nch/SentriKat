@@ -2222,25 +2222,36 @@ function Main {
     # Load configuration
     $config = Get-AgentConfig
 
+    # Import custom CA certificate BEFORE proxy setup (needed for SSL inspection proxies)
+    if ($config.CaCertPath -and (Test-Path $config.CaCertPath)) {
+        try {
+            $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($config.CaCertPath)
+            # Use LocalMachine store when running as SYSTEM/admin, fall back to CurrentUser
+            $storeName = "Root"
+            try {
+                $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($storeName, "LocalMachine")
+                $store.Open("ReadWrite")
+                $store.Add($cert)
+                $store.Close()
+                Write-Log "Imported custom CA certificate to LocalMachine store from $($config.CaCertPath)"
+            } catch {
+                $store = New-Object System.Security.Cryptography.X509Certificates.X509Store($storeName, "CurrentUser")
+                $store.Open("ReadWrite")
+                $store.Add($cert)
+                $store.Close()
+                Write-Log "Imported custom CA certificate to CurrentUser store from $($config.CaCertPath)"
+            }
+        } catch {
+            Write-Log "Failed to import CA certificate: $_" -Level "ERROR"
+            Write-Log "Agent may fail to connect through SSL inspection proxy without valid CA cert" -Level "WARN"
+        }
+    }
+
     # Configure proxy at .NET level (applies to all Invoke-RestMethod/WebRequest calls)
     if ($config.ProxyUrl) {
         Write-Log "Using proxy: $($config.ProxyUrl)"
         [System.Net.WebRequest]::DefaultWebProxy = New-Object System.Net.WebProxy($config.ProxyUrl)
         [System.Net.WebRequest]::DefaultWebProxy.UseDefaultCredentials = $true
-    }
-
-    # Import custom CA certificate if specified (for SSL inspection proxies)
-    if ($config.CaCertPath -and (Test-Path $config.CaCertPath)) {
-        try {
-            $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($config.CaCertPath)
-            $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("Root", "CurrentUser")
-            $store.Open("ReadWrite")
-            $store.Add($cert)
-            $store.Close()
-            Write-Log "Imported custom CA certificate from $($config.CaCertPath)"
-        } catch {
-            Write-Log "Failed to import CA certificate: $_" -Level "WARN"
-        }
     }
 
     # Validate configuration

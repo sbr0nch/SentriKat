@@ -796,20 +796,23 @@ class VulnerabilityMatch(db.Model):
         exploit_score = min(exploit_score, 25)
 
         # Asset criticality (0-20 points)
-        asset_score = 10  # Default: medium
-        # Check if any installation is on a critical/high asset
-        try:
-            from sqlalchemy import exists
-            critical_install = ProductInstallation.query.filter(
-                ProductInstallation.product_id == product.id
-            ).join(Asset).filter(
-                Asset.criticality.in_(['critical', 'high'])
-            ).first()
-            if critical_install:
-                crit = critical_install.asset.criticality
-                asset_score = 20 if crit == 'critical' else 15
-        except Exception:
-            pass
+        # Use batch-preloaded score if available (set by _preload_asset_scores),
+        # otherwise fall back to per-match query
+        if hasattr(self, '_preloaded_asset_score'):
+            asset_score = self._preloaded_asset_score
+        else:
+            asset_score = 10  # Default: medium
+            try:
+                critical_install = ProductInstallation.query.filter(
+                    ProductInstallation.product_id == product.id
+                ).join(Asset).filter(
+                    Asset.criticality.in_(['critical', 'high'])
+                ).first()
+                if critical_install:
+                    crit = critical_install.asset.criticality
+                    asset_score = 20 if crit == 'critical' else 15
+            except Exception:
+                pass
 
         # Confidence factor (0-15 points)
         confidence = self.match_confidence or 'medium'
@@ -833,7 +836,7 @@ class VulnerabilityMatch(db.Model):
         vuln = self.vulnerability
         severity = (vuln.severity or '').upper()
         epss = vuln.epss_score or 0
-        is_exploited = bool(vuln.known_ransomware) or bool(getattr(vuln, 'date_added', None))
+        is_exploited = bool(vuln.known_ransomware) or bool(getattr(vuln, 'exploit_public', False))
 
         # Medium confidence + dangerous CVE = needs review
         if severity in ('CRITICAL', 'HIGH') or epss > 0.4 or is_exploited:
