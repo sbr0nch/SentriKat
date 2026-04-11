@@ -7630,6 +7630,7 @@ async function showAssetDetails(assetId) {
                 </div>
             </div>
             ${productsHtml}
+            ${_buildRuntimeDataHtml(asset.metadata || {})}
         `;
 
         // Render paginated products table if we have products
@@ -7645,6 +7646,76 @@ async function showAssetDetails(assetId) {
             </div>
         `;
     }
+}
+
+function _buildRuntimeDataHtml(metadata) {
+    let html = '';
+
+    // Security Posture
+    const posture = metadata.security_posture;
+    if (posture && typeof posture === 'object') {
+        html += `<h6 class="mt-4 mb-3"><i class="bi bi-shield-check me-2 text-success"></i>Security Posture</h6>
+        <div class="row">`;
+        const items = [
+            {label: 'Firewall', value: posture.firewall, icon: 'bi-bricks'},
+            {label: 'SELinux', value: posture.selinux, icon: 'bi-lock'},
+            {label: 'AppArmor', value: posture.apparmor, icon: 'bi-shield'},
+            {label: 'Disk Encryption', value: posture.disk_encryption, icon: 'bi-key'},
+            {label: 'Auto Update', value: posture.auto_update, icon: 'bi-arrow-repeat'},
+            {label: 'SIP', value: posture.sip, icon: 'bi-shield-lock'},
+            {label: 'FileVault', value: posture.filevault, icon: 'bi-lock-fill'},
+            {label: 'Gatekeeper', value: posture.gatekeeper, icon: 'bi-check-circle'},
+            {label: 'Windows Defender', value: posture.defender, icon: 'bi-shield-fill-check'},
+            {label: 'UAC', value: posture.uac, icon: 'bi-person-lock'},
+            {label: 'BitLocker', value: posture.bitlocker, icon: 'bi-key-fill'},
+        ].filter(i => i.value && i.value !== 'unknown' && i.value !== 'disabled');
+        items.forEach(item => {
+            const color = (item.value || '').toLowerCase().includes('enabled') || (item.value || '').toLowerCase().includes('enforcing') || (item.value || '').toLowerCase().includes('active') || (item.value || '').toLowerCase().includes('encrypted') || (item.value || '').toLowerCase() === 'on' ? 'success' : 'warning';
+            html += `<div class="col-md-4 mb-2"><span class="badge bg-${color} me-1"><i class="bi ${item.icon}"></i></span> ${escapeHtml(item.label)}: <strong>${escapeHtml(item.value)}</strong></div>`;
+        });
+        html += '</div>';
+    }
+
+    // Listening Ports
+    const ports = metadata.listening_ports;
+    if (Array.isArray(ports) && ports.length > 0) {
+        html += `<h6 class="mt-4 mb-3"><i class="bi bi-hdd-network me-2 text-info"></i>Listening Ports (${ports.length})</h6>
+        <div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-light">
+        <tr><th>Port</th><th>Protocol</th><th>Address</th><th>Process</th></tr></thead><tbody>`;
+        ports.slice(0, 25).forEach(p => {
+            html += `<tr><td><code>${p.port}</code></td><td>${escapeHtml(p.proto || 'tcp')}</td><td><code>${escapeHtml(p.address || '*')}</code></td><td>${escapeHtml(p.process || 'unknown')}</td></tr>`;
+        });
+        if (ports.length > 25) html += `<tr><td colspan="4" class="text-muted text-center">... and ${ports.length - 25} more</td></tr>`;
+        html += '</tbody></table></div>';
+    }
+
+    // Running Services
+    const services = metadata.running_services;
+    if (Array.isArray(services) && services.length > 0) {
+        html += `<h6 class="mt-4 mb-3"><i class="bi bi-gear-wide-connected me-2 text-primary"></i>Running Services (${services.length})</h6>
+        <div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-light">
+        <tr><th>Service</th><th>State</th><th>User</th><th>PID</th></tr></thead><tbody>`;
+        services.slice(0, 30).forEach(s => {
+            html += `<tr><td>${escapeHtml(s.name || s.display_name || 'unknown')}</td><td><span class="badge bg-success">running</span></td><td>${escapeHtml(s.user || '-')}</td><td><code>${s.pid || '-'}</code></td></tr>`;
+        });
+        if (services.length > 30) html += `<tr><td colspan="4" class="text-muted text-center">... and ${services.length - 30} more</td></tr>`;
+        html += '</tbody></table></div>';
+    }
+
+    // Pending Patches
+    const patches = metadata.pending_patches;
+    if (Array.isArray(patches) && patches.length > 0) {
+        html += `<h6 class="mt-4 mb-3"><i class="bi bi-download me-2 text-warning"></i>Pending Patches (${patches.length})</h6>
+        <div class="table-responsive"><table class="table table-sm table-hover"><thead class="table-light">
+        <tr><th>Package</th><th>Available Version</th><th>Type</th></tr></thead><tbody>`;
+        patches.slice(0, 20).forEach(p => {
+            html += `<tr><td>${escapeHtml(p.name)}</td><td><code>${escapeHtml(p.available_version || '-')}</code></td><td><span class="badge bg-info">${escapeHtml(p.type || 'update')}</span></td></tr>`;
+        });
+        if (patches.length > 20) html += `<tr><td colspan="3" class="text-muted text-center">... and ${patches.length - 20} more</td></tr>`;
+        html += '</tbody></table></div>';
+    }
+
+    return html;
 }
 
 async function deleteAsset(assetId, hostname) {
