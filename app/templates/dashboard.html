@@ -434,6 +434,50 @@
         </div>
     </div>
 
+    <!-- Remediation Actions — "Update X to fix N CVEs" -->
+    <div class="row mb-3">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-wrench me-2"></i>Remediation Actions</span>
+                    <small class="text-muted" id="remediationSummary"></small>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover mb-0" id="remediationTable">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Action</th>
+                                    <th class="text-center" style="width:60px">CVEs</th>
+                                    <th class="text-center" style="width:50px"><span class="text-danger">C</span></th>
+                                    <th class="text-center" style="width:50px"><span class="text-warning">H</span></th>
+                                    <th class="text-center" style="width:50px"><span class="text-info">M</span></th>
+                                    <th class="text-center" style="width:80px">Impact</th>
+                                </tr>
+                            </thead>
+                            <tbody id="remediationBody">
+                                <tr><td colspan="6" class="text-center text-muted py-3">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header py-2">
+                    <span><i class="bi bi-clipboard-check me-2"></i>SLA Compliance</span>
+                </div>
+                <div class="card-body" id="slaComplianceBody">
+                    <div class="text-center text-muted py-3">
+                        <i class="bi bi-clipboard-check fs-2 opacity-50"></i>
+                        <p class="mt-1 mb-0 small">Loading...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Advanced Filters Panel -->
     <div class="card mb-3">
         <div class="card-header py-2 d-flex justify-content-between align-items-center">
@@ -2695,6 +2739,85 @@
 
     // Load shared view on page load if token present
     loadSharedView();
+
+    // Load Remediation Actions table
+    async function loadRemediationActions() {
+        try {
+            const response = await fetch('/api/remediation/actions?per_page=10');
+            if (!response.ok) return;
+            const data = await response.json();
+            const tbody = document.getElementById('remediationBody');
+            const summary = document.getElementById('remediationSummary');
+
+            if (!data.actions || data.actions.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No pending remediation actions</td></tr>';
+                return;
+            }
+
+            summary.textContent = `${data.summary.total_products_affected} products, ${data.summary.total_cves} CVEs`;
+
+            tbody.innerHTML = data.actions.map(a => {
+                const impactColor = a.impact_score >= 80 ? 'danger' : a.impact_score >= 40 ? 'warning' : 'info';
+                return `<tr>
+                    <td>
+                        <div class="fw-semibold">${escapeHtml(a.action)}</div>
+                        <small class="text-muted">${escapeHtml(a.current_version || 'unknown version')}</small>
+                    </td>
+                    <td class="text-center"><span class="badge bg-dark">${a.total_cves}</span></td>
+                    <td class="text-center">${a.critical ? `<span class="badge bg-danger">${a.critical}</span>` : '-'}</td>
+                    <td class="text-center">${a.high ? `<span class="badge bg-warning text-dark">${a.high}</span>` : '-'}</td>
+                    <td class="text-center">${a.medium ? `<span class="badge bg-info">${a.medium}</span>` : '-'}</td>
+                    <td class="text-center"><span class="badge bg-${impactColor}">${a.impact_score}</span></td>
+                </tr>`;
+            }).join('');
+        } catch (e) {
+            console.error('Error loading remediation actions:', e);
+        }
+    }
+
+    // Load SLA Compliance widget
+    async function loadSlaCompliance() {
+        try {
+            const response = await fetch('/api/sla/compliance');
+            if (!response.ok) return;
+            const data = await response.json();
+            const container = document.getElementById('slaComplianceBody');
+
+            if (!data.has_policies) {
+                container.innerHTML = `
+                    <div class="text-center text-muted py-2">
+                        <i class="bi bi-clipboard-check fs-3 opacity-50"></i>
+                        <p class="mt-1 mb-1 small">No SLA policies configured</p>
+                        <a href="/admin#sla" class="btn btn-sm btn-outline-primary"><i class="bi bi-plus-lg me-1"></i>Set up SLA</a>
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = data.compliance.map(c => {
+                const pct = c.compliance_percent;
+                const color = pct >= 90 ? 'success' : pct >= 70 ? 'warning' : 'danger';
+                const sev = c.policy.severity.toUpperCase();
+                const sevColor = sev === 'CRITICAL' ? 'danger' : sev === 'HIGH' ? 'warning' : sev === 'MEDIUM' ? 'info' : 'success';
+                return `
+                    <div class="mb-2">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span><span class="badge bg-${sevColor}">${sev}</span> <small class="text-muted">within ${c.policy.max_days}d</small></span>
+                            <span class="fw-bold text-${color}">${pct}%</span>
+                        </div>
+                        <div class="progress" style="height: 6px;">
+                            <div class="progress-bar bg-${color}" style="width: ${pct}%"></div>
+                        </div>
+                        <small class="text-muted">${c.within_sla} OK / ${c.overdue} overdue / ${c.total_matches} total</small>
+                    </div>`;
+            }).join('');
+        } catch (e) {
+            console.error('Error loading SLA compliance:', e);
+        }
+    }
+
+    // Load remediation and SLA on page load
+    loadRemediationActions();
+    loadSlaCompliance();
 
     // Load grouped vulnerabilities from API
     async function loadGroupedVulnerabilities() {
