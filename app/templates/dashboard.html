@@ -842,6 +842,95 @@
         </div>
     </div>
 
+<!-- Assign Remediation Modal -->
+<div class="modal fade" id="assignRemediationModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-person-plus me-2"></i>Assign Remediation</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="assignProductId">
+                <input type="hidden" id="assignCveIds">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Product</label>
+                    <div id="assignProductName" class="text-muted"></div>
+                </div>
+                <div class="mb-3">
+                    <label for="assignTo" class="form-label fw-semibold">Assign to <span class="text-danger">*</span></label>
+                    <input type="email" class="form-control" id="assignTo" placeholder="user@company.com" required>
+                </div>
+                <div class="mb-3">
+                    <label for="assignDueDate" class="form-label fw-semibold">Due date</label>
+                    <input type="date" class="form-control" id="assignDueDate">
+                    <small class="text-muted">Leave empty to auto-set from SLA policy</small>
+                </div>
+                <div class="mb-3">
+                    <label for="assignPriority" class="form-label fw-semibold">Priority</label>
+                    <select class="form-select" id="assignPriority">
+                        <option value="critical">Critical</option>
+                        <option value="high">High</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="low">Low</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label for="assignNotes" class="form-label fw-semibold">Notes</label>
+                    <textarea class="form-control" id="assignNotes" rows="2" placeholder="Optional instructions..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="submitAssignment()">
+                    <i class="bi bi-send me-1"></i>Assign
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- SLA Policy Setup Modal -->
+<div class="modal fade" id="slaPolicyModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-clipboard-check me-2"></i>Configure SLA Policies</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">Define maximum days to remediate vulnerabilities by severity. SentriKat will track compliance and alert when deadlines are breached.</p>
+                <div class="mb-3">
+                    <label class="form-label"><span class="badge bg-danger me-1">CRITICAL</span> Max days to remediate</label>
+                    <input type="number" class="form-control" id="slaCriticalDays" value="14" min="1" max="365">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label"><span class="badge bg-warning text-dark me-1">HIGH</span> Max days to remediate</label>
+                    <input type="number" class="form-control" id="slaHighDays" value="30" min="1" max="365">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label"><span class="badge bg-info me-1">MEDIUM</span> Max days to remediate</label>
+                    <input type="number" class="form-control" id="slaMediumDays" value="90" min="1" max="365">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label"><span class="badge bg-success me-1">LOW</span> Max days to remediate</label>
+                    <input type="number" class="form-control" id="slaLowDays" value="180" min="1" max="365">
+                </div>
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" id="slaNotifyBreach" checked>
+                    <label class="form-check-label" for="slaNotifyBreach">Send email alert when SLA is breached</label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveSLAPolicies()">
+                    <i class="bi bi-check-lg me-1"></i>Save Policies
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
@@ -2792,11 +2881,14 @@
                     <td class="text-center">${a.high ? `<span class="badge bg-warning text-dark">${a.high}</span>` : '-'}</td>
                     <td class="text-center">${a.medium ? `<span class="badge bg-info">${a.medium}</span>` : '-'}</td>
                     <td class="text-center"><span class="badge bg-${impactColor}">${a.impact_score}</span></td>
-                    <td class="text-center">
-                        <button class="btn btn-success btn-sm py-0 px-1" onclick="event.stopPropagation(); acknowledgeByCveList(${JSON.stringify(a.cve_ids || [])})" title="Acknowledge all CVEs for this product">
+                    <td class="text-center text-nowrap">
+                        <button class="btn btn-outline-primary btn-sm py-0 px-1" onclick="event.stopPropagation(); openAssignModal(${a.product_id}, '${escapeHtml(a.action)}', ${JSON.stringify(a.cve_ids || [])}, '${a.critical > 0 ? 'critical' : a.high > 0 ? 'high' : 'medium'}')" title="Assign to someone">
+                            <i class="bi bi-person-plus"></i>
+                        </button>
+                        <button class="btn btn-success btn-sm py-0 px-1" onclick="event.stopPropagation(); acknowledgeByCveList(${JSON.stringify(a.cve_ids || [])})" title="Acknowledge all CVEs">
                             <i class="bi bi-check-all"></i>
                         </button>
-                        <a href="/admin#products" class="btn btn-outline-primary btn-sm py-0 px-1" onclick="event.stopPropagation()" title="View product">
+                        <a href="/admin#products:${a.product_id}" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="event.stopPropagation()" title="View product">
                             <i class="bi bi-box-arrow-up-right"></i>
                         </a>
                     </td>
@@ -2870,7 +2962,7 @@
                     <div class="text-center text-muted py-2">
                         <i class="bi bi-clipboard-check fs-3 opacity-50"></i>
                         <p class="mt-1 mb-1 small">No SLA policies configured</p>
-                        <a href="/admin#sla" class="btn btn-sm btn-outline-primary"><i class="bi bi-plus-lg me-1"></i>Set up SLA</a>
+                        <button class="btn btn-sm btn-outline-primary" onclick="openSLAModal()"><i class="bi bi-plus-lg me-1"></i>Set up SLA</button>
                     </div>`;
                 return;
             }
@@ -2948,6 +3040,119 @@
     loadRemediationActions();
     loadSlaCompliance();
     loadAssignmentsSummary();
+
+    // Open Assign Remediation modal
+    function openAssignModal(productId, actionName, cveIds, priority) {
+        document.getElementById('assignProductId').value = productId;
+        document.getElementById('assignCveIds').value = JSON.stringify(cveIds);
+        document.getElementById('assignProductName').textContent = actionName + ' (' + cveIds.length + ' CVEs)';
+        document.getElementById('assignPriority').value = priority || 'medium';
+        document.getElementById('assignTo').value = '';
+        document.getElementById('assignDueDate').value = '';
+        document.getElementById('assignNotes').value = '';
+        const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('assignRemediationModal'));
+        modal.show();
+    }
+
+    // Submit assignment
+    async function submitAssignment() {
+        const assignTo = document.getElementById('assignTo').value.trim();
+        if (!assignTo) { alert('Please enter an email address'); return; }
+
+        const productId = parseInt(document.getElementById('assignProductId').value);
+        const cveIds = JSON.parse(document.getElementById('assignCveIds').value || '[]');
+        const dueDate = document.getElementById('assignDueDate').value || null;
+        const priority = document.getElementById('assignPriority').value;
+        const notes = document.getElementById('assignNotes').value.trim();
+
+        try {
+            const resp = await fetch('/api/remediation/assignments', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    product_id: productId,
+                    assigned_to: assignTo,
+                    due_date: dueDate,
+                    priority: priority,
+                    severity: priority,
+                    notes: notes || ('Remediation for ' + cveIds.length + ' CVEs')
+                })
+            });
+            if (resp.ok) {
+                bootstrap.Modal.getInstance(document.getElementById('assignRemediationModal')).hide();
+                if (typeof showToast === 'function') showToast('Assigned to ' + assignTo, 'success');
+                loadAssignmentsSummary();
+            } else {
+                const err = await resp.json();
+                alert('Error: ' + (err.error || 'Failed to create assignment'));
+            }
+        } catch(e) {
+            alert('Error: ' + e.message);
+        }
+    }
+
+    // Open SLA Policy modal
+    function openSLAModal() {
+        // Load existing policies if any
+        fetch('/api/sla/policies').then(r => r.json()).then(data => {
+            if (data.policies) {
+                data.policies.forEach(p => {
+                    const input = document.getElementById('sla' + p.severity.charAt(0).toUpperCase() + p.severity.slice(1) + 'Days');
+                    if (input) input.value = p.max_days;
+                });
+            }
+        }).catch(() => {});
+        const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('slaPolicyModal'));
+        modal.show();
+    }
+
+    // Save SLA Policies
+    async function saveSLAPolicies() {
+        const severities = [
+            {key: 'critical', input: 'slaCriticalDays'},
+            {key: 'high', input: 'slaHighDays'},
+            {key: 'medium', input: 'slaMediumDays'},
+            {key: 'low', input: 'slaLowDays'},
+        ];
+        const notifyBreach = document.getElementById('slaNotifyBreach').checked;
+        let saved = 0;
+
+        for (const sev of severities) {
+            const days = parseInt(document.getElementById(sev.input).value);
+            if (!days || days < 1) continue;
+
+            try {
+                // Try create first, if 409 (already exists) then update
+                let resp = await fetch('/api/sla/policies', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        severity: sev.key,
+                        max_days: days,
+                        notify_on_breach: notifyBreach,
+                        name: sev.key.charAt(0).toUpperCase() + sev.key.slice(1) + ' CVE SLA'
+                    })
+                });
+                if (resp.status === 409) {
+                    // Already exists, find and update
+                    const policies = await (await fetch('/api/sla/policies')).json();
+                    const existing = policies.policies.find(p => p.severity === sev.key);
+                    if (existing) {
+                        resp = await fetch('/api/sla/policies/' + existing.id, {
+                            method: 'PUT',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({max_days: days, notify_on_breach: notifyBreach})
+                        });
+                    }
+                }
+                if (resp.ok) saved++;
+            } catch(e) { console.error('SLA save error:', e); }
+        }
+
+        bootstrap.Modal.getInstance(document.getElementById('slaPolicyModal')).hide();
+        if (typeof showToast === 'function') showToast(saved + ' SLA policies saved', 'success');
+        loadSlaCompliance();
+    }
 
     // Load grouped vulnerabilities from API
     async function loadGroupedVulnerabilities() {
