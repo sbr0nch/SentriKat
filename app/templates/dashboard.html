@@ -453,10 +453,11 @@
                                     <th class="text-center" style="width:50px"><span class="text-warning">H</span></th>
                                     <th class="text-center" style="width:50px"><span class="text-info">M</span></th>
                                     <th class="text-center" style="width:80px">Impact</th>
+                                    <th class="text-center" style="width:100px">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="remediationBody">
-                                <tr><td colspan="6" class="text-center text-muted py-3">Loading...</td></tr>
+                                <tr><td colspan="7" class="text-center text-muted py-3">Loading...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -464,7 +465,7 @@
             </div>
         </div>
         <div class="col-lg-4">
-            <div class="card">
+            <div class="card mb-3">
                 <div class="card-header py-2">
                     <span><i class="bi bi-clipboard-check me-2"></i>SLA Compliance</span>
                 </div>
@@ -473,6 +474,24 @@
                         <i class="bi bi-clipboard-check fs-2 opacity-50"></i>
                         <p class="mt-1 mb-0 small">Loading...</p>
                     </div>
+                </div>
+            </div>
+            <!-- Remediation Quick Stats -->
+            <div class="card mb-3">
+                <div class="card-header py-2">
+                    <span><i class="bi bi-speedometer2 me-2"></i>Remediation Overview</span>
+                </div>
+                <div class="card-body py-2" id="remediationOverview">
+                    <div class="text-center text-muted py-2 small">Loading...</div>
+                </div>
+            </div>
+            <!-- Assignments Summary -->
+            <div class="card">
+                <div class="card-header py-2">
+                    <span><i class="bi bi-person-check me-2"></i>Assignments</span>
+                </div>
+                <div class="card-body py-2" id="assignmentsSummary">
+                    <div class="text-center text-muted py-2 small">Loading...</div>
                 </div>
             </div>
         </div>
@@ -2748,9 +2767,11 @@
             const data = await response.json();
             const tbody = document.getElementById('remediationBody');
             const summary = document.getElementById('remediationSummary');
+            const overview = document.getElementById('remediationOverview');
 
             if (!data.actions || data.actions.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No pending remediation actions</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">No pending remediation actions</td></tr>';
+                if (overview) overview.innerHTML = '<div class="text-center text-muted small py-2">No data</div>';
                 return;
             }
 
@@ -2758,21 +2779,82 @@
 
             tbody.innerHTML = data.actions.map(a => {
                 const impactColor = a.impact_score >= 80 ? 'danger' : a.impact_score >= 40 ? 'warning' : 'info';
-                return `<tr>
+                const cveList = (a.cve_ids || []).map(c => escapeHtml(c)).join(', ');
+                return `<tr class="cursor-pointer" onclick="this.nextElementSibling.classList.toggle('d-none')" title="Click to expand CVE list">
                     <td>
                         <div class="fw-semibold">${escapeHtml(a.action)}</div>
                         <small class="text-muted">${escapeHtml(a.current_version || 'unknown version')}</small>
+                        ${a.actively_exploited ? '<span class="badge bg-danger ms-1" style="font-size:0.65em">EXPLOITED</span>' : ''}
+                        ${a.exploit_public ? '<span class="badge bg-dark ms-1" style="font-size:0.65em">PoC</span>' : ''}
                     </td>
                     <td class="text-center"><span class="badge bg-dark">${a.total_cves}</span></td>
                     <td class="text-center">${a.critical ? `<span class="badge bg-danger">${a.critical}</span>` : '-'}</td>
                     <td class="text-center">${a.high ? `<span class="badge bg-warning text-dark">${a.high}</span>` : '-'}</td>
                     <td class="text-center">${a.medium ? `<span class="badge bg-info">${a.medium}</span>` : '-'}</td>
                     <td class="text-center"><span class="badge bg-${impactColor}">${a.impact_score}</span></td>
+                    <td class="text-center">
+                        <button class="btn btn-success btn-sm py-0 px-1" onclick="event.stopPropagation(); acknowledgeByCveList(${JSON.stringify(a.cve_ids || [])})" title="Acknowledge all CVEs for this product">
+                            <i class="bi bi-check-all"></i>
+                        </button>
+                        <a href="/admin#products" class="btn btn-outline-primary btn-sm py-0 px-1" onclick="event.stopPropagation()" title="View product">
+                            <i class="bi bi-box-arrow-up-right"></i>
+                        </a>
+                    </td>
+                </tr>
+                <tr class="d-none">
+                    <td colspan="7" class="bg-light small py-1 px-3">
+                        <strong>CVEs:</strong> ${cveList}${a.total_cves > 10 ? ` <em>... and ${a.total_cves - 10} more</em>` : ''}
+                    </td>
                 </tr>`;
             }).join('');
+
+            // Remediation Overview widget
+            if (overview) {
+                const s = data.summary;
+                const topAction = data.actions[0];
+                overview.innerHTML = `
+                    <div class="d-flex justify-content-between mb-2">
+                        <small class="text-muted">Products to update</small>
+                        <span class="fw-bold">${s.total_products_affected}</span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <small class="text-muted">Total open CVEs</small>
+                        <span class="fw-bold">${s.total_cves}</span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <small class="text-muted">Critical CVEs</small>
+                        <span class="fw-bold text-danger">${s.total_critical || 0}</span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <small class="text-muted">Actively exploited</small>
+                        <span class="fw-bold text-danger">${s.total_actively_exploited || 0}</span>
+                    </div>
+                    <hr class="my-2">
+                    <small class="text-muted d-block mb-1">Highest impact:</small>
+                    <div class="fw-semibold small">${escapeHtml(topAction.action)}</div>
+                    <small class="text-muted">${topAction.total_cves} CVEs (${topAction.critical} critical)</small>
+                `;
+            }
         } catch (e) {
             console.error('Error loading remediation actions:', e);
         }
+    }
+
+    // Acknowledge all CVEs in a list (from remediation table)
+    async function acknowledgeByCveList(cveIds) {
+        if (!cveIds || cveIds.length === 0) return;
+        if (!confirm('Acknowledge all ' + cveIds.length + ' CVEs for this product?')) return;
+
+        let acked = 0;
+        for (const cveId of cveIds) {
+            try {
+                const resp = await fetch('/api/matches/acknowledge-by-cve/' + encodeURIComponent(cveId), {method: 'POST'});
+                if (resp.ok) acked++;
+            } catch(e) {}
+        }
+        if (typeof showToast === 'function') showToast(acked + ' CVEs acknowledged', 'success');
+        loadRemediationActions();
+        loadStats();
     }
 
     // Load SLA Compliance widget
@@ -2815,9 +2897,57 @@
         }
     }
 
-    // Load remediation and SLA on page load
+    // Load Assignments Summary
+    async function loadAssignmentsSummary() {
+        const container = document.getElementById('assignmentsSummary');
+        if (!container) return;
+        try {
+            const response = await fetch('/api/remediation/assignments');
+            if (!response.ok) {
+                container.innerHTML = '<div class="text-center text-muted small py-2">No assignments yet</div>';
+                return;
+            }
+            const data = await response.json();
+            if (!data.assignments || data.assignments.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center text-muted py-2">
+                        <p class="small mb-1">No assignments yet</p>
+                        <small>Use the <i class="bi bi-check-all"></i> button in Remediation Actions to assign work</small>
+                    </div>`;
+                return;
+            }
+            const open = data.assignments.filter(a => a.status === 'open').length;
+            const inProgress = data.assignments.filter(a => a.status === 'in_progress').length;
+            const resolved = data.assignments.filter(a => a.status === 'resolved' || a.status === 'accepted_risk').length;
+            const overdue = data.overdue || 0;
+
+            container.innerHTML = `
+                <div class="d-flex justify-content-between mb-2">
+                    <small class="text-muted">Open</small>
+                    <span class="badge bg-primary">${open}</span>
+                </div>
+                <div class="d-flex justify-content-between mb-2">
+                    <small class="text-muted">In Progress</small>
+                    <span class="badge bg-info">${inProgress}</span>
+                </div>
+                <div class="d-flex justify-content-between mb-2">
+                    <small class="text-muted">Resolved</small>
+                    <span class="badge bg-success">${resolved}</span>
+                </div>
+                ${overdue > 0 ? `<div class="d-flex justify-content-between mb-2">
+                    <small class="text-danger fw-bold">Overdue</small>
+                    <span class="badge bg-danger">${overdue}</span>
+                </div>` : ''}
+            `;
+        } catch (e) {
+            container.innerHTML = '<div class="text-center text-muted small py-2">No assignments yet</div>';
+        }
+    }
+
+    // Load remediation, SLA and assignments on page load
     loadRemediationActions();
     loadSlaCompliance();
+    loadAssignmentsSummary();
 
     // Load grouped vulnerabilities from API
     async function loadGroupedVulnerabilities() {
