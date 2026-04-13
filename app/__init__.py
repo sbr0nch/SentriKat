@@ -375,6 +375,8 @@ def create_app(config_class=Config):
     app.register_blueprint(gdpr_api.gdpr_bp)
     from app import remediation_api
     app.register_blueprint(remediation_api.bp)
+    from app import sbom_export
+    app.register_blueprint(sbom_export.bp)
 
     # Error handlers: return JSON for API routes, HTML for browser routes
     # Global helper: sanitize error messages in production to prevent info leakage

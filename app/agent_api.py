@@ -37,6 +37,8 @@ from app.error_utils import ERROR_MSGS
 from sqlalchemy.exc import IntegrityError
 import json
 import hashlib
+import gzip
+import io
 
 # Threshold for async processing (queued instead of immediate).
 # Agent script sends chunks of 500 max, so 750 ensures agent chunks are
@@ -96,6 +98,27 @@ logger = logging.getLogger(__name__)
 
 agent_bp = Blueprint('agent', __name__)
 csrf.exempt(agent_bp)  # Agents use API keys, not CSRF
+
+
+# Sprint 4 #34: Transparent gzip decompression for agent requests
+@agent_bp.before_request
+def _decompress_gzip():
+    """Auto-decompress gzip-encoded request bodies from agents."""
+    if request.content_encoding == 'gzip':
+        try:
+            compressed = request.get_data(cache=False)
+            decompressed = gzip.decompress(compressed)
+            # Replace the request stream with the decompressed data
+            request._cached_data = decompressed
+            # Override environ so get_json() reads from the decompressed data
+            request.environ['wsgi.input'] = io.BytesIO(decompressed)
+            request.environ['CONTENT_LENGTH'] = str(len(decompressed))
+            # Clear content-encoding so Flask doesn't try to decompress again
+            if 'HTTP_CONTENT_ENCODING' in request.environ:
+                del request.environ['HTTP_CONTENT_ENCODING']
+        except Exception as e:
+            logger.warning(f"Failed to decompress gzip request: {e}")
+            return jsonify({'error': 'Invalid gzip payload'}), 400
 
 
 # ============================================================================
@@ -2315,6 +2338,7 @@ def agent_heartbeat():
 
     hostname = data.get('hostname')
     agent_id = data.get('agent_id')
+    delta_mode = data.get('delta')  # Sprint 4 #34: "unchanged" or "full"
 
     if not hostname and not agent_id:
         return jsonify({'error': 'hostname or agent_id required'}), 400
@@ -2408,12 +2432,17 @@ def agent_heartbeat():
         logger.error(f"Failed to update asset checkin: {e}")
         return jsonify({'error': 'Failed to update asset status'}), 500
 
-    return jsonify({
+    response_data = {
         'status': 'ok',
         'asset_id': asset.id,
         'hostname': asset.hostname,
-        'server_time': datetime.utcnow().isoformat()
-    })
+        'server_time': datetime.utcnow().isoformat(),
+    }
+    # Sprint 4 #34: Acknowledge delta mode
+    if delta_mode:
+        response_data['delta_ack'] = delta_mode
+
+    return jsonify(response_data)
 
 
 # ============================================================================

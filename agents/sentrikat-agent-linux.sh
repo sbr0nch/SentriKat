@@ -1488,6 +1488,121 @@ check_agent_health() {
     fi
 }
 
+# ============================================================================
+# Sprint 4 #34: Delta Scan + HTTP Compression  |  #35: Store-and-Forward
+# ============================================================================
+
+DELTA_HASH_FILE="/var/lib/sentrikat/last_hash.txt"
+DELTA_LAST_FULL_FILE="/var/lib/sentrikat/last_full_time.txt"
+SPOOL_DIR="/var/lib/sentrikat/spool"
+SPOOL_MAX_FILES=50
+
+compute_payload_hash() {
+    # Compute SHA256 hash of the payload string
+    local payload="$1"
+    printf '%s' "$payload" | sha256sum | awk '{print $1}'
+}
+
+test_delta_changed() {
+    # Returns 0 (true) if payload changed or full send is due; 1 (false) if unchanged
+    local current_hash="$1"
+
+    # Force full send every 24 hours
+    if [[ -f "$DELTA_LAST_FULL_FILE" ]]; then
+        local last_full_epoch
+        last_full_epoch=$(cat "$DELTA_LAST_FULL_FILE" 2>/dev/null)
+        if [[ "$last_full_epoch" =~ ^[0-9]+$ ]]; then
+            local now_epoch
+            now_epoch=$(date +%s)
+            if [[ $((now_epoch - last_full_epoch)) -ge 86400 ]]; then
+                log_info "Delta: 24h since last full send - forcing full heartbeat"
+                return 0
+            fi
+        else
+            # File corrupt - force full
+            return 0
+        fi
+    else
+        # No record of last full send - force full
+        return 0
+    fi
+
+    # Compare hash with previous
+    if [[ -f "$DELTA_HASH_FILE" ]]; then
+        local previous_hash
+        previous_hash=$(cat "$DELTA_HASH_FILE" 2>/dev/null | tr -d '[:space:]')
+        if [[ "$previous_hash" == "$current_hash" ]]; then
+            log_info "Delta: payload hash unchanged - sending lightweight heartbeat"
+            return 1
+        fi
+    fi
+
+    log_info "Delta: payload changed or no previous hash - sending full heartbeat"
+    return 0
+}
+
+save_delta_state() {
+    local hash="$1"
+    local dir
+    dir=$(dirname "$DELTA_HASH_FILE")
+    mkdir -p "$dir" 2>/dev/null || true
+    printf '%s' "$hash" > "$DELTA_HASH_FILE" 2>/dev/null || true
+    date +%s > "$DELTA_LAST_FULL_FILE" 2>/dev/null || true
+}
+
+save_spool_payload() {
+    local json_payload="$1"
+    mkdir -p "$SPOOL_DIR" 2>/dev/null || true
+    local timestamp
+    timestamp=$(date +%Y%m%d%H%M%S%N | cut -c1-17)
+    local spool_file="${SPOOL_DIR}/heartbeat_${timestamp}.json"
+    printf '%s' "$json_payload" > "$spool_file" 2>/dev/null || true
+    log_info "Spooled failed heartbeat to $spool_file"
+
+    # Enforce spool limit (delete oldest if over max)
+    local file_count
+    file_count=$(ls -1 "${SPOOL_DIR}"/heartbeat_*.json 2>/dev/null | wc -l)
+    if [[ "$file_count" -gt "$SPOOL_MAX_FILES" ]]; then
+        local to_delete=$((file_count - SPOOL_MAX_FILES))
+        ls -1 "${SPOOL_DIR}"/heartbeat_*.json 2>/dev/null | sort | head -n "$to_delete" | while IFS= read -r f; do
+            rm -f "$f" 2>/dev/null
+        done
+        log_info "Pruned spool directory to $SPOOL_MAX_FILES files"
+    fi
+}
+
+send_spooled_payloads() {
+    [[ -d "$SPOOL_DIR" ]] || return 0
+    local files
+    files=$(ls -1 "${SPOOL_DIR}"/heartbeat_*.json 2>/dev/null | sort)
+    [[ -z "$files" ]] && return 0
+
+    local count
+    count=$(echo "$files" | wc -l)
+    log_info "Replaying $count spooled heartbeat(s)..."
+
+    local endpoint="${SERVER_URL}/api/agent/heartbeat"
+    echo "$files" | while IFS= read -r f; do
+        [[ -z "$f" ]] && continue
+        local http_code
+        http_code=$(cat "$f" | gzip -c | _curl -s -o /dev/null -w "%{http_code}" -X POST "$endpoint" \
+            -H "X-Agent-Key: $API_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Content-Encoding: gzip" \
+            -H "User-Agent: SentriKat-Agent/$AGENT_VERSION (Linux)" \
+            --data-binary @- \
+            --max-time 30 2>/dev/null) || http_code="000"
+
+        if [[ "$http_code" =~ ^2 ]]; then
+            rm -f "$f" 2>/dev/null
+            log_info "Replayed spooled heartbeat: $(basename "$f")"
+        else
+            log_warn "Failed to replay spooled heartbeat $(basename "$f") (HTTP $http_code)"
+            break  # Stop replaying on first failure (server likely still down)
+        fi
+    done
+}
+
 send_heartbeat() {
     local endpoint="${SERVER_URL}/api/agent/heartbeat"
     local max_retries=3
@@ -1505,25 +1620,64 @@ send_heartbeat() {
     local posture_json
     posture_json=$(collect_security_posture) || posture_json="{}"
 
+    # --- Sprint 4 #34: Delta scan ---
+    # Build the full payload to compute its hash
+    local full_payload
+    full_payload="{\"hostname\": \"$(hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\", \"health_status\": \"$HEALTH_STATUS\", \"uptime_seconds\": $uptime_seconds, \"running_services\": $services_json, \"listening_ports\": $ports_json, \"pending_patches\": $patches_json, \"security_posture\": $posture_json}"
+
+    local current_hash
+    current_hash=$(compute_payload_hash "$full_payload")
+
+    local delta_changed=true
+    if ! test_delta_changed "$current_hash"; then
+        delta_changed=false
+    fi
+
     local heartbeat_payload
-    heartbeat_payload="{\"hostname\": \"$(hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\", \"health_status\": \"$HEALTH_STATUS\", \"uptime_seconds\": $uptime_seconds, \"running_services\": $services_json, \"listening_ports\": $ports_json, \"pending_patches\": $patches_json, \"security_posture\": $posture_json}"
+    if [[ "$delta_changed" == "true" ]]; then
+        # Full payload with delta=full marker
+        heartbeat_payload="{\"hostname\": \"$(hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\", \"health_status\": \"$HEALTH_STATUS\", \"uptime_seconds\": $uptime_seconds, \"running_services\": $services_json, \"listening_ports\": $ports_json, \"pending_patches\": $patches_json, \"security_posture\": $posture_json, \"delta\": \"full\"}"
+    else
+        # Lightweight heartbeat - no heavy collections
+        heartbeat_payload="{\"hostname\": \"$(hostname)\", \"agent_id\": \"$AGENT_ID\", \"agent_version\": \"$AGENT_VERSION\", \"health_status\": \"$HEALTH_STATUS\", \"uptime_seconds\": $uptime_seconds, \"delta\": \"unchanged\"}"
+    fi
+
+    # --- Sprint 4 #34: HTTP compression (gzip) ---
+    # Write payload to temp file, compress with gzip, send compressed
+    local tmpfile
+    tmpfile=$(mktemp)
+    register_temp_file "$tmpfile"
+    printf '%s' "$heartbeat_payload" > "$tmpfile"
 
     for ((attempt=1; attempt<=max_retries; attempt++)); do
         local http_code
-        http_code=$(_curl -s -o /dev/null -w "%{http_code}" -X POST "$endpoint" \
+        http_code=$(gzip -c "$tmpfile" | _curl -s -o /dev/null -w "%{http_code}" -X POST "$endpoint" \
             -H "X-Agent-Key: $API_KEY" \
             -H "Content-Type: application/json" \
-            -d "$heartbeat_payload" \
+            -H "Content-Encoding: gzip" \
+            -H "User-Agent: SentriKat-Agent/$AGENT_VERSION (Linux)" \
+            --data-binary @- \
             --max-time 30 2>/dev/null) || http_code="000"
 
         if [[ "$http_code" == "200" || "$http_code" == "202" ]]; then
-            log_info "Heartbeat sent successfully (HTTP $http_code)"
+            log_info "Heartbeat sent successfully (HTTP $http_code, delta=$( [[ "$delta_changed" == "true" ]] && echo full || echo unchanged))"
+
+            # --- Sprint 4 #34: Save delta state on successful full send ---
+            if [[ "$delta_changed" == "true" ]]; then
+                save_delta_state "$current_hash"
+            fi
+
+            # --- Sprint 4 #35: Replay spooled payloads on success ---
+            send_spooled_payloads
+
+            rm -f "$tmpfile"
             return 0
         fi
 
         # Don't retry on auth errors
         if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
             log_error "API key is invalid or revoked (HTTP $http_code). Check your config."
+            rm -f "$tmpfile"
             return 1
         fi
 
@@ -1534,7 +1688,11 @@ send_heartbeat() {
         fi
     done
 
-    log_error "Heartbeat failed after $max_retries attempts (last HTTP $http_code)"
+    # --- Sprint 4 #35: Spool the failed payload for later retry ---
+    log_error "Heartbeat failed after $max_retries attempts (last HTTP $http_code) - spooling for retry"
+    save_spool_payload "$heartbeat_payload"
+
+    rm -f "$tmpfile"
     return 1
 }
 

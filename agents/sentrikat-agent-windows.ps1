@@ -1224,6 +1224,135 @@ function Test-AgentHealth {
     return $result
 }
 
+# ============================================================================
+# Sprint 4 #34: Delta Scan + HTTP Compression  |  #35: Store-and-Forward
+# ============================================================================
+
+$DeltaHashFile = "$env:ProgramData\SentriKat\last_hash.txt"
+$DeltaLastFullFile = "$env:ProgramData\SentriKat\last_full_time.txt"
+$SpoolDir = "$env:ProgramData\SentriKat\spool"
+$SpoolMaxFiles = 50
+
+function Get-PayloadHash {
+    param([string]$JsonString)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    $hashBytes = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($JsonString))
+    return [BitConverter]::ToString($hashBytes).Replace("-", "").ToLower()
+}
+
+function Test-DeltaChanged {
+    # Returns $true if the payload has changed or a full send is due (24h)
+    param([string]$CurrentHash)
+
+    # Force full send every 24 hours
+    if (Test-Path $DeltaLastFullFile) {
+        try {
+            $lastFullEpoch = [long](Get-Content $DeltaLastFullFile -ErrorAction Stop)
+            $nowEpoch = [long]([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())
+            if (($nowEpoch - $lastFullEpoch) -ge 86400) {
+                Write-Log "Delta: 24h since last full send - forcing full heartbeat"
+                return $true
+            }
+        } catch {
+            # File corrupt or unreadable - force full
+            return $true
+        }
+    } else {
+        # No record of last full send - force full
+        return $true
+    }
+
+    # Compare hash
+    if (Test-Path $DeltaHashFile) {
+        try {
+            $previousHash = (Get-Content $DeltaHashFile -ErrorAction Stop).Trim()
+            if ($previousHash -eq $CurrentHash) {
+                Write-Log "Delta: payload hash unchanged - sending lightweight heartbeat"
+                return $false
+            }
+        } catch {}
+    }
+
+    Write-Log "Delta: payload changed or no previous hash - sending full heartbeat"
+    return $true
+}
+
+function Save-DeltaState {
+    param([string]$Hash)
+    try {
+        $dir = Split-Path $DeltaHashFile -Parent
+        if (!(Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        Set-Content -Path $DeltaHashFile -Value $Hash -Force
+        $nowEpoch = [long]([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())
+        Set-Content -Path $DeltaLastFullFile -Value $nowEpoch -Force
+    } catch {
+        Write-Log "Failed to save delta state: $_" -Level "WARN"
+    }
+}
+
+function Compress-GzipBytes {
+    param([byte[]]$InputBytes)
+    $ms = New-Object System.IO.MemoryStream
+    $gz = New-Object System.IO.Compression.GZipStream($ms, [System.IO.Compression.CompressionMode]::Compress)
+    $gz.Write($InputBytes, 0, $InputBytes.Length)
+    $gz.Close()
+    return $ms.ToArray()
+}
+
+function Save-SpoolPayload {
+    param([string]$JsonPayload)
+    try {
+        if (!(Test-Path $SpoolDir)) { New-Item -ItemType Directory -Path $SpoolDir -Force | Out-Null }
+        $timestamp = Get-Date -Format "yyyyMMddHHmmssfff"
+        $spoolFile = Join-Path $SpoolDir "heartbeat_${timestamp}.json"
+        Set-Content -Path $spoolFile -Value $JsonPayload -Force
+        Write-Log "Spooled failed heartbeat to $spoolFile"
+
+        # Enforce spool limit (delete oldest if over max)
+        $files = Get-ChildItem -Path $SpoolDir -Filter "heartbeat_*.json" -ErrorAction SilentlyContinue | Sort-Object Name
+        if ($files.Count -gt $SpoolMaxFiles) {
+            $toDelete = $files | Select-Object -First ($files.Count - $SpoolMaxFiles)
+            foreach ($f in $toDelete) {
+                Remove-Item $f.FullName -Force -ErrorAction SilentlyContinue
+            }
+            Write-Log "Pruned spool directory to $SpoolMaxFiles files"
+        }
+    } catch {
+        Write-Log "Failed to spool heartbeat: $_" -Level "WARN"
+    }
+}
+
+function Send-SpooledPayloads {
+    param($Config)
+    if (!(Test-Path $SpoolDir)) { return }
+    $files = Get-ChildItem -Path $SpoolDir -Filter "heartbeat_*.json" -ErrorAction SilentlyContinue | Sort-Object Name
+    if ($files.Count -eq 0) { return }
+
+    Write-Log "Replaying $($files.Count) spooled heartbeat(s)..."
+    $endpoint = "$($Config.ServerUrl)/api/agent/heartbeat"
+    $headers = @{
+        "X-Agent-Key" = $Config.ApiKey
+        "User-Agent" = "SentriKat-Agent/$AgentVersion (Windows)"
+        "Content-Encoding" = "gzip"
+    }
+
+    foreach ($f in $files) {
+        try {
+            $jsonContent = Get-Content $f.FullName -Raw
+            $rawBytes = [System.Text.Encoding]::UTF8.GetBytes($jsonContent)
+            $gzBytes = Compress-GzipBytes -InputBytes $rawBytes
+
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            Invoke-RestMethod -Uri $endpoint -Method Post -Headers $headers -Body $gzBytes -ContentType "application/json; charset=utf-8" -TimeoutSec 30 | Out-Null
+            Remove-Item $f.FullName -Force -ErrorAction SilentlyContinue
+            Write-Log "Replayed spooled heartbeat: $($f.Name)"
+        } catch {
+            Write-Log "Failed to replay spooled heartbeat $($f.Name): $($_.Exception.Message)" -Level "WARN"
+            break  # Stop replaying on first failure (server likely still down)
+        }
+    }
+}
+
 function Send-Heartbeat {
     param($Config, $SystemInfo, $HealthStatus = $null)
 
@@ -1292,9 +1421,33 @@ function Send-Heartbeat {
         $payload.health = $HealthStatus
     }
 
+    # --- Sprint 4 #34: Delta scan ---
+    # Compute hash of the full payload (sorted JSON) to detect changes
+    $fullPayloadJson = $payload | ConvertTo-Json -Depth 10 -Compress
+    $currentHash = Get-PayloadHash -JsonString $fullPayloadJson
+    $deltaChanged = Test-DeltaChanged -CurrentHash $currentHash
+
+    if ($deltaChanged) {
+        # Full payload - mark as delta=full
+        $payload.delta = "full"
+    } else {
+        # Lightweight heartbeat - strip heavy collections, mark delta=unchanged
+        $payload.Remove("running_services")
+        $payload.Remove("listening_ports")
+        $payload.Remove("pending_patches")
+        $payload.Remove("security_posture")
+        $payload.delta = "unchanged"
+    }
+
+    $jsonBody = $payload | ConvertTo-Json -Depth 10
+    # --- Sprint 4 #34: HTTP compression (gzip) ---
+    $rawBytes = [System.Text.Encoding]::UTF8.GetBytes($jsonBody)
+    $compressedBytes = Compress-GzipBytes -InputBytes $rawBytes
+
     $headers = @{
         "X-Agent-Key" = $Config.ApiKey
         "User-Agent" = "SentriKat-Agent/$AgentVersion (Windows)"
+        "Content-Encoding" = "gzip"
     }
 
     # Retry with exponential backoff: 5s, 10s, 20s
@@ -1307,8 +1460,16 @@ function Send-Heartbeat {
                 Write-Log "Heartbeat attempt $attempt of $maxRetries..." -Level "WARN"
             }
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes(($payload | ConvertTo-Json))
-            $response = Invoke-RestMethod -Uri $endpoint -Method Post -Headers $headers -Body $bodyBytes -ContentType "application/json; charset=utf-8" -TimeoutSec 30
+            $response = Invoke-RestMethod -Uri $endpoint -Method Post -Headers $headers -Body $compressedBytes -ContentType "application/json; charset=utf-8" -TimeoutSec 30
+
+            # --- Sprint 4 #34: Save delta state on successful full send ---
+            if ($deltaChanged) {
+                Save-DeltaState -Hash $currentHash
+            }
+
+            # --- Sprint 4 #35: Replay spooled payloads on success ---
+            Send-SpooledPayloads -Config $Config
+
             return $true
         }
         catch {
@@ -1341,7 +1502,9 @@ function Send-Heartbeat {
         }
     }
 
-    Write-Log "Heartbeat failed after $maxRetries attempts" -Level "ERROR"
+    # --- Sprint 4 #35: Spool the failed payload for later retry ---
+    Write-Log "Heartbeat failed after $maxRetries attempts - spooling for retry" -Level "ERROR"
+    Save-SpoolPayload -JsonPayload $jsonBody
     return $false
 }
 
