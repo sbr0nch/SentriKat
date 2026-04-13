@@ -292,3 +292,144 @@ def export_spdx():
         f'attachment; filename="{org.name}-spdx-sbom.json"'
     )
     return response
+
+
+# ============================================================================
+# STIX 2.1 Export (Sprint 5)
+# ============================================================================
+
+def _stix_timestamp():
+    """Return an RFC3339/STIX-compliant UTC timestamp with millisecond precision."""
+    return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+
+
+@bp.route('/api/sbom/export/stix21', methods=['GET'])
+@login_required
+@requires_professional('SBOM Export')
+@limiter.limit("10/hour")
+def export_stix21():
+    """Export organization vulnerabilities as a STIX 2.1 JSON bundle.
+
+    Sprint 5: STIX 2.1 is the OASIS standard for threat intelligence sharing,
+    used by ISACs, MISP, CISA, and other threat intel platforms.
+
+    Query Parameters:
+        product_ids: Optional comma-separated list of product IDs to filter
+
+    Returns:
+        A STIX 2.1 Bundle containing:
+        - vulnerability SDOs (one per matched CVE)
+        - software SCOs (one per product)
+        - relationship SROs linking vulnerabilities to affected software
+    """
+    org_id = session.get('organization_id')
+    if not org_id:
+        return jsonify({'error': 'Organization required'}), 400
+
+    org = Organization.query.get(org_id)
+    if not org:
+        return jsonify({'error': 'Organization not found'}), 404
+
+    product_ids = _parse_product_ids(request.args.get('product_ids'))
+    products = _get_org_products(org_id, product_ids)
+
+    now = _stix_timestamp()
+    bundle_id = f"bundle--{uuid.uuid4()}"
+
+    objects = []
+
+    # 1) software SCOs (one per product)
+    software_id_by_product = {}
+    for p in products:
+        sw_id = f"software--{uuid.uuid4()}"
+        software_id_by_product[p.id] = sw_id
+
+        sw_obj = {
+            'type': 'software',
+            'spec_version': '2.1',
+            'id': sw_id,
+            'name': p.product_name or 'unknown',
+        }
+        if p.vendor:
+            sw_obj['vendor'] = p.vendor
+        if p.version:
+            sw_obj['version'] = p.version
+        if p.cpe_uri:
+            sw_obj['cpe'] = p.cpe_uri
+        objects.append(sw_obj)
+
+    # 2) vulnerability SDOs + 3) relationship SROs
+    product_id_list = [p.id for p in products]
+    match_map = _get_vuln_matches_for_products(product_id_list)
+
+    vuln_id_by_cve = {}  # cve_id -> stix id (dedupe across products)
+
+    for p in products:
+        matches = match_map.get(p.id, [])
+        for m in matches:
+            vuln = m.vulnerability
+            cve_id = vuln.cve_id
+            if not cve_id:
+                continue
+
+            if cve_id not in vuln_id_by_cve:
+                vuln_stix_id = f"vulnerability--{uuid.uuid4()}"
+                vuln_id_by_cve[cve_id] = vuln_stix_id
+
+                vuln_obj = {
+                    'type': 'vulnerability',
+                    'spec_version': '2.1',
+                    'id': vuln_stix_id,
+                    'created': now,
+                    'modified': now,
+                    'name': cve_id,
+                    'description': (vuln.short_description or f'Vulnerability {cve_id}'),
+                    'external_references': [
+                        {
+                            'source_name': 'cve',
+                            'external_id': cve_id,
+                            'url': f'https://nvd.nist.gov/vuln/detail/{cve_id}',
+                        }
+                    ],
+                }
+
+                # Optional labels for severity / known ransomware
+                labels = []
+                if getattr(vuln, 'severity', None):
+                    labels.append(f'severity-{vuln.severity.lower()}')
+                if getattr(vuln, 'known_ransomware', False):
+                    labels.append('known-ransomware')
+                if labels:
+                    vuln_obj['labels'] = labels
+
+                objects.append(vuln_obj)
+            else:
+                vuln_stix_id = vuln_id_by_cve[cve_id]
+
+            # relationship: vulnerability --[affects]--> software
+            sw_stix_id = software_id_by_product.get(p.id)
+            if sw_stix_id:
+                rel_obj = {
+                    'type': 'relationship',
+                    'spec_version': '2.1',
+                    'id': f'relationship--{uuid.uuid4()}',
+                    'created': now,
+                    'modified': now,
+                    'relationship_type': 'affects',
+                    'source_ref': vuln_stix_id,
+                    'target_ref': sw_stix_id,
+                }
+                objects.append(rel_obj)
+
+    bundle = {
+        'type': 'bundle',
+        'id': bundle_id,
+        'objects': objects,
+    }
+
+    response = make_response(jsonify(bundle))
+    response.headers['Content-Disposition'] = (
+        f'attachment; filename="{org.name}-stix21-bundle.json"'
+    )
+    response.headers['Content-Type'] = 'application/stix+json;version=2.1'
+    return response

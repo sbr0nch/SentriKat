@@ -423,6 +423,19 @@ def start_scheduler(app):
     )
     logger.info("Subscription/license expiration check scheduled at 09:00")
 
+    # Schedule Patch Tuesday digest (2nd Wednesday of every month at 09:00).
+    # day='8-14' + day_of_week='wed' ensures we fire on the Wednesday after
+    # Microsoft's second-Tuesday patch release — giving MS time to publish,
+    # then summarizing the morning after.
+    scheduler.add_job(
+        func=lambda: _run_with_lock('patch_tuesday_digest', patch_tuesday_digest_job, app),
+        trigger=CronTrigger(day='8-14', day_of_week='wed', hour=9, minute=0, timezone=tz),
+        id='patch_tuesday_digest',
+        name='Patch Tuesday Digest (2nd Wednesday of month at 09:00)',
+        replace_existing=True
+    )
+    logger.info("Patch Tuesday digest scheduled for the 2nd Wednesday of each month at 09:00")
+
     # Warm up the CVE known products cache on startup
     try:
         if refresh_known_cve_products is not None:
@@ -1719,3 +1732,226 @@ def _check_onprem_expiration():
     for lower_t in EXPIRY_THRESHOLDS:
         if lower_t < threshold:
             set_setting(f'license_expiry_notified_{lower_t}d', 'false', 'expiration')
+
+
+# ---------------------------------------------------------------------------
+# Patch Tuesday digest job
+# ---------------------------------------------------------------------------
+
+def _check_email_quota_for_org(org_id):
+    """Thin wrapper around email_provider._check_rate_limit for digest jobs.
+
+    Returns True if the org has quota remaining (or quotas are not enforced).
+    Centralized here so all report jobs share the same gate.
+    """
+    try:
+        from app.email_provider import _check_rate_limit
+        allowed, remaining, limit = _check_rate_limit(org_id)
+        return allowed
+    except Exception as e:
+        # If the quota check itself fails, err on the side of attempting
+        # the send — the provider layer will enforce again anyway.
+        logger.warning(f"Email quota check failed for org {org_id}: {e}")
+        return True
+
+
+def build_patch_tuesday_digest_data(organization, since_dt=None, until_dt=None):
+    """
+    Build the summary dict for the Patch Tuesday digest for one org.
+
+    Queries vulnerabilities that:
+      - were PUBLISHED (CISA KEV date_added) in the last 7 days
+      - match the organization's tracked products (via product_organizations)
+      - AND (severity is HIGH/CRITICAL OR vendor is Microsoft OR is_actively_exploited)
+
+    Uses a single joined query with eager-loaded Vulnerability to avoid
+    N+1 selects. Returns a dict ready to pass to send_patch_tuesday_digest.
+    """
+    from app.models import (
+        Vulnerability, VulnerabilityMatch, Product, product_organizations
+    )
+    from sqlalchemy.orm import joinedload
+    from sqlalchemy import func as sa_func, or_ as sa_or, distinct
+
+    now = datetime.utcnow()
+    until_dt = until_dt or now
+    since_dt = since_dt or (until_dt - timedelta(days=7))
+
+    # Month/year label for the subject line
+    month_year = until_dt.strftime('%B %Y')
+
+    # Subquery: product IDs tracked by this org (legacy + multi-org).
+    legacy_ids = db.session.query(Product.id).filter(
+        Product.organization_id == organization.id
+    )
+    multi_org_ids = db.session.query(product_organizations.c.product_id).filter(
+        product_organizations.c.organization_id == organization.id
+    )
+    org_product_ids = legacy_ids.union(multi_org_ids).scalar_subquery()
+
+    # Single query, eager-load the Vulnerability relationship to avoid N+1.
+    base_query = (
+        db.session.query(VulnerabilityMatch, Vulnerability, Product)
+        .join(Vulnerability, VulnerabilityMatch.vulnerability_id == Vulnerability.id)
+        .join(Product, VulnerabilityMatch.product_id == Product.id)
+        .filter(
+            VulnerabilityMatch.product_id.in_(org_product_ids),
+            Vulnerability.date_added >= since_dt.date(),
+            Vulnerability.date_added <= until_dt.date(),
+            sa_or(
+                Vulnerability.severity.in_(['HIGH', 'CRITICAL']),
+                sa_func.lower(Vulnerability.vendor_project).like('microsoft%'),
+                Vulnerability.is_actively_exploited.is_(True),
+            ),
+        )
+    )
+
+    rows = base_query.all()
+
+    # Deduplicate on CVE id (same CVE may match multiple tracked products).
+    by_cve = {}
+    affected_product_ids = set()
+    for match, vuln, product in rows:
+        affected_product_ids.add(product.id)
+        if vuln.cve_id not in by_cve:
+            by_cve[vuln.cve_id] = (vuln, product)
+
+    unique_vulns = [t[0] for t in by_cve.values()]
+
+    # Severity buckets
+    critical_count = sum(1 for v in unique_vulns if (v.severity or '').upper() == 'CRITICAL')
+    high_count = sum(1 for v in unique_vulns if (v.severity or '').upper() == 'HIGH')
+    medium_count = sum(1 for v in unique_vulns if (v.severity or '').upper() == 'MEDIUM')
+    low_count = sum(1 for v in unique_vulns if (v.severity or '').upper() == 'LOW')
+
+    # Top 10 by CVSS score (None scores treated as 0 so they sort last).
+    top_sorted = sorted(
+        unique_vulns,
+        key=lambda v: (v.cvss_score if v.cvss_score is not None else -1.0),
+        reverse=True,
+    )[:10]
+
+    top_list = []
+    for v in top_sorted:
+        linked_product = by_cve[v.cve_id][1]
+        top_list.append({
+            'cve_id': v.cve_id,
+            'vendor': v.vendor_project or linked_product.vendor,
+            'product': v.product or linked_product.product_name,
+            'severity': v.severity or 'UNKNOWN',
+            'cvss_score': v.cvss_score,
+            'is_exploited': bool(v.is_actively_exploited),
+            'description': (v.short_description or '')[:300],
+        })
+
+    return {
+        'month_year': month_year,
+        'total_new': len(unique_vulns),
+        'critical_count': critical_count,
+        'high_count': high_count,
+        'medium_count': medium_count,
+        'low_count': low_count,
+        'affected_products': len(affected_product_ids),
+        'top_vulns': top_list,
+        'since': since_dt.isoformat(),
+        'until': until_dt.isoformat(),
+    }
+
+
+def patch_tuesday_digest_job(app):
+    """
+    Monthly Patch Tuesday digest job.
+
+    Runs on the Wednesday after Microsoft's second-Tuesday patch release.
+    For each active organization:
+      - Queries new CVEs (published in last 7 days) matching tracked products
+        with severity HIGH/CRITICAL, Microsoft vendor, or actively exploited.
+      - Respects org alert preferences (alert_on_critical).
+      - Checks per-org email quota before sending.
+      - Sends an HTML digest to all org admins via email_service.
+    """
+    with app.app_context():
+        try:
+            from app.models import Organization
+            from app.email_service import send_patch_tuesday_digest
+
+            logger.info("Starting Patch Tuesday digest job...")
+
+            organizations = Organization.query.filter_by(active=True).all()
+
+            total_sent = 0
+            total_skipped = 0
+            total_errors = 0
+
+            for org in organizations:
+                try:
+                    digest_data = build_patch_tuesday_digest_data(org)
+
+                    has_high_or_critical = (
+                        digest_data['critical_count'] > 0
+                        or digest_data['high_count'] > 0
+                    )
+
+                    # Rate limiting / quota rule: if the org has disabled
+                    # critical alerts AND there are no high/critical CVEs,
+                    # skip the send to avoid spamming disabled orgs.
+                    if not getattr(org, 'alert_on_critical', True) and not has_high_or_critical:
+                        logger.info(
+                            f"Patch Tuesday: skipping {org.name} "
+                            f"(alerts disabled, no high/critical CVEs)"
+                        )
+                        total_skipped += 1
+                        continue
+
+                    # Nothing to report at all? Skip silently.
+                    if digest_data['total_new'] == 0:
+                        logger.info(
+                            f"Patch Tuesday: no new matching CVEs for "
+                            f"{org.name}, skipping"
+                        )
+                        total_skipped += 1
+                        continue
+
+                    # Quota gate — same pattern as EmailAlertManager.
+                    if not _check_email_quota_for_org(org.id):
+                        logger.warning(
+                            f"Patch Tuesday: email quota exhausted for "
+                            f"{org.name}, skipping digest"
+                        )
+                        total_skipped += 1
+                        continue
+
+                    result = send_patch_tuesday_digest(org, digest_data)
+                    if result.get('success'):
+                        total_sent += 1
+                        logger.info(
+                            f"Patch Tuesday digest sent to {org.name}: "
+                            f"{digest_data['total_new']} CVEs, "
+                            f"{result.get('recipients', 0)} recipients"
+                        )
+                    else:
+                        total_errors += 1
+                        logger.error(
+                            f"Patch Tuesday digest failed for {org.name}: "
+                            f"{result.get('error')}"
+                        )
+
+                except Exception as e:
+                    total_errors += 1
+                    logger.error(
+                        f"Error building Patch Tuesday digest for "
+                        f"{org.name}: {e}",
+                        exc_info=True,
+                    )
+
+            logger.info(
+                f"Patch Tuesday digest job completed: "
+                f"{total_sent} sent, {total_skipped} skipped, "
+                f"{total_errors} errors"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Patch Tuesday digest job failed: {e}",
+                exc_info=True,
+            )
