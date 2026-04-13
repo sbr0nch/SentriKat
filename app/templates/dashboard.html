@@ -984,6 +984,7 @@
                         <input class="form-check-input" type="checkbox" id="assignCreateJira">
                         <label class="form-check-label" for="assignCreateJira">
                             <i class="bi bi-ticket-detailed me-1"></i>Also create issue tracker ticket
+                            <small class="text-muted d-block" id="assignTrackerHint">Jira / YouTrack / GitHub / GitLab (uses configured tracker)</small>
                         </label>
                     </div>
                 </div>
@@ -3342,8 +3343,10 @@
                 const overdueClass = a.is_overdue ? 'text-danger fw-bold' : '';
                 const target = a.cve_id ? escapeHtml(a.cve_id) : (a.product_name ? escapeHtml(a.product_name) : `Product #${a.product_id || '?'}`);
                 const dueDateStr = a.due_date || '-';
-                const ticketHtml = a.jira_issue_url
-                    ? `<a href="${escapeHtml(a.jira_issue_url)}" target="_blank" class="text-decoration-none" title="${escapeHtml(a.jira_issue_key || '')}">${escapeHtml(a.jira_issue_key || 'View')}</a>`
+                const trackerUrl = a.tracker_issue_url || a.jira_issue_url;
+                const trackerKey = a.tracker_issue_key || a.jira_issue_key;
+                const ticketHtml = trackerUrl
+                    ? `<a href="${escapeHtml(trackerUrl)}" target="_blank" class="text-decoration-none" title="${escapeHtml(trackerKey || '')}">${escapeHtml(trackerKey || 'View')}</a>`
                     : '<span class="text-muted">-</span>';
 
                 return `<tr>
@@ -3433,8 +3436,11 @@
         document.getElementById('detailTarget').textContent = target;
 
         const ticketEl = document.getElementById('detailTicket');
-        if (a.jira_issue_url) {
-            ticketEl.innerHTML = `<a href="${escapeHtml(a.jira_issue_url)}" target="_blank">${escapeHtml(a.jira_issue_key || 'View Ticket')}</a>`;
+        const detailTrackerUrl = a.tracker_issue_url || a.jira_issue_url;
+        const detailTrackerKey = a.tracker_issue_key || a.jira_issue_key;
+        if (detailTrackerUrl) {
+            const typeLabel = a.tracker_type ? ` (${escapeHtml(a.tracker_type)})` : '';
+            ticketEl.innerHTML = `<a href="${escapeHtml(detailTrackerUrl)}" target="_blank">${escapeHtml(detailTrackerKey || 'View Ticket')}</a>${typeLabel}`;
         } else {
             ticketEl.innerHTML = '<span class="text-muted">No ticket linked</span>';
         }
@@ -3544,8 +3550,9 @@
                 const assignModal = bootstrap.Modal.getInstance(document.getElementById('assignRemediationModal'));
                 if (assignModal) assignModal.hide();
                 let msg = 'Assigned to ' + escapeHtml(assignTo);
-                if (result.jira_issue_key) msg += ` (ticket: ${escapeHtml(result.jira_issue_key)})`;
-                if (result.jira_warning) msg += ` — Warning: ${escapeHtml(result.jira_warning)}`;
+                const newKey = result.tracker_issue_key || result.jira_issue_key;
+                if (newKey) msg += ` (ticket: ${escapeHtml(newKey)})`;
+                if (result.warning) msg += ` — Warning: ${escapeHtml(result.warning)}`;
                 showToast(msg, 'success');
                 loadAssignmentsSummary();
                 if (!document.getElementById('assignmentsPanel').classList.contains('d-none')) loadAssignmentsTable();

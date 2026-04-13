@@ -101,24 +101,63 @@ csrf.exempt(agent_bp)  # Agents use API keys, not CSRF
 
 
 # Sprint 4 #34: Transparent gzip decompression for agent requests
+# Hard limit on decompressed size to prevent gzip bomb DoS attacks.
+# 10 MB is generous: a 1000-package agent payload is ~200 KB uncompressed.
+MAX_DECOMPRESSED_AGENT_PAYLOAD = 10 * 1024 * 1024  # 10 MB
+MAX_COMPRESSED_AGENT_PAYLOAD = 2 * 1024 * 1024  # 2 MB compressed (>50:1 ratio is suspicious)
+
+
 @agent_bp.before_request
 def _decompress_gzip():
-    """Auto-decompress gzip-encoded request bodies from agents."""
-    if request.content_encoding == 'gzip':
-        try:
-            compressed = request.get_data(cache=False)
-            decompressed = gzip.decompress(compressed)
-            # Replace the request stream with the decompressed data
-            request._cached_data = decompressed
-            # Override environ so get_json() reads from the decompressed data
-            request.environ['wsgi.input'] = io.BytesIO(decompressed)
-            request.environ['CONTENT_LENGTH'] = str(len(decompressed))
-            # Clear content-encoding so Flask doesn't try to decompress again
-            if 'HTTP_CONTENT_ENCODING' in request.environ:
-                del request.environ['HTTP_CONTENT_ENCODING']
-        except Exception as e:
-            logger.warning(f"Failed to decompress gzip request: {e}")
-            return jsonify({'error': 'Invalid gzip payload'}), 400
+    """Auto-decompress gzip-encoded request bodies from agents.
+
+    Includes zip bomb protection: rejects payloads where the decompressed
+    size exceeds MAX_DECOMPRESSED_AGENT_PAYLOAD or where the compressed
+    size exceeds MAX_COMPRESSED_AGENT_PAYLOAD.
+    """
+    if request.content_encoding != 'gzip':
+        return None
+
+    try:
+        compressed = request.get_data(cache=False)
+
+        # Reject huge compressed bodies upfront
+        if len(compressed) > MAX_COMPRESSED_AGENT_PAYLOAD:
+            logger.warning(
+                f"Rejecting oversized compressed agent payload: "
+                f"{len(compressed)} bytes from {request.remote_addr}"
+            )
+            return jsonify({'error': 'Compressed payload too large'}), 413
+
+        # Stream decompression with size enforcement (zip bomb protection)
+        decompressed_chunks = []
+        decompressed_size = 0
+        with gzip.GzipFile(fileobj=io.BytesIO(compressed), mode='rb') as gz:
+            while True:
+                chunk = gz.read(64 * 1024)  # 64 KB chunks
+                if not chunk:
+                    break
+                decompressed_size += len(chunk)
+                if decompressed_size > MAX_DECOMPRESSED_AGENT_PAYLOAD:
+                    logger.warning(
+                        f"Rejecting gzip bomb: compressed={len(compressed)}B, "
+                        f"decompressed>{MAX_DECOMPRESSED_AGENT_PAYLOAD}B "
+                        f"from {request.remote_addr}"
+                    )
+                    return jsonify({'error': 'Decompressed payload too large'}), 413
+                decompressed_chunks.append(chunk)
+        decompressed = b''.join(decompressed_chunks)
+
+        # Replace the request stream with the decompressed data
+        request._cached_data = decompressed
+        request.environ['wsgi.input'] = io.BytesIO(decompressed)
+        request.environ['CONTENT_LENGTH'] = str(len(decompressed))
+        # Clear content-encoding so Flask doesn't try to decompress again
+        if 'HTTP_CONTENT_ENCODING' in request.environ:
+            del request.environ['HTTP_CONTENT_ENCODING']
+    except Exception as e:
+        logger.warning(f"Failed to decompress gzip request: {e}")
+        return jsonify({'error': 'Invalid gzip payload'}), 400
 
 
 # ============================================================================

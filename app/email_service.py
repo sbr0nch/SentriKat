@@ -117,15 +117,55 @@ def send_product_assignment_notification(product, organization, action='assigned
         logger.error(f"Failed to send product {action} notification: {str(e)}")
 
 
+# In-memory throttle: assignment_id -> last_sent_timestamp
+# Prevents rapid-fire emails on bulk updates and protects email quota (e.g. Resend free).
+# Cleared on app restart, which is fine: this is a soft throttle, not a hard guarantee.
+_ASSIGNMENT_EMAIL_THROTTLE = {}
+_ASSIGNMENT_EMAIL_THROTTLE_SECONDS = 3600  # 1 hour minimum between emails per assignment
+
+
 def send_remediation_assignment_notification(assignment, organization, action='created'):
     """
-    Send email notification when a remediation assignment is created, updated, or resolved.
+    Send email notification when a remediation assignment is created or resolved.
+
+    Optimized for low-volume email plans (e.g. Resend free tier = 100/day):
+    - Only sends on 'created' and 'resolved' (NOT every status change)
+    - Sends only to the assignee (NOT CC org admins - admins use the dashboard)
+    - Throttles to max 1 email per assignment per hour
+    - Respects organization's alert configuration (alert_on_critical etc.)
 
     Args:
         assignment: RemediationAssignment model instance
         organization: Organization model instance
-        action: 'created', 'updated', or 'resolved'
+        action: 'created' or 'resolved' (any other value is silently ignored)
     """
+    # Sprint 4 fix: skip noisy 'updated' actions to preserve email quota
+    if action not in ('created', 'resolved'):
+        logger.debug(f"Skipping {action} notification (only created/resolved trigger emails)")
+        return
+
+    # Sprint 4 fix: rate limit per assignment
+    import time
+    now = time.time()
+    last_sent = _ASSIGNMENT_EMAIL_THROTTLE.get(assignment.id, 0)
+    if action != 'resolved' and (now - last_sent) < _ASSIGNMENT_EMAIL_THROTTLE_SECONDS:
+        logger.info(
+            f"Throttled assignment notification for assignment {assignment.id} "
+            f"(last sent {int(now - last_sent)}s ago)"
+        )
+        return
+
+    # Sprint 4 fix: respect org alert configuration
+    # If org has configured alert priority filtering, check if this assignment matches
+    priority_lower = (assignment.priority or 'medium').lower()
+    if priority_lower == 'critical' and not getattr(organization, 'alert_on_critical', True):
+        logger.debug(f"Org {organization.id} has critical alerts disabled, skipping")
+        return
+    if priority_lower == 'high' and not getattr(organization, 'alert_on_high', False):
+        # 'high' alerts are off by default; only send if explicitly enabled
+        # For assignments specifically, we still send because the user is notified directly
+        pass  # don't skip, assignments are direct notifications
+
     try:
         from app.email_provider import send_email
 
@@ -238,24 +278,12 @@ def send_remediation_assignment_notification(assignment, organization, action='c
         """
 
         # --- Build recipient list ---
+        # Sprint 4 fix: only send to assignee, not CC admins (admins have the dashboard).
+        # This cuts email volume by ~3-5x and prevents Resend free tier exhaustion.
         recipients = []
 
-        # Primary recipient: the assigned_to address
-        if assignment.assigned_to:
+        if assignment.assigned_to and '@' in assignment.assigned_to:
             recipients.append(assignment.assigned_to)
-
-        # CC org admins (same pattern as send_product_assignment_notification)
-        org_admins = User.query.filter_by(
-            organization_id=organization.id,
-            is_active=True
-        ).filter(
-            (User.role == 'org_admin') | (User.role == 'super_admin') | (User.is_admin == True)
-        ).all()
-
-        admin_emails = [a.email for a in org_admins if a.email]
-        for email in admin_emails:
-            if email not in recipients:
-                recipients.append(email)
 
         if not recipients:
             logger.debug(
@@ -271,6 +299,15 @@ def send_remediation_assignment_notification(assignment, organization, action='c
             organization_id=organization.id,
             email_type='alert',
         )
+        # Update throttle timestamp
+        _ASSIGNMENT_EMAIL_THROTTLE[assignment.id] = now
+        # Cleanup old throttle entries to prevent unbounded memory growth
+        if len(_ASSIGNMENT_EMAIL_THROTTLE) > 10000:
+            cutoff = now - (_ASSIGNMENT_EMAIL_THROTTLE_SECONDS * 24)
+            for k in list(_ASSIGNMENT_EMAIL_THROTTLE.keys()):
+                if _ASSIGNMENT_EMAIL_THROTTLE[k] < cutoff:
+                    del _ASSIGNMENT_EMAIL_THROTTLE[k]
+
         logger.info(
             f"Sent remediation assignment {action} notification for "
             f"assignment {assignment.id} to {len(recipients)} recipient(s)"

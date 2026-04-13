@@ -103,6 +103,40 @@ def prometheus_metrics():
         api_keys_active = AgentApiKey.query.filter_by(active=True).count()
         gauge('sentrikat_api_keys_active', api_keys_active, 'Active agent API keys')
 
+        # Sprint 4 #29-#33: Remediation, assignments, exceptions, alias metrics
+        try:
+            from app.models import RemediationAssignment, RiskException, ProductAlias
+            for status in ['open', 'in_progress', 'resolved', 'accepted_risk']:
+                count = RemediationAssignment.query.filter_by(status=status).count()
+                gauge('sentrikat_assignments', count,
+                      'Remediation assignments by status', {'status': status})
+
+            # Overdue assignments
+            overdue = RemediationAssignment.query.filter(
+                RemediationAssignment.due_date < datetime.utcnow().date(),
+                RemediationAssignment.status.in_(['open', 'in_progress'])
+            ).count()
+            gauge('sentrikat_assignments_overdue', overdue, 'Assignments past due date')
+
+            # Assignments with tracker tickets
+            tracker_linked = RemediationAssignment.query.filter(
+                RemediationAssignment.tracker_issue_key.isnot(None)
+            ).count()
+            gauge('sentrikat_assignments_with_tracker_ticket', tracker_linked,
+                  'Assignments linked to issue tracker tickets')
+
+            # Risk exceptions
+            for status in ['active', 'expired', 'revoked']:
+                count = RiskException.query.filter_by(status=status).count()
+                gauge('sentrikat_risk_exceptions', count,
+                      'Risk exceptions by status', {'status': status})
+
+            # Product aliases
+            alias_count = ProductAlias.query.count()
+            gauge('sentrikat_product_aliases_total', alias_count, 'Total product aliases configured')
+        except Exception as e:
+            logger.warning(f"Failed to collect Sprint 4 metrics: {e}")
+
         # Subscription metrics (SaaS only)
         import os
         if os.environ.get('SENTRIKAT_MODE', 'onpremise').lower() == 'saas':

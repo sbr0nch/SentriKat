@@ -9,7 +9,7 @@ on create, Risk Exception CRUD, Product Alias CRUD.
 """
 
 from flask import Blueprint, request, jsonify, session
-from app import db, csrf
+from app import db, csrf, limiter
 from app.auth import login_required, org_admin_required
 from app.models import (
     RemediationAssignment, SlaPolicy, Organization, VulnerabilityMatch,
@@ -248,6 +248,7 @@ def get_assignment(assignment_id):
 @bp.route('/api/remediation/assignments', methods=['POST'])
 @login_required
 @org_admin_required
+@limiter.limit("60/minute")
 def create_assignment():
     """Create a new remediation assignment. Optionally create a Jira/issue-tracker ticket."""
     org_id = _org_id_or_400()
@@ -390,10 +391,14 @@ def create_assignment():
                     issue_url = None
 
             if success and issue_key:
-                assignment.jira_issue_key = issue_key
-                assignment.jira_issue_url = issue_url
+                assignment.tracker_issue_key = issue_key
+                assignment.tracker_issue_url = issue_url
+                # Determine effective tracker type that was used
+                from app.settings_api import get_setting
+                effective_type = tracker_type or (get_setting('issue_tracker_type', 'disabled') or '').split(',')[0].strip()
+                assignment.tracker_type = effective_type or None
                 db.session.commit()
-                logger.info(f"Created issue {issue_key} for assignment {assignment.id}")
+                logger.info(f"Created {effective_type or 'tracker'} issue {issue_key} for assignment {assignment.id}")
             else:
                 warning = f"Assignment created but ticket creation failed: {message}"
                 logger.warning(f"Ticket creation failed for assignment {assignment.id}: {message}")
@@ -458,18 +463,19 @@ def update_assignment(assignment_id):
 
     db.session.commit()
 
-    # Email notification on status change
+    # Sprint 4 fix: email notification ONLY on resolution (not every status change).
+    # The send function itself filters out non-create/resolve events, but we also
+    # avoid the function call entirely to skip the import + DB query overhead.
     new_status = assignment.status
-    if new_status != old_status:
+    if new_status != old_status and new_status in ('resolved', 'accepted_risk'):
         try:
             from app.email_service import send_remediation_assignment_notification
             from app.models import Organization
             org = Organization.query.get(org_id)
             if org:
-                action = 'resolved' if new_status in ('resolved', 'accepted_risk') else 'updated'
-                send_remediation_assignment_notification(assignment, org, action=action)
+                send_remediation_assignment_notification(assignment, org, action='resolved')
         except Exception as e:
-            logger.warning(f"Failed to send assignment update notification: {e}")
+            logger.warning(f"Failed to send assignment resolved notification: {e}")
 
     return jsonify(assignment.to_dict())
 
@@ -694,6 +700,7 @@ def list_risk_exceptions():
 @bp.route('/api/risk-exceptions', methods=['POST'])
 @login_required
 @org_admin_required
+@limiter.limit("30/minute")
 def create_risk_exception():
     """Create a new risk exception (org_admin only). Requires justification."""
     org_id = _org_id_or_400()
@@ -834,6 +841,7 @@ def list_product_aliases():
 @bp.route('/api/product-aliases', methods=['POST'])
 @login_required
 @org_admin_required
+@limiter.limit("30/minute")
 def create_product_alias():
     """Create a new product alias (org_admin only). Requires product_id, alias_vendor, alias_product."""
     org_id = _org_id_or_400()

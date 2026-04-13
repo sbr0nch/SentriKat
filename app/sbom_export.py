@@ -7,8 +7,9 @@ of an organization's software inventory with matched vulnerabilities.
 
 from flask import Blueprint, request, jsonify, session, make_response
 from sqlalchemy import select
-from app import db, csrf
+from app import db, csrf, limiter
 from app.auth import login_required
+from app.licensing import requires_professional
 from app.models import Product, VulnerabilityMatch, Vulnerability, product_organizations, Organization
 from datetime import datetime, timezone
 import uuid
@@ -94,8 +95,14 @@ def _get_vuln_matches_for_products(product_ids):
 
 @bp.route('/api/sbom/export/cyclonedx', methods=['GET'])
 @login_required
+@requires_professional('SBOM Export')
+@limiter.limit("10/hour")
 def export_cyclonedx():
-    """Export organization software inventory as CycloneDX 1.5 JSON BOM."""
+    """Export organization software inventory as CycloneDX 1.5 JSON BOM.
+
+    Sprint 4 #32: Rate limited to 10/hour per user (heavy DB query).
+    Requires Professional+ license.
+    """
     org_id = session.get('organization_id')
     if not org_id:
         return jsonify({'error': 'Organization required'}), 400
@@ -201,6 +208,8 @@ def export_cyclonedx():
 
 @bp.route('/api/sbom/export/spdx', methods=['GET'])
 @login_required
+@requires_professional('SBOM Export')
+@limiter.limit("10/hour")
 def export_spdx():
     """Export organization software inventory as SPDX 2.3 JSON."""
     org_id = session.get('organization_id')
