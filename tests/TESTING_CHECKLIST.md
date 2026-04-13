@@ -322,6 +322,148 @@ echo '<14>1 2026-02-11T12:00:00Z sentrikat test - - - Test message' | nc -u loca
 
 ---
 
+---
+
+## Sprint 4: Assignments Management (#29)
+
+**Setup:** Have at least one product with vulnerabilities tracked. Be logged in as `org_admin`.
+
+- [ ] Open dashboard. The Assignments widget appears in the left column.
+- [ ] Click the list icon on the Assignments widget header → Assignments Management panel expands.
+- [ ] Use Remediation Actions table → click person-plus icon → Assign modal opens with product pre-filled.
+- [ ] Fill in assignee email, priority, due date, notes. Click "Assign". Toast shows "Assigned to ...".
+- [ ] New assignment appears in the management table.
+- [ ] **Filter by Status:** select "Open" → only open assignments shown. Select "All" → all visible.
+- [ ] **Filter by Priority:** select "Critical" → only critical shown.
+- [ ] **Search:** type assignee email → filters results.
+- [ ] **Pagination:** create >25 assignments → pagination controls appear → click page 2 works.
+- [ ] **Quick status change:** Click play (▶) on an open assignment → status flips to In Progress with toast.
+- [ ] **Quick resolve:** Click ✓ on in_progress assignment → status flips to Resolved.
+- [ ] **Detail/Edit modal:** Click pencil icon → modal opens with all fields populated.
+- [ ] In modal, change status to "Accepted Risk", add resolution notes, save → table updates.
+- [ ] Delete button on detail modal (org_admin only) → confirms → removes from list.
+- [ ] Try as a non-admin user → mutation buttons hidden / 403 on direct API call.
+- [ ] **Cross-tenant test:** Org A admin tries to GET /api/remediation/assignments/<id> for Org B's assignment → 404.
+- [ ] **Rate limit:** 60+ POST /api/remediation/assignments in 1 minute → 429 after 60.
+
+## Sprint 4: Issue Tracker Integration on Assignments (#30)
+
+**Setup:** Configure Jira (or any tracker) in Admin → Integrations → Issue Trackers. Connect successfully.
+
+- [ ] Open Assign modal → "Also create issue tracker ticket" checkbox is visible.
+- [ ] Without tracker configured → checkbox is hidden.
+- [ ] Check the box, submit → assignment created AND ticket appears in the table "Ticket" column with link.
+- [ ] Click ticket link → opens the tracker issue in a new tab.
+- [ ] Open Detail modal → "Ticket" field shows tracker key + type label "(jira)".
+- [ ] **Tracker failure path:** Misconfigure tracker (wrong API key) → submit → assignment IS created, but warning toast: "Warning: ticket creation failed".
+- [ ] Verify the same flow works with **YouTrack**, **GitHub**, **GitLab** if configured.
+- [ ] Verify multi-tracker: enable Jira + GitHub → tracker_type field in POST selects which one.
+- [ ] DB check: `SELECT tracker_issue_key, tracker_issue_url, tracker_type FROM remediation_assignments WHERE id=?` → all three populated correctly.
+
+## Sprint 4: Email Notifications for Assignments (#31)
+
+**Setup:** Configure SMTP or use Resend in dev mode. Have a test email inbox.
+
+- [ ] Create a new assignment with `assigned_to=test@example.com` → 1 email arrives within 30s.
+- [ ] Email subject: `[SentriKat] New Remediation Assignment`. Body shows priority badge, due date, product, notes.
+- [ ] **Update test (no email expected):** Change status open → in_progress → no email.
+- [ ] **Resolve test:** Change status to "resolved" → 1 email arrives, subject `[SentriKat] Assignment Resolved`.
+- [ ] **Throttle test:** Create 3 assignments in 5 seconds → first one sends email, subsequent same-assignment updates within 1 hour are throttled (logged as "throttled" but no email).
+- [ ] Org admins are NOT CC'd (only the assignee receives the email).
+- [ ] Email volume after 10 create + 10 status changes + 5 resolutions = max 15 emails (NOT 50+).
+- [ ] **HTML escape test:** Assignee notes contain `<script>alert(1)</script>` → email body shows it as literal text, no script execution.
+
+## Sprint 4: SBOM Export (#32)
+
+**Setup:** Have at least 5 products with versions and at least 3 matched CVEs.
+
+- [ ] Open dashboard → Export dropdown → "SBOM Export" section visible.
+- [ ] Click "CycloneDX 1.5 (JSON)" → downloads a JSON file.
+- [ ] Open file → has `bomFormat: "CycloneDX"`, `specVersion: "1.5"`, `components` array, `vulnerabilities` array.
+- [ ] Each component has: type, name, version, purl (e.g. `pkg:apt/openssl/openssl@1.1.1k`), supplier (vendor).
+- [ ] Each vulnerability has: id (CVE), source, ratings, affects refs to components.
+- [ ] Click "SPDX 2.3 (JSON)" → downloads JSON file with `spdxVersion: "SPDX-2.3"`, `packages` array.
+- [ ] Each package has SPDXID, name, versionInfo, externalRefs (cpe23Type if available).
+- [ ] **Validate with online tool:** Upload to https://cyclonedx.github.io/cyclonedx.org/tool-center/ → no validation errors.
+- [ ] **Cross-tenant:** Org A user calls `/api/sbom/export/cyclonedx` → only Org A products in output.
+- [ ] **License gate:** Free user (no Professional license) → 403 with upgrade message.
+- [ ] **Rate limit:** 11+ requests in 1 hour → 429 after 10.
+
+## Sprint 4: Risk Exception Management (#33)
+
+- [ ] Click the shield icon to open the Risk Exceptions panel (or use API directly).
+- [ ] **Create:** Use API: `POST /api/risk-exceptions` with `{justification: "WAF mitigation in place", expires_at: "2026-12-31", cve_id: "CVE-2024-1234", product_id: 1}` → 201.
+- [ ] Exception appears in the panel with status "Active".
+- [ ] Justification truncated to 60 chars in table; full text in tooltip.
+- [ ] **Filter by status:** "Active" → only active visible. "Revoked" → only revoked.
+- [ ] **Revoke:** Click X button on active → confirms → status changes to "Revoked".
+- [ ] **Permanent exception:** Create without `expires_at` → "Expires" column shows "Permanent".
+- [ ] **Expiry warning:** Create with past `expires_at` → `is_expired: true` flag → warning icon shown.
+- [ ] **Required field:** Submit without justification → 400 error "Justification required".
+- [ ] **Cross-tenant:** Try to revoke another org's exception → 404.
+- [ ] **non-admin:** Regular user tries POST → 403.
+- [ ] **Rate limit:** 30+ POSTs/minute → 429 after 30.
+
+## Sprint 4: Agent Delta Scan + HTTP Compression (#34)
+
+**Setup:** Install Linux/macOS/Windows agent on a test machine. Configure to point to test server.
+
+### Linux/macOS agent
+- [ ] First run: agent sends FULL inventory. Server log shows `delta=full`.
+- [ ] Second run (no software changes): agent sends LIGHTWEIGHT heartbeat. Server log shows `delta=unchanged`.
+- [ ] Verify `last_hash.txt` exists at `/var/lib/sentrikat/last_hash.txt` (Linux) or `/usr/local/var/sentrikat/last_hash.txt` (macOS).
+- [ ] Install a new package (e.g. `apt install jq`) → next run sends FULL inventory again.
+- [ ] **24h forced full:** Set system clock forward 25h → next run sends full even if hash unchanged.
+- [ ] **Compression check:** tcpdump on agent → POST body uses `Content-Encoding: gzip` header.
+- [ ] Server log: payload size <2KB after gzip (was 100-500KB before).
+
+### Windows agent
+- [ ] Same checks apply. Hash file at `$env:ProgramData\SentriKat\last_hash.txt`.
+- [ ] PowerShell GZip compression visible in network capture.
+
+### Server-side
+- [ ] **Zip bomb protection:** Send a 1KB compressed payload that decompresses to 100MB → server returns 413 "Decompressed payload too large".
+- [ ] **Oversized compressed:** Send 5MB compressed → server returns 413 "Compressed payload too large".
+- [ ] Normal heartbeat (10KB compressed → 100KB decompressed) → 200 OK.
+
+## Sprint 4: Agent Store-and-Forward (#35)
+
+- [ ] Stop the SentriKat server (or block its hostname in /etc/hosts on the agent machine).
+- [ ] Run agent 5 times → all heartbeats fail → 5 files appear in `/var/lib/sentrikat/spool/` (Linux) or equivalent.
+- [ ] Restart the server / unblock connectivity.
+- [ ] Run agent once → spool files are sent in chronological order BEFORE the new heartbeat.
+- [ ] Spool directory is empty after replay.
+- [ ] **Spool limit:** Block server, run 60+ heartbeats → spool contains 50 files (oldest deleted).
+- [ ] **Replay stops on failure:** Block server again mid-replay → no further replay attempts until next successful heartbeat.
+- [ ] Verify in server logs: each spooled payload received and processed in order.
+
+## Sprint 4: Product Alias / Disambiguation (#36)
+
+- [ ] **Create alias via API:** `POST /api/product-aliases {product_id: 1, alias_vendor: "OpenSSL", alias_product: "openssl-libs"}` → 201.
+- [ ] **List:** `GET /api/product-aliases` → returns the alias with embedded product info.
+- [ ] **Duplicate check:** POST same alias → 409 conflict.
+- [ ] **Cross-tenant:** Try product_id from another org → 403.
+- [ ] **Delete:** `DELETE /api/product-aliases/<id>` → 200 → list is empty.
+- [ ] **Non-admin:** Regular user POST → 403.
+- [ ] **Rate limit:** 30+ POST/minute → 429.
+- [ ] DB: unique constraint enforced on `(organization_id, alias_vendor, alias_product)`.
+
+## Sprint 4: Telemetry / Metrics
+
+- [ ] `GET /metrics` (Prometheus endpoint) → contains `sentrikat_assignments{status="open"}`, `sentrikat_assignments_overdue`, `sentrikat_assignments_with_tracker_ticket`.
+- [ ] Contains `sentrikat_risk_exceptions{status="active"}` and `sentrikat_product_aliases_total`.
+- [ ] All values reflect current DB state.
+
+## Sprint 4: Database & Migration
+
+- [ ] Run `db.create_all()` on a fresh DB → all new tables exist: `remediation_assignments`, `sla_policies`, `risk_exceptions`, `product_aliases`.
+- [ ] `remediation_assignments` table has `tracker_issue_key`, `tracker_issue_url`, `tracker_type` columns.
+- [ ] Composite indexes exist: `idx_assign_org_status`, `idx_assign_org_assignee`, `idx_assign_org_due`, `idx_riskexc_org_status`, `idx_riskexc_org_expiry`.
+- [ ] `product_aliases` has unique constraint `uq_product_alias`.
+- [ ] **Migration from existing prod DB:** Add migration script for new columns/tables (Alembic or manual SQL).
+
+---
+
 ## Test Environment Teardown
 
 ```bash

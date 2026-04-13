@@ -4045,6 +4045,13 @@ class RemediationAssignment(db.Model):
     """Assign a vulnerability match to a user for remediation with a due date."""
     __tablename__ = 'remediation_assignments'
 
+    # Sprint 4: composite indexes for common dashboard queries
+    __table_args__ = (
+        db.Index('idx_assign_org_status', 'organization_id', 'status'),
+        db.Index('idx_assign_org_assignee', 'organization_id', 'assigned_to'),
+        db.Index('idx_assign_org_due', 'organization_id', 'due_date'),
+    )
+
     id = db.Column(db.Integer, primary_key=True)
     organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)
     match_id = db.Column(db.Integer, db.ForeignKey('vulnerability_matches.id', ondelete='CASCADE'), nullable=True, index=True)
@@ -4061,9 +4068,10 @@ class RemediationAssignment(db.Model):
     notes = db.Column(db.Text, nullable=True)
     resolution_notes = db.Column(db.Text, nullable=True)
 
-    # External issue tracker link (Sprint 4 #30)
-    jira_issue_key = db.Column(db.String(100), nullable=True)  # e.g. "VULN-42"
-    jira_issue_url = db.Column(db.String(500), nullable=True)  # Full URL to the ticket
+    # External issue tracker link (Sprint 4 #30) - works with Jira/YouTrack/GitHub/GitLab/Webhook
+    tracker_issue_key = db.Column(db.String(100), nullable=True)  # e.g. "VULN-42"
+    tracker_issue_url = db.Column(db.String(500), nullable=True)  # Full URL to the ticket
+    tracker_type = db.Column(db.String(20), nullable=True)  # jira, youtrack, github, gitlab, webhook
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -4087,8 +4095,12 @@ class RemediationAssignment(db.Model):
             'priority': self.priority,
             'notes': self.notes,
             'resolution_notes': self.resolution_notes,
-            'jira_issue_key': self.jira_issue_key,
-            'jira_issue_url': self.jira_issue_url,
+            'tracker_issue_key': self.tracker_issue_key,
+            'tracker_issue_url': self.tracker_issue_url,
+            'tracker_type': self.tracker_type,
+            # Backward-compat aliases (Sprint 4 #30 - to be removed in v2)
+            'jira_issue_key': self.tracker_issue_key,
+            'jira_issue_url': self.tracker_issue_url,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'resolved_at': self.resolved_at.isoformat() if self.resolved_at else None,
@@ -4135,6 +4147,11 @@ class SlaPolicy(db.Model):
 class RiskException(db.Model):
     """Accept risk for a vulnerability with justification and optional expiry."""
     __tablename__ = 'risk_exceptions'
+
+    __table_args__ = (
+        db.Index('idx_riskexc_org_status', 'organization_id', 'status'),
+        db.Index('idx_riskexc_org_expiry', 'organization_id', 'expires_at'),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id', ondelete='CASCADE'), nullable=False, index=True)

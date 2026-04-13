@@ -144,7 +144,8 @@ PROFESSIONAL_FEATURES = [
     'multi_org',
     'push_agents',  # Agent deployment feature
     'jira_integration',  # Jira ticket creation
-    'compliance_reports'  # CISA BOD 22-01 compliance reports
+    'compliance_reports',  # CISA BOD 22-01 compliance reports
+    'sbom_export',  # Sprint 4 #32 - CycloneDX/SPDX export
 ]
 
 
@@ -949,6 +950,7 @@ def requires_professional(feature=None):
                     'LDAP': 'ldap', 'SAML SSO': 'sso', 'Email Alerts': 'email_alerts',
                     'White Label': 'white_label', 'Integrations': 'push_agents',
                     'Jira Integration': 'jira_integration', 'Issue Tracker Integration': 'jira_integration',
+                    'SBOM Export': 'sbom_export',
                     'SIEM Integration': 'siem_integration', 'SIEM': 'siem_integration',
                     'Audit Export': 'audit_export', 'Backup & Restore': 'backup_restore',
                     'Agent Keys': 'push_agents',
