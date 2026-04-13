@@ -7641,6 +7641,93 @@ def generate_custom_report():
         return jsonify({'error': ERROR_MSGS['internal']}), 500
 
 
+@bp.route('/api/reports/patch-tuesday/trigger', methods=['POST'])
+@login_required
+@admin_required
+def trigger_patch_tuesday_digest():
+    """
+    Manually trigger the Patch Tuesday digest for the current admin's org.
+
+    Useful for testing the email template + for on-demand regeneration
+    outside the monthly schedule. Respects the same quota + alert
+    preference gates as the scheduled job.
+
+    Query/body parameters (optional):
+        days: lookback window in days (default: 7)
+        dry_run: if 'true', returns the built summary without sending
+    """
+    try:
+        current_user_id = session.get('user_id')
+        current_user = User.query.get(current_user_id)
+        if not current_user:
+            return jsonify({'error': 'Not authenticated'}), 401
+
+        org_id = current_user.organization_id
+        if not org_id:
+            return jsonify({'error': 'No organization context'}), 400
+
+        org = Organization.query.get(org_id)
+        if not org:
+            return jsonify({'error': 'Organization not found'}), 404
+
+        # Parse parameters from either JSON body or query string.
+        payload = request.get_json(silent=True) or {}
+        try:
+            days = int(payload.get('days') or request.args.get('days') or 7)
+        except (TypeError, ValueError):
+            days = 7
+        days = max(1, min(days, 60))
+
+        dry_run_raw = str(
+            payload.get('dry_run') or request.args.get('dry_run') or 'false'
+        ).lower()
+        dry_run = dry_run_raw in ('1', 'true', 'yes')
+
+        from datetime import datetime as _dt, timedelta as _td
+        from app.scheduler import (
+            build_patch_tuesday_digest_data,
+            _check_email_quota_for_org,
+        )
+        from app.email_service import send_patch_tuesday_digest
+
+        now = _dt.utcnow()
+        digest_data = build_patch_tuesday_digest_data(
+            org,
+            since_dt=now - _td(days=days),
+            until_dt=now,
+        )
+
+        if dry_run:
+            return jsonify({
+                'success': True,
+                'dry_run': True,
+                'organization': org.name,
+                'digest': digest_data,
+            })
+
+        # Quota check (matches scheduler behavior).
+        if not _check_email_quota_for_org(org.id):
+            return jsonify({
+                'success': False,
+                'error': 'Email quota exhausted for this organization',
+                'digest': digest_data,
+            }), 429
+
+        result = send_patch_tuesday_digest(org, digest_data)
+        status_code = 200 if result.get('success') else 500
+        return jsonify({
+            'success': bool(result.get('success')),
+            'error': result.get('error'),
+            'recipients': result.get('recipients', 0),
+            'organization': org.name,
+            'digest': digest_data,
+        }), status_code
+
+    except Exception as e:
+        logger.exception("Failed to trigger Patch Tuesday digest")
+        return jsonify({'error': ERROR_MSGS['internal']}), 500
+
+
 @bp.route('/api/reports/export', methods=['GET'])
 @login_required
 def export_selected_matches():

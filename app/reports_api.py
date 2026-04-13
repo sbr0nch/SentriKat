@@ -1950,3 +1950,5 @@ def send_syslog_event(event_type, cve_id, severity, product, message, **kwargs):
     except Exception as e:
         logger.error(f"Syslog send failed: {e}")
         return False
+
+

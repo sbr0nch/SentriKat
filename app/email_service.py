@@ -318,3 +318,254 @@ def send_remediation_assignment_notification(assignment, organization, action='c
             f"Failed to send remediation assignment {action} notification "
             f"for assignment {getattr(assignment, 'id', '?')}: {str(e)}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Patch Tuesday digest
+# ---------------------------------------------------------------------------
+
+def send_patch_tuesday_digest(organization, new_vulns_data):
+    """
+    Send the monthly Patch Tuesday digest email to an organization's admins.
+
+    Runs on the Wednesday after Microsoft's Patch Tuesday release. Summarizes
+    new CVEs published in the last 7 days that match the org's tracked
+    products, with emphasis on HIGH/CRITICAL, Microsoft, and actively
+    exploited vulnerabilities.
+
+    Args:
+        organization: Organization model instance.
+        new_vulns_data: dict built by the scheduler with the following keys:
+            {
+                'month_year':        'April 2026',
+                'total_new':         int,
+                'critical_count':    int,
+                'high_count':        int,
+                'medium_count':      int,
+                'low_count':         int,
+                'affected_products': int,     # distinct products in org
+                'top_vulns':         [        # top 10 by CVSS
+                    {
+                        'cve_id':      'CVE-2026-1234',
+                        'vendor':      'Microsoft',
+                        'product':     'Windows 11',
+                        'severity':    'CRITICAL',
+                        'cvss_score':  9.8,
+                        'is_exploited': True,
+                        'description': '...',
+                    },
+                    ...
+                ],
+            }
+
+    Returns:
+        dict: {'success': bool, 'error': str|None, 'recipients': int}
+    """
+    try:
+        # --- Resolve recipients (org admins) ---
+        org_admins = User.query.filter_by(
+            organization_id=organization.id,
+            is_active=True
+        ).filter(
+            (User.role == 'org_admin') | (User.role == 'super_admin') | (User.is_admin == True)
+        ).all()
+
+        admin_emails = [a.email for a in org_admins if a.email]
+        if not admin_emails:
+            logger.info(
+                f"Patch Tuesday digest: no admin recipients for org "
+                f"{organization.name}, skipping"
+            )
+            return {'success': False, 'error': 'No recipients', 'recipients': 0}
+
+        # --- Extract & escape summary fields ---
+        month_year = html_escape(str(new_vulns_data.get('month_year', '')))
+        total_new = int(new_vulns_data.get('total_new', 0) or 0)
+        critical_count = int(new_vulns_data.get('critical_count', 0) or 0)
+        high_count = int(new_vulns_data.get('high_count', 0) or 0)
+        medium_count = int(new_vulns_data.get('medium_count', 0) or 0)
+        low_count = int(new_vulns_data.get('low_count', 0) or 0)
+        affected_products = int(new_vulns_data.get('affected_products', 0) or 0)
+        top_vulns = new_vulns_data.get('top_vulns', []) or []
+
+        safe_org_name = html_escape(str(organization.display_name or organization.name))
+        app_url = _get_app_url()
+
+        # --- Subject ---
+        subject = (
+            f"[SentriKat] Patch Tuesday Digest - {month_year} "
+            f"({total_new} new CVEs)"
+        )
+
+        # --- Severity summary cards ---
+        def _severity_card(label, count, color):
+            return (
+                f'<td align="center" style="padding: 12px; background: white; '
+                f'border: 1px solid #e5e7eb; border-radius: 6px; width: 25%;">'
+                f'<div style="font-size: 11px; color: #6b7280; '
+                f'text-transform: uppercase; letter-spacing: 0.5px;">'
+                f'{html_escape(label)}</div>'
+                f'<div style="font-size: 24px; font-weight: 700; color: {color}; '
+                f'margin-top: 4px;">{count}</div>'
+                f'</td>'
+            )
+
+        severity_table = (
+            '<table role="presentation" width="100%" cellspacing="8" '
+            'cellpadding="0" style="margin: 16px 0;"><tr>'
+            + _severity_card('Critical', critical_count, '#dc2626')
+            + _severity_card('High', high_count, '#f59e0b')
+            + _severity_card('Medium', medium_count, '#3b82f6')
+            + _severity_card('Low', low_count, '#6b7280')
+            + '</tr></table>'
+        )
+
+        # --- Top 10 rows ---
+        severity_colors = {
+            'CRITICAL': '#dc2626',
+            'HIGH': '#f59e0b',
+            'MEDIUM': '#3b82f6',
+            'LOW': '#6b7280',
+        }
+
+        if top_vulns:
+            rows_html = ''
+            for v in top_vulns[:10]:
+                safe_cve = html_escape(str(v.get('cve_id', '')))
+                safe_vendor = html_escape(str(v.get('vendor', '') or ''))
+                safe_product = html_escape(str(v.get('product', '') or ''))
+                severity = (v.get('severity') or 'UNKNOWN').upper()
+                safe_severity = html_escape(severity)
+                sev_color = severity_colors.get(severity, '#6b7280')
+                cvss_score = v.get('cvss_score')
+                safe_cvss = (
+                    html_escape(f"{cvss_score:.1f}")
+                    if isinstance(cvss_score, (int, float)) else 'N/A'
+                )
+                exploited_badge = ''
+                if v.get('is_exploited'):
+                    exploited_badge = (
+                        '<span style="background: #dc2626; color: white; '
+                        'padding: 2px 6px; border-radius: 3px; font-size: 10px; '
+                        'margin-left: 6px; text-transform: uppercase;">'
+                        'Exploited</span>'
+                    )
+                cve_link = f"{app_url}/vulnerabilities?search={safe_cve}" if app_url else '#'
+                safe_cve_link = html_escape(cve_link)
+
+                rows_html += (
+                    '<tr>'
+                    f'<td style="padding: 10px; border-bottom: 1px solid #e5e7eb; '
+                    f'font-family: monospace; font-size: 13px;">'
+                    f'<a href="{safe_cve_link}" style="color: #1e40af; '
+                    f'text-decoration: none;">{safe_cve}</a>{exploited_badge}'
+                    '</td>'
+                    f'<td style="padding: 10px; border-bottom: 1px solid #e5e7eb; '
+                    f'font-size: 13px;">{safe_vendor} {safe_product}</td>'
+                    f'<td style="padding: 10px; border-bottom: 1px solid #e5e7eb; '
+                    f'text-align: center;">'
+                    f'<span style="background: {sev_color}; color: white; '
+                    f'padding: 2px 8px; border-radius: 4px; font-size: 11px; '
+                    f'font-weight: 600;">{safe_severity}</span>'
+                    '</td>'
+                    f'<td style="padding: 10px; border-bottom: 1px solid #e5e7eb; '
+                    f'text-align: right; font-weight: 600; font-size: 13px;">'
+                    f'{safe_cvss}</td>'
+                    '</tr>'
+                )
+
+            top_vulns_html = (
+                '<h3 style="margin: 24px 0 8px 0; color: #1e40af; '
+                'font-size: 16px;">Top New CVEs (by CVSS)</h3>'
+                '<table role="presentation" width="100%" cellspacing="0" '
+                'cellpadding="0" style="background: white; '
+                'border: 1px solid #e5e7eb; border-radius: 6px; '
+                'border-collapse: separate; border-spacing: 0;">'
+                '<thead><tr style="background: #f3f4f6;">'
+                '<th align="left" style="padding: 10px; font-size: 11px; '
+                'color: #6b7280; text-transform: uppercase;">CVE</th>'
+                '<th align="left" style="padding: 10px; font-size: 11px; '
+                'color: #6b7280; text-transform: uppercase;">Product</th>'
+                '<th align="center" style="padding: 10px; font-size: 11px; '
+                'color: #6b7280; text-transform: uppercase;">Severity</th>'
+                '<th align="right" style="padding: 10px; font-size: 11px; '
+                'color: #6b7280; text-transform: uppercase;">CVSS</th>'
+                f'</tr></thead><tbody>{rows_html}</tbody></table>'
+            )
+        else:
+            top_vulns_html = (
+                '<p style="color: #6b7280; font-style: italic; '
+                'margin: 16px 0;">No matching CVEs were published this cycle.</p>'
+            )
+
+        dashboard_url = f"{app_url}/dashboard" if app_url else '#'
+        safe_dashboard_url = html_escape(dashboard_url)
+
+        body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 640px; margin: 0 auto; padding: 20px;">
+                <div style="background: #1e40af; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+                    <h2 style="margin: 0;">Patch Tuesday Digest - {month_year}</h2>
+                    <p style="margin: 6px 0 0 0; font-size: 13px; opacity: 0.9;">
+                        New vulnerabilities affecting {safe_org_name}
+                    </p>
+                </div>
+                <div style="background: #f9fafb; padding: 20px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
+                    <p style="margin-top: 0;">
+                        <strong>{total_new}</strong> new CVE{'s' if total_new != 1 else ''}
+                        published in the last 7 days match your tracked products,
+                        affecting <strong>{affected_products}</strong>
+                        product{'s' if affected_products != 1 else ''} in your organization.
+                    </p>
+
+                    {severity_table}
+
+                    {top_vulns_html}
+
+                    <p style="margin-top: 24px; text-align: center;">
+                        <a href="{safe_dashboard_url}" style="background: #1e40af; color: white; padding: 12px 28px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600;">View in SentriKat dashboard</a>
+                    </p>
+                </div>
+                <div style="margin-top: 20px; padding: 15px; font-size: 12px; color: #6b7280; border-top: 1px solid #e5e7eb;">
+                    <p>This is an automated Patch Tuesday digest from SentriKat.</p>
+                    <p>You are receiving this because you are an administrator of {safe_org_name}.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        from app.email_provider import send_email
+        result = send_email(
+            to=admin_emails,
+            subject=subject,
+            html_body=body,
+            organization_id=organization.id,
+            email_type='report',
+        )
+
+        if result.get('success'):
+            logger.info(
+                f"Patch Tuesday digest sent to {len(admin_emails)} admin(s) "
+                f"for org {organization.name}: {total_new} new CVEs"
+            )
+            return {'success': True, 'error': None, 'recipients': len(admin_emails)}
+        else:
+            logger.error(
+                f"Patch Tuesday digest failed for org {organization.name}: "
+                f"{result.get('error')}"
+            )
+            return {
+                'success': False,
+                'error': result.get('error'),
+                'recipients': len(admin_emails),
+            }
+
+    except Exception as e:
+        logger.error(
+            f"Failed to send Patch Tuesday digest for org "
+            f"{getattr(organization, 'name', '?')}: {e}",
+            exc_info=True,
+        )
+        return {'success': False, 'error': str(e), 'recipients': 0}

@@ -589,6 +589,33 @@
         </div>
     </div>
 
+    <!-- Vulnerability Trends (Sprint 5) -->
+    <div class="card mb-3">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-graph-up-arrow me-2"></i>Vulnerability Trends</span>
+            <div class="d-flex gap-2">
+                <select class="form-select form-select-sm" id="trendDaysSelect" style="width:120px">
+                    <option value="7">Last 7 days</option>
+                    <option value="30" selected>Last 30 days</option>
+                    <option value="60">Last 60 days</option>
+                    <option value="90">Last 90 days</option>
+                </select>
+                <select class="form-select form-select-sm" id="trendMetricSelect" style="width:160px">
+                    <option value="total">Total Matches</option>
+                    <option value="severity" selected>By Severity</option>
+                    <option value="status">Open vs Resolved</option>
+                </select>
+            </div>
+        </div>
+        <div class="card-body py-3">
+            <canvas id="trendsChart" style="max-height: 280px"></canvas>
+            <div id="trendsEmpty" class="text-center text-muted py-3 d-none">
+                <i class="bi bi-graph-down fs-2 opacity-50"></i>
+                <p class="mt-1 mb-0 small">No historical data yet. Snapshots are taken daily at 02:00 UTC.</p>
+            </div>
+        </div>
+    </div>
+
     <!-- Advanced Filters Panel -->
     <div class="card mb-3">
         <div class="card-header py-2 d-flex justify-content-between align-items-center">
@@ -3664,6 +3691,191 @@
             } else { showToast('Failed to revoke', 'danger'); }
         } catch (e) { showToast('Network error', 'danger'); }
     }
+
+    // ====================================================================
+    // Vulnerability Trends Chart (Sprint 5)
+    // ====================================================================
+    async function loadTrendsChart() {
+        const canvas = document.getElementById('trendsChart');
+        const empty = document.getElementById('trendsEmpty');
+        if (!canvas) return;
+
+        const daysSel = document.getElementById('trendDaysSelect');
+        const metricSel = document.getElementById('trendMetricSelect');
+        const days = daysSel ? parseInt(daysSel.value, 10) || 30 : 30;
+        const metric = metricSel ? metricSel.value : 'severity';
+
+        try {
+            const resp = await fetch(`/api/vulnerabilities/trends?days=${days}`);
+            if (!resp.ok) {
+                canvas.classList.add('d-none');
+                empty.classList.remove('d-none');
+                return;
+            }
+            const data = await resp.json();
+            const trends = data.trends || {};
+            const dates = trends.dates || [];
+
+            // Destroy existing chart to avoid memory leaks
+            if (window._trendsChart) {
+                try { window._trendsChart.destroy(); } catch (e) {}
+                window._trendsChart = null;
+            }
+
+            if (!dates.length) {
+                canvas.classList.add('d-none');
+                empty.classList.remove('d-none');
+                return;
+            }
+
+            canvas.classList.remove('d-none');
+            empty.classList.add('d-none');
+
+            // Build datasets based on selected metric
+            let datasets = [];
+            if (metric === 'total') {
+                datasets = [{
+                    label: 'Total Matches',
+                    data: trends.total_matches || [],
+                    borderColor: '#1e40af',
+                    backgroundColor: 'rgba(30, 64, 175, 0.12)',
+                    borderWidth: 2,
+                    tension: 0.25,
+                    fill: true,
+                    pointRadius: 2,
+                    pointHoverRadius: 5
+                }];
+            } else if (metric === 'severity') {
+                datasets = [
+                    {
+                        label: 'Critical',
+                        data: trends.critical || [],
+                        borderColor: '#dc2626',
+                        backgroundColor: 'rgba(220, 38, 38, 0.10)',
+                        borderWidth: 2,
+                        tension: 0.25,
+                        fill: false,
+                        pointRadius: 2,
+                        pointHoverRadius: 5
+                    },
+                    {
+                        label: 'High',
+                        data: trends.high || [],
+                        borderColor: '#f59e0b',
+                        backgroundColor: 'rgba(245, 158, 11, 0.10)',
+                        borderWidth: 2,
+                        tension: 0.25,
+                        fill: false,
+                        pointRadius: 2,
+                        pointHoverRadius: 5
+                    },
+                    {
+                        label: 'Medium',
+                        data: trends.medium || [],
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.10)',
+                        borderWidth: 2,
+                        tension: 0.25,
+                        fill: false,
+                        pointRadius: 2,
+                        pointHoverRadius: 5
+                    },
+                    {
+                        label: 'Low',
+                        data: trends.low || [],
+                        borderColor: '#6b7280',
+                        backgroundColor: 'rgba(107, 114, 128, 0.10)',
+                        borderWidth: 2,
+                        tension: 0.25,
+                        fill: false,
+                        pointRadius: 2,
+                        pointHoverRadius: 5
+                    }
+                ];
+            } else if (metric === 'status') {
+                datasets = [
+                    {
+                        label: 'Open (Unacknowledged)',
+                        data: trends.unacknowledged || [],
+                        borderColor: '#dc2626',
+                        backgroundColor: 'rgba(220, 38, 38, 0.12)',
+                        borderWidth: 2,
+                        tension: 0.25,
+                        fill: false,
+                        pointRadius: 2,
+                        pointHoverRadius: 5
+                    },
+                    {
+                        label: 'Resolved (Acknowledged)',
+                        data: trends.acknowledged || [],
+                        borderColor: '#1e40af',
+                        backgroundColor: 'rgba(30, 64, 175, 0.12)',
+                        borderWidth: 2,
+                        tension: 0.25,
+                        fill: false,
+                        pointRadius: 2,
+                        pointHoverRadius: 5
+                    }
+                ];
+            }
+
+            // Use typeof check because Chart may still be loading via fallback
+            if (typeof Chart === 'undefined') {
+                canvas.classList.add('d-none');
+                empty.classList.remove('d-none');
+                return;
+            }
+
+            window._trendsChart = new Chart(canvas.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { usePointStyle: true, padding: 12, font: { size: 11 } }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(17, 24, 39, 0.95)',
+                            titleColor: '#fff',
+                            bodyColor: '#e5e7eb'
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 10, font: { size: 10 } },
+                            grid: { display: false }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: { precision: 0, font: { size: 10 } },
+                            grid: { color: 'rgba(107, 114, 128, 0.15)' }
+                        }
+                    }
+                }
+            });
+        } catch (e) {
+            console.error('Failed to load vulnerability trends:', e);
+            canvas.classList.add('d-none');
+            empty.classList.remove('d-none');
+        }
+    }
+
+    // Wire up trend dropdown change handlers
+    document.addEventListener('DOMContentLoaded', function() {
+        const daysSel = document.getElementById('trendDaysSelect');
+        const metricSel = document.getElementById('trendMetricSelect');
+        if (daysSel) daysSel.addEventListener('change', loadTrendsChart);
+        if (metricSel) metricSel.addEventListener('change', loadTrendsChart);
+        // Initial load
+        loadTrendsChart();
+    });
 
     // ====================================================================
     // SBOM Export (Sprint 4 #32)
