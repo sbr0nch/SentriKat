@@ -159,3 +159,21 @@ class TestSSOReplay:
         with app.test_client() as c2:
             r2 = c2.get(f'/admin/sso?token={token}')
             assert r2.status_code == 401
+
+
+class TestSSOExit:
+    def test_exit_clears_session_and_redirects_to_login(self, app, tenant_admin):
+        token, _ = _mint_token(tenant_id='sso-admin@example.com')
+        with app.test_client() as c:
+            # Establish an impersonated session.
+            r1 = c.get(f'/admin/sso?token={token}')
+            assert r1.status_code == 302
+            with c.session_transaction() as sess:
+                assert sess.get('impersonated') is True
+            # Exit.
+            r2 = c.get('/admin/sso/exit')
+            assert r2.status_code == 302
+            # Session cleared.
+            with c.session_transaction() as sess:
+                assert 'user_id' not in sess
+                assert 'impersonated' not in sess

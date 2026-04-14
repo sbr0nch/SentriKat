@@ -25,11 +25,36 @@ WEBHOOK_SECRET = 'unit-test-webhook-secret'
 
 
 @pytest.fixture(autouse=True)
-def _set_webhook_secret(monkeypatch, setup_complete):
+def _set_webhook_secret(monkeypatch, setup_complete, app):
     """Seed the webhook secret and ensure setup_complete so the app doesn't
-    return 503 before our handler runs."""
+    return 503 before our handler runs.
+
+    Also tears down the license_revoked / license_suspended flags in
+    SystemSettings after each test. The webhook handler writes these
+    via ``_system_settings_set()`` and without the cleanup every
+    subsequent test (in this file OR cross-file) would see the flags
+    still set — which flips ``LicenseInfo.is_valid`` to False globally
+    and regresses ``test_licensing.py``."""
     monkeypatch.setenv('SENTRIKAT_WEBHOOK_SECRET', WEBHOOK_SECRET)
     yield
+    # Cleanup after each test: remove any license_revoked / license_suspended
+    # flag our handlers may have written so the next test starts from a clean
+    # slate.
+    try:
+        with app.app_context():
+            from app.models import SystemSettings
+            from app import db
+            SystemSettings.query.filter(
+                SystemSettings.key.in_(('license_revoked', 'license_suspended'))
+            ).delete(synchronize_session=False)
+            # Also drop idempotency cache so subsequent tests don't hit
+            # cached replay responses.
+            SystemSettings.query.filter(
+                SystemSettings.key.like('webhook:idempotency:%')
+            ).delete(synchronize_session=False)
+            db.session.commit()
+    except Exception:
+        pass
 
 
 def _sign(body: bytes, secret: str = WEBHOOK_SECRET) -> str:

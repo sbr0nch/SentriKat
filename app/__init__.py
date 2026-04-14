@@ -375,6 +375,8 @@ def create_app(config_class=Config):
     app.register_blueprint(gdpr_api.gdpr_bp)
     from app import license_webhook  # B3: license-server event receiver
     app.register_blueprint(license_webhook.license_webhook_bp)
+    from app import observability_api  # Sprint 6: super-admin cross-repo visibility
+    app.register_blueprint(observability_api.observability_bp)
     from app import sso_api  # Sprint 6 contract: admin SSO impersonation
     app.register_blueprint(sso_api.sso_api_bp)
     from app import remediation_api
@@ -494,6 +496,30 @@ def create_app(config_class=Config):
             except Exception:
                 pass
 
+        # Sprint 6: read license state flags for header banner.
+        license_revoked_banner = None
+        try:
+            revoked_row = SystemSettings.query.filter_by(
+                key='license_revoked', organization_id=None
+            ).first()
+            suspended_row = SystemSettings.query.filter_by(
+                key='license_suspended', organization_id=None
+            ).first()
+            is_revoked = bool(revoked_row and revoked_row.value == 'true')
+            is_suspended = bool(suspended_row and suspended_row.value == 'true')
+            if is_suspended:
+                license_revoked_banner = {
+                    'level': 'suspended',
+                    'message': 'Your subscription is suspended due to a payment issue. Contact support to restore access.',
+                }
+            elif is_revoked:
+                license_revoked_banner = {
+                    'level': 'revoked',
+                    'message': 'Your license has been revoked. Contact support.',
+                }
+        except Exception:
+            license_revoked_banner = None
+
         # Load license info (on-premise) or subscription info (SaaS)
         license_info = None
         subscription_info = None
@@ -568,7 +594,10 @@ def create_app(config_class=Config):
             subscription=subscription_info,
             session_timeout_minutes=session_timeout_minutes,
             app_version=APP_VERSION,
-            display_settings=display_settings
+            display_settings=display_settings,
+            license_revoked_banner=license_revoked_banner,
+            impersonated=session.get('impersonated', False),
+            impersonated_by=session.get('impersonated_by'),
         )
 
     # Setup wizard redirect

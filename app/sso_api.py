@@ -282,3 +282,27 @@ def sso_login():
         user.email, session['organization_id'], tenant_email, nonce,
     )
     return redirect(dest)
+
+
+@sso_api_bp.route('/admin/sso/exit', methods=['GET'])
+def sso_exit():
+    """Terminate an impersonation session.
+
+    Clears session data and redirects to the login page. Does NOT
+    propagate back to the license server — the admin operator who
+    started the impersonation is still authenticated on their own
+    portal and can just close the tab.
+    """
+    was_impersonated = session.get('impersonated', False)
+    impersonator = session.get('impersonated_by', 'unknown')
+    if was_impersonated:
+        logger.info(
+            "SSO impersonation exited by=%s",
+            impersonator,
+        )
+    session.clear()
+    try:
+        dest = url_for('auth.login')
+    except Exception:
+        dest = '/login'
+    return redirect(dest)

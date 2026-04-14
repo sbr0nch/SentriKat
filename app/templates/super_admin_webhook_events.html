@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Webhook Events — Super Admin{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h2 class="mb-0">License Webhook Events Received</h2>
+            <p class="text-muted small mb-0">
+                Events pushed by the upstream SentriKat-web license server
+                to <code>POST /api/license/events</code>. Shows the last {{ event_count }}
+                entries from the idempotency cache (max 200, retention 24h).
+            </p>
+        </div>
+        <a href="/super-admin" class="btn btn-outline-secondary btn-sm">← Back to Super Admin</a>
+    </div>
+
+    {% if events %}
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Received</th>
+                        <th>Event Type</th>
+                        <th>Tenant</th>
+                        <th>Idempotency Key</th>
+                        <th>Result</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for e in events %}
+                    <tr>
+                        <td class="text-nowrap small">
+                            {% if e.received_at %}{{ e.received_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC{% else %}—{% endif %}
+                        </td>
+                        <td><code>{{ e.event_type }}</code></td>
+                        <td class="small">{{ e.tenant_id or '—' }}</td>
+                        <td class="text-muted small font-monospace">{{ e.idempotency_key[:8] }}…</td>
+                        <td>
+                            {% set status = e.result.get('status', '—') if e.result else '—' %}
+                            {% if status == 'ok' %}
+                                <span class="badge bg-success">{{ status }}</span>
+                                {% if e.result.get('action') %}
+                                    <small class="text-muted ms-1">{{ e.result['action'] }}</small>
+                                {% endif %}
+                            {% elif status == 'error' %}
+                                <span class="badge bg-danger">{{ status }}</span>
+                                <small class="text-muted ms-1">{{ e.result.get('error', '') }}</small>
+                            {% else %}
+                                <span class="badge bg-secondary">{{ status }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <button type="button" class="btn btn-outline-secondary btn-sm"
+                                    data-bs-toggle="collapse" data-bs-target="#event-{{ loop.index }}">
+                                Details
+                            </button>
+                        </td>
+                    </tr>
+                    <tr class="collapse" id="event-{{ loop.index }}">
+                        <td colspan="6" class="bg-light">
+                            <pre class="small mb-0">{{ e.full | tojson(indent=2) }}</pre>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% else %}
+    <div class="alert alert-info">
+        No webhook events received yet. When the upstream license server
+        sends its first event (plan change, revocation, suspension, etc.),
+        it will appear here.
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
