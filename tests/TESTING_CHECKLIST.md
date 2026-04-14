@@ -1,14 +1,180 @@
-# SentriKat Secondary Features Testing Checklist
+# SentriKat — PRE-LAUNCH MANUAL TESTING CHECKLIST
 
-## Prerequisites
+> **Stampa questo documento e percorrilo riga per riga con una penna in mano
+> prima del lancio commerciale.** Ogni `[ ]` e' un test che devi fare. Segna
+> `X` se passa, `F` se fallisce, `S` se lo skippi consapevolmente (scrivi il
+> motivo a lato).
+
+**Target di completamento**: tutto verde (o tutti gli `S` consapevoli)
+prima di annunciare pubblicamente il prodotto.
+
+**Tempo stimato**: 4-6 ore per una prima passata completa. Si puo' spalmare
+su 2 giorni.
+
+**Stato attuale** (2026-04-14): il codice e' **READY**. Test suite
+automatica 1.328/1.329 passing. Sprint 4+5 audit completato, tutti i fix
+critici applicati. Vedi `docs/PRE_LAUNCH_AUDIT_AND_TESTING_PLAN.md`
+PARTE 9 per il report completo dell'audit.
+
+---
+
+## HOW TO USE
+
+1. **Parti dalla PART A** (prerequisites). Se qualcosa nella A non esiste,
+   fermati e fixalo prima di toccare qualsiasi test.
+2. **Poi fai la PART B** (30 minuti di smoke test critical path). Se
+   qualcosa in B fallisce, **STOP**: c'e' un blocker, non andare oltre.
+3. **PART C-E** sono i test di feature esistenti, ereditati dalla
+   TESTING_CHECKLIST storica. Puoi skippare le feature che non vuoi
+   abilitare al lancio (LDAP/SAML se non hai customer enterprise, ecc.)
+   — segnali `S` e basta.
+4. **PART F-H** (cross-tenant, browser, 3 OS agent) sono i test
+   "pre-launch quality gate": sono i piu' noiosi ma sono quelli che
+   ti evitano un flop al lancio.
+5. **PART I** e' il checklist operativo di go-live — DNS, SSL, backup,
+   monitoring, rollback plan. Si fa l'ultimo giorno.
+6. **PART J** e' cosa monitorare nelle prime 48 ore dopo il lancio.
+
+Ogni sezione ha un'intestazione con il **tempo stimato**. Se stai finendo
+il tempo, skippa il piu' possibile delle PART C-E (feature) ma non le
+PART B, F, I (smoke, cross-tenant, go-live).
+
+---
+
+# PART A — PREREQUISITES (10 min)
+
+Prima di iniziare qualsiasi test ti serve l'ambiente pronto.
+
+## A.1 Istanza di test accessibile
+
+- [ ] L'istanza SentriKat e' raggiungibile su HTTPS (es.
+      `https://staging.sentrikat.com` o `https://localhost` con self-signed)
+- [ ] `curl -sk $BASE/api/health` ritorna `{"status":"healthy",...}` con HTTP 200
+- [ ] La dashboard apre nel browser senza errori nella console JS
+
+## A.2 Due utenti di test (per cross-tenant)
+
+- [ ] **User A (org A)**: email `testA@example.com`, password nota,
+      organization "Org A" con almeno 10 prodotti + 3 vulnerabilita' KEV
+- [ ] **User B (org B)**: email `testB@example.com`, password nota,
+      organization "Org B" con almeno 5 prodotti + 1 vulnerabilita' KEV
+- [ ] User A e User B **non condividono** alcun product, alcun asset,
+      alcun match (cross-tenant pulito)
+
+## A.3 Strumenti locali
+
+- [ ] `curl` installato
+- [ ] `python3` con `json.tool` (per pretty print)
+- [ ] Un secondo browser installato (se fai test con Chrome, avere
+      Firefox pronto, e viceversa)
+- [ ] Un terminale aperto sulla VM (per `docker compose logs`)
+
+## A.4 Backup del DB (non negoziabile)
+
+- [ ] Backup completo del DB di produzione salvato in una directory
+      off-box: `docker compose exec -T db pg_dump -U sentrikat sentrikat > ~/sentrikat-backup-YYYYMMDD.sql`
+- [ ] Dimensione del backup verificata (`ls -lh`) — deve essere > 1 MB,
+      non 0 bytes
+- [ ] Procedura di restore testata almeno una volta su staging:
+      `docker compose exec -T db psql -U sentrikat -d sentrikat < ~/backup.sql`
+
+## A.5 Cookies di sessione per curl
 
 ```bash
-# Start test environment (Keycloak + OpenLDAP + Syslog)
-./tests/setup-test-env.sh
-
-# Start SentriKat (development mode)
-python run.py
+# Salva il cookie di sessione per gli smoke test curl
+# Dopo aver loggato in browser come user A, apri DevTools > Application > Cookies
+# Copia il valore di 'session' e usalo qui
+export BASE="https://app.sentrikat.com"   # adatta al tuo dominio
+export COOKIE_A="session=IL_COOKIE_DI_USER_A"
+export COOKIE_B="session=IL_COOKIE_DI_USER_B"
 ```
+
+- [ ] `$BASE`, `$COOKIE_A`, `$COOKIE_B` esportati nel tuo terminale
+
+---
+
+# PART B — SMOKE TEST CRITICAL PATH (30 min, OBBLIGATORIO)
+
+Questa e' la "golden path" del prodotto: il percorso che un customer reale
+fara' nei primi 30 minuti. Se QUALCOSA qui non funziona, **il prodotto non
+e' pronto per il lancio**, fermati e sistema.
+
+## B.1 Login e dashboard (5 min)
+
+- [ ] Apri `$BASE` nel browser — atterri sulla pagina di login
+- [ ] Login come User A — sei reindirizzato alla dashboard senza errori
+- [ ] La dashboard carica entro 3 secondi
+- [ ] La console del browser non mostra errori JS rossi
+- [ ] Vedi almeno: priority matrix (cards critical/high/medium/low),
+      widget "Vulnerability Trends" (Chart.js), lista top vulnerabilita'
+- [ ] Widget "Vulnerability Trends" mostra almeno 1 punto dati O lo
+      stato vuoto "No trend data yet"
+- [ ] Il menu header mostra il nome dell'org attiva (User A → "Org A")
+
+## B.2 Inventory e agenti (5 min)
+
+- [ ] Menu → Inventory → vedi i prodotti di Org A (almeno 10)
+- [ ] Click su un prodotto → dettaglio del prodotto carica
+- [ ] Menu → Agents (o Endpoints) → vedi gli asset di Org A
+- [ ] Ogni asset mostra hostname, OS, last_seen, stato (online/offline)
+
+## B.3 Vulnerabilita' e matching (5 min)
+
+- [ ] Menu → Vulnerabilities → vedi la lista dei match
+- [ ] Filtri funzionano: severity=critical → lista si aggiorna
+- [ ] Click su un match → dettaglio CVE con:
+      - CVE ID
+      - CVSS score + fonte (NVD/CVE.org/EUVD)
+      - EPSS percentile (se disponibile)
+      - Prodotto affetto + versione
+      - Link alla KEV entry (se e' in CISA KEV)
+- [ ] Un match e' acknowledgeable: click "Acknowledge" → status cambia
+
+## B.4 Assignment + tracker ticket (5 min)
+
+- [ ] Da un match, click "Create Assignment" (o simile)
+- [ ] Compila: assignee (te stesso), priority=high, due_date in 2 settimane
+- [ ] Salva → assignment appare nella pagina Assignments
+- [ ] **Se hai configurato Jira/GitHub:** click "Create Ticket" →
+      il ticket viene creato sul tracker esterno, e `tracker_issue_key`
+      + `tracker_issue_url` compaiono sull'assignment
+- [ ] Apri Email → ricevi (o vedi nei log) la notifica email di
+      "assignment created"
+
+## B.5 Export SBOM (3 min)
+
+- [ ] Dashboard → Export dropdown → "SBOM — CycloneDX 1.5"
+- [ ] Download un file JSON
+- [ ] Apri il file → `bomFormat: "CycloneDX"`, `specVersion: "1.5"`,
+      array `components` non vuoto
+- [ ] Ripeti per "SPDX 2.3" → download JSON, `spdxVersion: "SPDX-2.3"`
+- [ ] Ripeti per "STIX 2.1" → download JSON, `type: "bundle"`,
+      array `objects` non vuoto
+
+## B.6 Compliance report (5 min)
+
+- [ ] Dashboard → Reports → Compliance → "PCI-DSS v4.0"
+- [ ] Click JSON → download, apri il file, verifica che ci sia il blocco
+      `integrity` con `algorithm: "HMAC-SHA256"` e un `hash`
+- [ ] Click PDF → download, apri il PDF, verifica:
+      - Prima pagina: nome org, data, framework
+      - Una pagina per ogni requirement (6.3, 11.3)
+      - Ogni requirement ha PASS/PARTIAL/FAIL/NOT_APPLICABLE
+      - Footer con integrity hash
+- [ ] Ripeti per ISO 27001 e SOC 2
+
+## B.7 Scan / inventory fresh (2 min, opzionale)
+
+- [ ] Menu → Agents → Install Linux Agent (copia il comando)
+- [ ] Su una VM di test, incolla il comando `curl ... | bash`
+- [ ] L'agent si installa, si registra, invia il primo inventory
+- [ ] Torna sulla dashboard → dopo 30 secondi vedi l'asset nuovo +
+      i match che si aggiornano
+
+**Verdict PART B:**
+
+- [ ] ✅ TUTTI i check sopra sono verdi → puoi andare alle PART C-J
+- [ ] ❌ QUALCOSA e' rosso → **STOP**. Fissa prima di procedere.
 
 ---
 
