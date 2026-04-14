@@ -464,6 +464,90 @@ echo '<14>1 2026-02-11T12:00:00Z sentrikat test - - - Test message' | nc -u loca
 
 ---
 
+## Sprint 5: Vulnerability Trending Dashboard
+
+- [ ] Open the main dashboard → "Vulnerability Trends" Chart.js widget is visible.
+- [ ] Widget has 3 view toggles: **Total**, **By severity**, **Open vs resolved**.
+- [ ] Switch views → chart re-renders without page reload.
+- [ ] Empty state: fresh org with zero snapshots → widget shows "No trend data yet — first snapshot will be captured at 02:00 UTC".
+- [ ] **API:** `GET /api/vulnerabilities/trends` → returns array of snapshots with `{date, total, critical, high, medium, low, open, resolved}`.
+- [ ] **Filter by window:** `?days=7` → last 7 days only. `?days=30` (default) → last 30 days.
+- [ ] **Force snapshot (admin):** `POST /api/vulnerabilities/trends/snapshot` → 200, new row added to `vulnerability_snapshots` table.
+- [ ] **Cross-tenant:** Org A user calls the endpoint → only Org A snapshots returned.
+- [ ] **Non-admin:** Force snapshot as regular user → 403.
+- [ ] Scheduler job `snapshot_vulnerabilities_daily` runs at 02:00 UTC → row inserted for every active org.
+- [ ] With ≥2 snapshots, the chart displays a continuous line (no gaps).
+
+## Sprint 5: STIX 2.1 Export
+
+- [ ] Open dashboard → Export dropdown → "STIX 2.1 (JSON)" option visible.
+- [ ] Click it → downloads a JSON bundle.
+- [ ] Bundle has `type: "bundle"`, `id` starts with `bundle--`, `objects` array.
+- [ ] Objects include at least one `vulnerability` SDO per matched CVE (with `external_references[0].source_name = "cve"`).
+- [ ] Objects include `software` SCOs (one per affected product) with `name` and `version`.
+- [ ] Objects include `relationship` SROs with `relationship_type: "affects"` linking vuln → software.
+- [ ] **Validate with online tool:** Upload to https://oasis-open.github.io/cti-stix-validator/ → no schema errors.
+- [ ] **Cross-tenant:** Org A user → only Org A data in the bundle.
+- [ ] **License gate:** Free user → 403 with upgrade message.
+- [ ] **Rate limit:** 11+ requests in 1 hour → 429.
+
+## Sprint 5: Patch Tuesday Digest Automation
+
+- [ ] Scheduler registers job `patch_tuesday_digest` with cron `day=8-14, dow=wed, hour=9, minute=0` (fires the 2nd Wednesday of each month at 09:00 local).
+- [ ] `app.scheduler.get_jobs()` → includes the patch_tuesday_digest job.
+- [ ] **Manual trigger dry-run:** `POST /api/reports/patch-tuesday/trigger?dry_run=true` → 200 → returns `{organizations_scanned, matches_found, email_would_be_sent: true/false}` but NO email actually sent.
+- [ ] **Manual trigger live:** `POST /api/reports/patch-tuesday/trigger` (admin, no dry_run) → email sent to org admin(s) with digest body.
+- [ ] Digest email subject contains the month (e.g. "SentriKat Patch Tuesday Digest — April 2026").
+- [ ] Digest body lists MSRC-published CVEs that match the fleet, grouped by severity.
+- [ ] **No new CVEs since last run:** digest skipped with log `Patch Tuesday: no new matching CVEs for <org>`.
+- [ ] **Email quota check:** Org over Resend quota → skipped with log `Patch Tuesday: email quota exhausted for <org>`.
+- [ ] **Non-admin:** regular user POST `/trigger` → 403.
+- [ ] Uses `Vulnerability.date_added` (not `published_date` which does not exist on the model).
+
+## Sprint 5: Compliance Gap Analysis Reports (PCI / ISO / SOC 2)
+
+### PCI-DSS v4.0 Report
+
+- [ ] `GET /api/reports/compliance/pci-dss` → 200, returns JSON with top-level keys `framework`, `version`, `generated_at`, `organization`, `requirements`, `integrity`.
+- [ ] `requirements` array contains entries for Req 6.3 (Develop and maintain secure systems) and Req 11.3 (Vulnerability management).
+- [ ] Each requirement has `id`, `title`, `status` (one of `PASS`, `PARTIAL`, `FAIL`, `NOT_APPLICABLE`), `evidence`, `gaps`, `recommendations`.
+- [ ] `integrity` block has `algorithm: "HMAC-SHA256"`, `hash`, and `signed_at`.
+- [ ] **PDF variant:** `GET /api/reports/compliance/pci-dss?format=pdf` → downloads a PDF, opens correctly, cover page shows org name + date.
+- [ ] **License gate:** Free user → 403 with upgrade message (or Compliance Pack add-on message).
+- [ ] **Cross-tenant:** Org A user → only Org A data in report.
+- [ ] Integrity hash verifies: recompute HMAC over the canonical JSON → matches `integrity.hash`.
+
+### ISO/IEC 27001:2022 Report
+
+- [ ] `GET /api/reports/compliance/iso-27001` → 200.
+- [ ] `requirements` covers Annex A.8.8 (Management of technical vulnerabilities), A.8.16 (Monitoring activities), A.5.24 (Incident management planning).
+- [ ] Each control has status + evidence + gaps + recommendations.
+- [ ] `GET /api/reports/compliance/iso-27001?format=pdf` → PDF OK.
+- [ ] Integrity block present and verifies.
+
+### SOC 2 Report
+
+- [ ] `GET /api/reports/compliance/soc2` → 200.
+- [ ] `requirements` covers CC7.1, CC7.2, CC7.4 (System monitoring) and CC6.6 (Vulnerability management).
+- [ ] PDF variant works.
+- [ ] Integrity block verifies.
+
+### Cross-cutting compliance report checks
+
+- [ ] **Rate limit:** 11+ report requests in 1 hour → 429.
+- [ ] **Content-Type:** JSON variant returns `application/json`, PDF variant returns `application/pdf` + `Content-Disposition: attachment`.
+- [ ] Status mapping is deterministic: same posture → same status across calls.
+- [ ] Status `NOT_APPLICABLE` is used when a control does not apply (e.g. no card data → PCI 11.3.x reduced).
+- [ ] Report generation time for a fleet of ~500 products completes in under 5 seconds.
+
+## Sprint 5: Database & Migration
+
+- [ ] `vulnerability_snapshots` table exists with `(organization_id, date)` as (implicit or explicit) uniqueness key — duplicate insert for same day is idempotent or caught.
+- [ ] Indexes on `vulnerability_snapshots (organization_id, date)`.
+- [ ] **Migration from existing prod DB:** Alembic migration or manual SQL captured in `docs/PRE_LAUNCH_AUDIT_AND_TESTING_PLAN.md` for the `vulnerability_snapshots` table.
+
+---
+
 ## Test Environment Teardown
 
 ```bash

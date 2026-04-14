@@ -81,12 +81,13 @@ SentriKat is an **Enterprise Vulnerability Management Platform** that helps orga
 
 | Metric | Value |
 |--------|-------|
-| Total Python Code | 32,428 lines |
-| Database Models | 28 SQLAlchemy models |
-| API Endpoints | 250+ REST endpoints |
-| Frontend Templates | 6 major pages (800+ KB HTML) |
-| External Integrations | 15+ (Jira, LDAP, SAML, etc.) |
-| Test Coverage | pytest suite included |
+| Total Python Code | ~50,000+ lines (post Sprint 4+5) |
+| Database Models | 35+ SQLAlchemy models |
+| API Endpoints | 280+ REST endpoints |
+| Frontend Templates | 9+ major pages |
+| External Integrations | 15+ (Jira, GitHub, GitLab, YouTrack, LDAP, SAML, OSV, MSRC, etc.) |
+| Test Coverage | 1,024+ pytest tests across 30+ test files |
+| Compliance Frameworks | CISA BOD 22-01, EU NIS2, PCI-DSS v4.0, ISO/IEC 27001:2022, SOC 2, EU CRA (SBOM) |
 
 ---
 
@@ -131,9 +132,37 @@ SentriKat is an **Enterprise Vulnerability Management Platform** that helps orga
 
 ### Reporting & Compliance
 - **CISA BOD 22-01**: Compliance dashboard and reports
+- **EU NIS2**: Article 21(2)(d)(e)(g) gap analysis report
+- **PCI-DSS v4.0**: Gap analysis report (Req 6.3 secure systems, 11.3 vulnerability management) — JSON / PDF
+- **ISO/IEC 27001:2022**: Gap analysis report (Annex A.8.8, A.8.16, A.5.24) — JSON / PDF
+- **SOC 2**: Gap analysis report (CC7.1, CC7.2, CC7.4, CC6.6) — JSON / PDF
+- **Cyber Resilience Act (EU 2024/2847)**: SBOM export ready for vendor obligations (effective Sep 2026)
 - **Scheduled Reports**: PDF export via email
-- **Vulnerability Trends**: Historical tracking with snapshots
+- **Vulnerability Trends**: Historical tracking with daily snapshots + Chart.js dashboard widget
+- **Patch Tuesday Digest**: Monthly automated email on the 2nd Wednesday covering MSRC CVEs affecting the fleet
+- **Integrity block**: All compliance reports carry SHA256 + HMAC signatures for audit evidence
 - **Shared Dashboards**: Token-based public links
+
+### SBOM Export (Software Bill of Materials)
+- **CycloneDX 1.5 JSON**: Industry-standard SBOM with components, dependencies, vulnerabilities (purl format)
+- **SPDX 2.3 JSON**: Linux Foundation SBOM standard with package definitions and external refs
+- **STIX 2.1 Bundle**: Cyber threat intelligence format with vulnerability SDOs, software SCOs, relationship SROs
+- **Use cases**: CRA compliance, EO 14028 (US federal), supply chain security, threat intel sharing (MISP/ISAC)
+
+### Remediation Workflows
+- **Assignments**: Create remediation tasks with due dates, severity, assignee, status (open/in_progress/resolved)
+- **SLA Policies**: Configurable SLA per severity with automatic due_date computation
+- **SLA Compliance**: Real-time dashboard of compliant vs overdue assignments
+- **Issue Tracker Integration**: Native Jira / GitHub / GitLab / YouTrack / Webhook ticket creation with `tracker_issue_key` / `tracker_issue_url` / `tracker_type` tracking
+- **Email Notifications**: Throttled (max 1/assignment/hour, only on created and resolved) to preserve Resend quotas
+- **Risk Exception Management**: Accept-risk workflow with mandatory justification, optional expiry, ISO/SOC2 evidence
+- **Product Aliases**: Vendor/product disambiguation for fleet normalization
+
+### Agent Resilience (Sprint 4)
+- **Delta Scan**: SHA256 hash-based change detection — full inventory only when software actually changes (~90% bandwidth reduction)
+- **Gzip Compression**: All inventory + heartbeat payloads gzip-compressed with server-side zip-bomb protection (10MB decompressed / 2MB compressed limits)
+- **Store-and-Forward**: Spool directory persists failed heartbeats and replays them in chronological order (max 50 spooled files)
+- **24h forced full**: Heartbeat re-syncs full inventory at least daily even if hash unchanged
 
 ## 2.2 Editions
 
@@ -644,17 +673,21 @@ CREATE TABLE product_installation (
 );
 ```
 
-## 5.3 Total: 28 Tables
+## 5.3 Total: 35+ Tables (post Sprint 4+5)
 
 | Category | Tables |
 |----------|--------|
 | Auth/Users | User, Organization, UserOrganization, SystemSettings |
-| Products | Product, ServiceCatalog, ProductExclusion, UserCpeMapping, CpeDictionaryEntry, ProductVersionHistory |
+| Products | Product, ServiceCatalog, ProductExclusion, UserCpeMapping, CpeDictionaryEntry, ProductVersionHistory, **ProductAlias** |
 | Vulnerabilities | Vulnerability, VulnerabilityMatch, VulnerabilitySnapshot, VendorFixOverride |
 | Agents | AgentApiKey, Asset, ProductInstallation, AgentEvent, InventoryJob, AgentLicense, AgentUsageRecord |
 | Containers | ContainerImage, ContainerVulnerability |
+| **Remediation & Risk** | **RemediationAssignment, SLAPolicy, RiskException** |
 | Reporting | ScheduledReport, HealthCheckResult |
 | Logging | SyncLog, AlertLog, StaleAssetNotification |
+
+**New in Sprint 4 (4 models):** RemediationAssignment, SLAPolicy, RiskException, ProductAlias.
+**Existing model used in Sprint 5:** VulnerabilitySnapshot (now actively populated by the daily snapshot job and read by the trending dashboard widget + `/api/vulnerabilities/trends` endpoint).
 
 ---
 
@@ -679,7 +712,63 @@ GET    /api/products/<id>            # Get details
 PUT    /api/products/<id>            # Update
 DELETE /api/products/<id>            # Delete
 POST   /api/products/rematch         # Re-run CVE matching
+
+# Product Aliases (Sprint 4 — vendor/product disambiguation)
+GET    /api/product-aliases          # List aliases for the org
+POST   /api/product-aliases          # Create alias (alias_vendor + alias_product → product_id)
+DELETE /api/product-aliases/<id>     # Delete alias
 ```
+
+## 6.2bis Remediation, SLA, Risk Exceptions (Sprint 4)
+
+```
+# Remediation Assignments
+GET    /api/remediation/assignments              # List (filters: status, assignee, due)
+POST   /api/remediation/assignments              # Create assignment
+GET    /api/remediation/assignments/<id>         # Get details
+PUT    /api/remediation/assignments/<id>         # Update (status, assignee, tracker_issue_key)
+DELETE /api/remediation/assignments/<id>         # Delete
+
+# SLA Policies
+GET    /api/sla/policies                         # List policies
+POST   /api/sla/policies                         # Create policy
+PUT    /api/sla/policies/<id>                    # Update
+DELETE /api/sla/policies/<id>                    # Delete
+GET    /api/sla/compliance                       # Real-time compliance summary
+
+# Risk Exceptions (accept-risk workflow with justification + expiry)
+GET    /api/risk-exceptions                      # List exceptions
+POST   /api/risk-exceptions                      # Create exception
+PUT    /api/risk-exceptions/<id>                 # Update (extend expiry, change status)
+DELETE /api/risk-exceptions/<id>                 # Revoke / delete
+```
+
+## 6.2ter SBOM Export (Sprint 4 + Sprint 5)
+
+```
+GET    /api/sbom/export/cyclonedx                # CycloneDX 1.5 JSON bundle
+GET    /api/sbom/export/spdx                     # SPDX 2.3 JSON bundle
+GET    /api/sbom/export/stix21                   # STIX 2.1 bundle (vuln SDOs + software SCOs + relationship SROs)
+```
+
+All SBOM endpoints are licensing-gated (feature key `sbom_export` in
+`PROFESSIONAL_FEATURES`) and rate-limited to 10 requests/hour per organization.
+
+## 6.2quater Compliance Reports (Sprint 5)
+
+```
+GET    /api/reports/compliance/bod-22-01         # CISA BOD 22-01 (existing)
+GET    /api/reports/compliance/nis2              # EU NIS2 (existing)
+GET    /api/reports/compliance/pci-dss           # PCI-DSS v4.0 gap analysis (Sprint 5)
+GET    /api/reports/compliance/iso-27001         # ISO/IEC 27001:2022 gap analysis (Sprint 5)
+GET    /api/reports/compliance/soc2              # SOC 2 gap analysis (Sprint 5)
+POST   /api/reports/patch-tuesday/trigger        # Manual trigger of monthly Patch Tuesday digest (dry_run supported)
+```
+
+All compliance reports support `?format=json` (default) or `?format=pdf`. Each
+report carries an `integrity` block with HMAC-SHA256 over the canonical JSON
+body so auditors can verify the report has not been tampered with after
+generation.
 
 ## 6.3 Vulnerability Management
 

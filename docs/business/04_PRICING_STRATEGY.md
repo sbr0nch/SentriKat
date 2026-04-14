@@ -3,6 +3,28 @@
 
 ---
 
+> **⚠️ POST SPRINT 5 PRICING UPDATE (April 2026)**
+>
+> This document describes the **original** pricing strategy from February 2026.
+> After the Sprint 4 + Sprint 5 release (15 new features, including SBOM export,
+> compliance gap analysis reports for PCI-DSS/ISO 27001/SOC 2, remediation
+> assignments, vulnerability trending, Patch Tuesday automation), a price
+> increase recommendation has been written up in
+> **[`22_PRICING_ANALYSIS_POST_SPRINT_5.md`](./22_PRICING_ANALYSIS_POST_SPRINT_5.md)**.
+>
+> The proposed updated SaaS tiers are:
+> - Free: €0 (unchanged)
+> - Starter: €59/month (unchanged)
+> - Pro: **€199 → €249/month**
+> - Business: **€499 → €649/month**
+> - Enterprise: **€999 → €1,499/month**
+> - **NEW** Compliance Pack add-on: +€199/month (unlocks PCI-DSS / ISO 27001 / SOC 2 reports on any tier)
+>
+> Existing customers are grandfathered at the legacy price. See file 22 for
+> margin analysis, break-even, and rollout plan.
+
+---
+
 ## PRICING PHILOSOPHY
 
 ### Core Principles

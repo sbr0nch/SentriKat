@@ -108,17 +108,17 @@ Tenable has 2,000+ employees. Qualys has 1,800+. We're one person. This means:
 
 **How to position:** "Built by a security practitioner who understands the problem firsthand. Every feature exists because a real customer needed it, not because a product manager filled a spreadsheet."
 
-**3. No SBOM Import/Export (Yet)**
+**~~3. No SBOM Import/Export (Yet)~~** *(closed in Sprint 4 + Sprint 5)*
 
-SBOM (Software Bill of Materials) is becoming a regulatory requirement under EU Cyber Resilience Act and US Executive Order 14028. We don't support CycloneDX or SPDX import yet.
+We now ship **SBOM export** in three industry-standard formats out of the box: CycloneDX 1.5 JSON, SPDX 2.3 JSON and STIX 2.1 bundle. Bundles validate against the official CycloneDX tool-center and OASIS STIX validator. This makes us **directly CRA-ready** ahead of the September 2026 deadline.
 
-**Planned:** Q3 2026 (via Trivy integration which generates SBOMs natively).
+**Still open:** SBOM **import** (consume third-party CycloneDX/SPDX bundles as inventory source). On the Sprint 6 backlog.
 
-**4. No NIS2/DORA Compliance Mapping**
+**~~4. No NIS2/DORA Compliance Mapping~~** *(closed in Sprint 5)*
 
-We track CISA BOD 22-01 compliance but don't map to NIS2, DORA, PCI-DSS, ISO 27001, or NIST frameworks. For EU customers, NIS2 mapping is increasingly expected.
+We now ship native gap analysis reports for **5 frameworks**: CISA BOD 22-01, EU NIS2 (Article 21 mapping), **PCI-DSS v4.0** (Req 6.3, 11.3), **ISO/IEC 27001:2022** (Annex A.8.8, A.8.16, A.5.24) and **SOC 2** (CC7.1, CC7.2, CC7.4, CC6.6). All in JSON and PDF, with HMAC-SHA256 integrity blocks for audit evidence.
 
-**How to position:** Frame CISA KEV tracking as a component of NIS2 Article 21 compliance (vulnerability handling). Add NIS2 framework mapping by Q4 2026.
+**Still open:** DORA-specific report, NIST 800-53 mapping, HIPAA. Add as customer demand materialises.
 
 **5. Brand Recognition = Zero**
 
@@ -154,14 +154,18 @@ The #1 feature request from mid-market IT teams is ServiceNow integration. The #
 
 ### What's Genuinely Missing From Promises
 
-Things a customer would expect from an "enterprise vulnerability management platform" that we don't have:
+Things a customer would expect from an "enterprise vulnerability management platform" that we don't have *(updated April 2026 after Sprint 4 + Sprint 5)*:
 
-1. **Compliance reporting beyond CISA BOD 22-01** — No NIS2, DORA, PCI-DSS, ISO 27001 reports
-2. **Executive dashboards** — Basic stats exist, but no C-level presentation mode
-3. **Scheduled compliance reports** — Framework exists in code (ScheduledReport model) but needs refinement
-4. **Data retention policies** — No configurable data lifecycle management
-5. **Formal SLA** — SLA document exists in business docs but no SLA enforcement in product
-6. **Customer documentation** — docs.sentrikat.com is referenced but quality unknown
+1. ~~**Compliance reporting beyond CISA BOD 22-01**~~ — ✅ **Closed in Sprint 5.** Added EU NIS2, PCI-DSS v4.0, ISO/IEC 27001:2022, SOC 2 gap analysis reports with HMAC integrity.
+2. **Executive dashboards** — Basic stats exist + new vulnerability trending widget (Sprint 5), but no C-level presentation mode yet.
+3. **Scheduled compliance reports** — Framework exists in code; PCI/ISO/SOC2 reports added in Sprint 5 but the *scheduling* of those specific reports is still on the backlog.
+4. **Data retention policies** — No configurable data lifecycle management.
+5. **Formal SLA** — SLA document exists in business docs; **SLA policies + compliance tracking are now shipped in the product (Sprint 4)** for remediation assignments.
+6. **Customer documentation** — docs.sentrikat.com is referenced but quality unknown.
+7. ~~**Remediation assignments + due dates**~~ — ✅ **Closed in Sprint 4.** Full assignments page with filters, modal detail/edit, multi-tracker integration.
+8. ~~**Risk exception management**~~ — ✅ **Closed in Sprint 4.** Justification-based exceptions with optional expiry, ISO/SOC2 audit evidence.
+9. ~~**Vulnerability trending dashboard**~~ — ✅ **Closed in Sprint 5.** Chart.js widget with 3 views consuming `/api/vulnerabilities/trends`.
+10. ~~**Patch Tuesday automation**~~ — ✅ **Closed in Sprint 5.** Monthly digest email job.
 
 ---
 

@@ -3,9 +3,9 @@
 
 ---
 
-**Document Version:** 1.0
-**Last Updated:** February 2026
-**Status:** Active Development
+**Document Version:** 1.2
+**Last Updated:** April 2026 (post Sprint 4 + Sprint 5)
+**Status:** Active Development — Sprint 4 + 5 shipped
 
 ---
 
@@ -87,17 +87,32 @@
 
 ### Planned Features
 
-| Feature | Priority | Effort | Description |
-|---------|----------|--------|-------------|
-| PostgreSQL read replicas | High | 2 weeks | Database scaling |
-| Redis caching layer | High | 1 week | Dashboard performance |
-| Agent groups/tags | High | 1 week | Organize agents |
-| Scheduled maintenance windows | Medium | 1 week | Pause alerts during maintenance |
-| Custom CVE rules | Medium | 2 weeks | User-defined matching rules |
-| Vulnerability exceptions | High | 1 week | Global exception rules |
-| Asset discovery scan | Medium | 2 weeks | Network scanning (optional) |
-| Container image scanning | Medium | 3 weeks | Docker/K8s integration |
-| SBOM import | Medium | 2 weeks | CycloneDX, SPDX |
+| Feature | Priority | Effort | Status | Description |
+|---------|----------|--------|--------|-------------|
+| PostgreSQL read replicas | High | 2 weeks | Planned | Database scaling |
+| Redis caching layer | High | 1 week | Planned | Dashboard performance |
+| Agent groups/tags | High | 1 week | Planned | Organize agents |
+| Scheduled maintenance windows | Medium | 1 week | Planned | Pause alerts during maintenance |
+| Custom CVE rules | Medium | 2 weeks | Planned | User-defined matching rules |
+| Vulnerability exceptions | High | 1 week | ✅ Done (Sprint 4) | Risk Exception Management with justification + expiry |
+| Asset discovery scan | Medium | 2 weeks | Planned | Network scanning (optional) |
+| Container image scanning | Medium | 3 weeks | ✅ Done (Sprint 2) | Docker/Podman + Trivy |
+| SBOM import | Medium | 2 weeks | Partial | SBOM **export** shipped (CycloneDX/SPDX/STIX); import still planned |
+
+### Sprint 4 (April 2026) — ✅ SHIPPED
+
+| Feature | Status | Notes |
+|---|---|---|
+| Remediation Assignments page | ✅ Done | Full CRUD with filters, pagination, inline status change, modal detail/edit |
+| Multi-tracker integration | ✅ Done | Jira / YouTrack / GitHub / GitLab / Webhook with `tracker_issue_key/url/type` |
+| Email notifications (assignments) | ✅ Done | Throttled (max 1/assignment/hour, only created+resolved, only assignee) |
+| SBOM Export CycloneDX 1.5 | ✅ Done | `app/sbom_export.py`, JSON bundle |
+| SBOM Export SPDX 2.3 | ✅ Done | JSON bundle |
+| Risk Exception Management | ✅ Done | Model + CRUD + UI panel + modal |
+| Agent Delta Scan + Gzip | ✅ Done | SHA256 hash detection on Linux/macOS/Windows (~90% bandwidth saving) |
+| Agent Store-and-Forward | ✅ Done | Spool dir, max 50 files, chronological replay |
+| Product Aliases | ✅ Done | Vendor/product disambiguation CRUD |
+| Hardening | ✅ Done | Zip bomb protection, rate limits, licensing gates, composite DB indexes, Prometheus telemetry |
 
 ### Infrastructure
 - [ ] Kubernetes Helm charts
@@ -116,18 +131,40 @@
 
 ### Planned Features
 
+| Feature | Priority | Effort | Status | Description |
+|---------|----------|--------|--------|-------------|
+| SOC 2 Type II compliance | High | Ongoing | Planned | Org certification (separate from the SOC 2 gap analysis report shipped in Sprint 5) |
+| Custom RBAC roles | High | 2 weeks | Planned | Fine-grained permissions |
+| Hierarchical organizations | High | 3 weeks | Planned | Parent/child orgs |
+| SSO enforcement | Medium | 1 week | Planned | Require SSO for all users |
+| Advanced audit logging | High | 2 weeks | Planned | SIEM integration |
+| Custom branding (white-label) | Medium | 1 week | ✅ Done | Full customization |
+| API rate limiting per customer | Medium | 1 week | ✅ Done (Sprint 4) | Per-endpoint rate limits with org scoping |
+| Vulnerability SLA tracking | High | 2 weeks | ✅ Done (Sprint 4) | SLA policies + due_date computation + `/api/sla/compliance` |
+| Executive dashboards | Medium | 2 weeks | Planned | C-level reporting |
+| Scheduled compliance reports | High | 2 weeks | ✅ Done (Sprint 5) | PCI-DSS / ISO 27001 / SOC 2 + existing CISA / NIS2 in JSON & PDF with HMAC integrity |
+
+### Sprint 5 (April 2026) — ✅ SHIPPED
+
+| Feature | Status | Notes |
+|---|---|---|
+| Vulnerability Trending Dashboard | ✅ Done | Chart.js widget on dashboard, 3 views (total / by severity / open vs resolved) consuming `/api/vulnerabilities/trends` |
+| STIX 2.1 Export | ✅ Done | `app/sbom_export.py` — vulnerability SDO + software SCO + relationship SRO |
+| Patch Tuesday Automation | ✅ Done | `patch_tuesday_digest_job` scheduled 2nd Wed/month at 09:00, manual trigger via `/api/reports/patch-tuesday/trigger?dry_run=true` |
+| PCI-DSS v4.0 Gap Analysis Report | ✅ Done | `app/compliance_reports.py` — Req 6.3, 11.3 mapping with PASS/PARTIAL/FAIL/N-A |
+| ISO/IEC 27001:2022 Gap Analysis Report | ✅ Done | Annex A.8.8, A.8.16, A.5.24 |
+| SOC 2 Gap Analysis Report | ✅ Done | CC7.1, CC7.2, CC7.4, CC6.6 |
+| Compliance integrity block | ✅ Done | SHA256 + HMAC over canonical JSON, embedded in every report |
+
+### Sprint 6 (planned, Q3 2026 — proposed scope)
+
 | Feature | Priority | Effort | Description |
-|---------|----------|--------|-------------|
-| SOC 2 Type II compliance | High | Ongoing | Certification |
-| Custom RBAC roles | High | 2 weeks | Fine-grained permissions |
-| Hierarchical organizations | High | 3 weeks | Parent/child orgs |
-| SSO enforcement | Medium | 1 week | Require SSO for all users |
-| Advanced audit logging | High | 2 weeks | SIEM integration |
-| Custom branding (white-label) | Medium | 1 week | Full customization |
-| API rate limiting per customer | Medium | 1 week | Fair use policies |
-| Vulnerability SLA tracking | High | 2 weeks | Time-to-remediation metrics |
-| Executive dashboards | Medium | 2 weeks | C-level reporting |
-| Scheduled compliance reports | High | 2 weeks | Auto-generate PDF reports |
+|---|---|---|---|
+| Cloud asset discovery (AWS / Azure / GCP) | High | 4 weeks | Native cloud provider integration for cloud-native asset inventory |
+| Asset graph view | Medium | 2 weeks | Visualize relationships: Org → Asset → Product → Vulnerability → Assignment |
+| Advanced scheduled reports | Medium | 2 weeks | Custom report builder, multi-recipient delivery, branded templates |
+| SBOM **import** (close the loop) | Medium | 1 week | Accept CycloneDX/SPDX bundles as inventory source |
+| Webhook-based incoming Patch Tuesday | Low | 1 week | Listen to MSRC live feed for real-time digest |
 
 ### Compliance
 - [ ] SOC 2 Type II audit
@@ -268,6 +305,7 @@ Transform SentriKat from a product to a platform
 | Date | Version | Changes |
 |------|---------|---------|
 | Feb 2026 | 1.0 | Initial roadmap |
+| Apr 2026 | 1.2 | Sprint 4 + Sprint 5 marked as shipped (15 features). Added Sprint 6 proposed scope (cloud asset discovery, asset graph, SBOM import). Updated status columns for Q3/Q4 features that landed early. |
 
 ---
 
