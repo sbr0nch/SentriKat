@@ -81,7 +81,9 @@ class TestSSOHappyPath:
 
         resp = client.get(f'/admin/sso?token={token}')
         assert resp.status_code == 302
-        assert '/dashboard' in resp.location
+        # The real dashboard is ``main.index`` (route ``/``). The previous
+        # hard-coded ``/dashboard`` path did not exist in this app.
+        assert resp.location.rstrip('/') in ('', 'http://localhost')
 
         with client.session_transaction() as sess:
             assert sess['user_id'] == user_id
