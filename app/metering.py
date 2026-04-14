@@ -358,7 +358,7 @@ def _iso_hour_floor_utc(dt=None):
 def _build_usage_payload(org_id):
     """Assemble the usage payload the license server expects (H7).
 
-    Schema (Sprint 6 — ``POST /api/v1/metrics/usage``)::
+    Schema (Sprint 6 — ``POST {LICENSE_SERVER_URL}/v1/metrics/usage``)::
 
         {
           "tenant_id":      "<customer-email>",
@@ -464,9 +464,14 @@ def send_usage_to_license_server():
 
     For each active organization we build a payload via
     :func:`_build_usage_payload` and ``POST`` it to
-    ``{LICENSE_SERVER_URL}/api/v1/metrics/usage`` with
+    ``{LICENSE_SERVER_URL}/v1/metrics/usage`` with
     ``Authorization: Bearer {SENTRIKAT_METRICS_KEY}``. Network errors
     retry with 1/2/4s backoff.
+
+    Note: ``LICENSE_SERVER_URL`` already includes the ``/api`` prefix
+    (default ``https://license.sentrikat.com/api``), matching the
+    existing heartbeat/activate endpoints which use ``/v1/...`` suffixes.
+    Do NOT add ``/api/`` here — that produces a double prefix and a 404.
 
     The license server expects ``202 Accepted`` from its receiver and
     normalizes the ``ts`` field to the hour, so sending multiple times
@@ -509,7 +514,7 @@ def send_usage_to_license_server():
         proxies = None
         verify_ssl = True
 
-    url = f"{LICENSE_SERVER_URL}/api/v1/metrics/usage"
+    url = f"{LICENSE_SERVER_URL}/v1/metrics/usage"
     headers = {
         'Content-Type': 'application/json',
         'Authorization': f'Bearer {metrics_key}',
