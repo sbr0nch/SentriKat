@@ -11,6 +11,13 @@ from app import db, csrf, limiter
 from app.auth import login_required
 from app.licensing import requires_professional
 from app.models import Product, VulnerabilityMatch, Vulnerability, product_organizations, Organization
+
+# DependencyScan is optional — the table may not exist on older deployments
+try:
+    from app.models import DependencyScan, DependencyScanResult
+except ImportError:  # pragma: no cover - defensive fallback
+    DependencyScan = None
+    DependencyScanResult = None
 from datetime import datetime, timezone
 import uuid
 import logging
@@ -78,6 +85,101 @@ def _build_bom_ref(product):
     return f"sentrikat-product-{product.id}"
 
 
+def _build_dep_purl(pkg_name, pkg_version, pkg_ecosystem):
+    """Build a PURL string for a DependencyScanResult row.
+
+    Uses the same CycloneDX PURL conventions used elsewhere in the SBOM.
+    """
+    eco = (pkg_ecosystem or '').strip().lower() or 'generic'
+    # Map OSV ecosystem labels to PURL types
+    eco_map = {
+        'pypi': 'pypi',
+        'npm': 'npm',
+        'go': 'golang',
+        'crates.io': 'cargo',
+        'rubygems': 'gem',
+        'maven': 'maven',
+        'packagist': 'composer',
+        'nuget': 'nuget',
+    }
+    purl_type = eco_map.get(eco, eco)
+    name = (pkg_name or 'unknown').strip()
+    version = (pkg_version or '').strip()
+    purl = f"pkg:{purl_type}/{name}"
+    if version:
+        purl += f"@{version}"
+    return purl
+
+
+def _build_dep_bom_ref(result_row):
+    """Deterministic bom-ref for a dependency scan result row."""
+    return f"sentrikat-dep-{result_row.id}"
+
+
+def _get_dependency_components(org_id):
+    """Return (components, deps_graph, product_to_dep_refs) for SBOM.
+
+    - components: list of CycloneDX component dicts for every vulnerable
+      or scanned dependency package found in this org's most recent
+      DependencyScan per asset.
+    - deps_graph: list of CycloneDX top-level ``dependencies`` entries
+      mapping each dep ref to any nested dep refs (we use a flat graph
+      since OSV doesn't give us transitive edges beyond ``is_direct``).
+    - product_to_dep_refs: dict[product_id] -> list[dep_bom_ref] so the
+      caller can attach these as nested dependencies of their parent
+      product components.
+    """
+    components = []
+    deps_graph = []
+    product_to_dep_refs = {}
+
+    if DependencyScan is None or DependencyScanResult is None:
+        return components, deps_graph, product_to_dep_refs
+
+    try:
+        # Most-recent completed scan per asset for this org (small orgs only
+        # to keep memory bounded; the MAX_SBOM_PRODUCTS guard already caps
+        # overall payload size).
+        scans = (
+            DependencyScan.query
+            .filter(DependencyScan.organization_id == org_id)
+            .filter(DependencyScan.scan_status == 'completed')
+            .order_by(DependencyScan.created_at.desc())
+            .limit(200)
+            .all()
+        )
+        if not scans:
+            return components, deps_graph, product_to_dep_refs
+
+        seen_refs = set()
+        for scan in scans:
+            try:
+                results = scan.results.all() if hasattr(scan.results, 'all') else list(scan.results)
+            except Exception:
+                results = []
+            for row in results:
+                ref = _build_dep_bom_ref(row)
+                if ref in seen_refs:
+                    continue
+                seen_refs.add(ref)
+                comp = {
+                    'type': 'library',
+                    'bom-ref': ref,
+                    'name': row.pkg_name,
+                    'version': row.pkg_version or '',
+                    'purl': row.purl or _build_dep_purl(row.pkg_name, row.pkg_version, row.pkg_ecosystem),
+                    'scope': 'required' if row.is_direct else 'optional',
+                }
+                components.append(comp)
+                # Flat dependencies entry — no nested edges from OSV
+                deps_graph.append({'ref': ref, 'dependsOn': []})
+    except Exception as e:  # pragma: no cover
+        logger.warning("SBOM dependency collection failed (non-critical): %s", e)
+        return [], [], {}
+
+    return components, deps_graph, product_to_dep_refs
+
+
 def _get_vuln_matches_for_products(product_ids):
     """Fetch vulnerability matches grouped by product_id."""
     if not product_ids:
@@ -140,6 +242,9 @@ def export_cyclonedx():
 
     # Build components
     components = []
+    # Top-level CycloneDX dependencies graph (CDX 1.4+): list of
+    # {"ref": <bom-ref>, "dependsOn": [<bom-ref>, ...]}
+    bom_dependencies = []
     for p in products:
         component = {
             'type': 'library',
@@ -153,6 +258,22 @@ def export_cyclonedx():
         if p.vendor:
             component['supplier'] = {'name': p.vendor}
         components.append(component)
+
+    # Append DependencyScan components and graph (M7 fix).
+    # Graceful: if DependencyScan is not available, this returns empty lists
+    # and the SBOM looks exactly as before.
+    dep_components, dep_graph, _product_dep_map = _get_dependency_components(org_id)
+    if dep_components:
+        components.extend(dep_components)
+        bom_dependencies.extend(dep_graph)
+        logger.info(
+            "SBOM: attached %d lock-file dependency components", len(dep_components)
+        )
+
+    # Seed top-level dependencies graph with product refs so CycloneDX
+    # consumers can walk from product -> deps (empty dependsOn is allowed).
+    for p in products:
+        bom_dependencies.append({'ref': _build_bom_ref(p), 'dependsOn': []})
 
     # Build vulnerabilities
     product_id_list = [p.id for p in products]
@@ -213,6 +334,7 @@ def export_cyclonedx():
             },
         },
         'components': components,
+        'dependencies': bom_dependencies,
         'vulnerabilities': vulnerabilities,
     }
 
