@@ -267,13 +267,15 @@ def sso_login():
 
     _audit_impersonation(user, nonce, claims)
 
-    # Redirect to the dashboard. ``main.dashboard`` is the canonical
-    # name in our routes module; we fall back to a hard-coded path if
-    # the endpoint is unknown in a given deployment.
+    # Redirect to the dashboard. The real endpoint is ``main.index``
+    # (route ``/``) — we previously redirected to ``/dashboard`` which
+    # does not exist in this app and produced a 404 immediately after
+    # a successful SSO handshake. Fall back to ``/`` if ``url_for`` is
+    # unavailable (e.g. blueprint not yet registered at import time).
     try:
-        dest = url_for('main.dashboard')
+        dest = url_for('main.index')
     except Exception:
-        dest = '/dashboard'
+        dest = '/'
 
     logger.info(
         "SSO impersonation successful user=%s org=%s tenant=%s nonce=%s",
