@@ -1,15 +1,18 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 from app.cisa_sync import sync_cisa_kev
 from app import db
 from config import Config
 from datetime import datetime, timedelta
+from sqlalchemy import or_
 from zoneinfo import ZoneInfo
 import json
 import logging
 import os
 import threading
+import time
 
 # Import job dependencies at module level so they are patchable by tests.
 # Each is guarded by try/except because some modules may be optional.
@@ -106,24 +109,46 @@ def _run_with_lock(job_name, func, *args, **kwargs):
                 return
             _job_locks[job_name] = True
 
+    def _release_with_retry(error=None):
+        """Release the DB lock with one retry on transient failure (M2)."""
+        from app.models import JobState as _JobState
+        last_exc = None
+        for attempt in range(2):
+            try:
+                if error is not None:
+                    _JobState.release_lock(job_name, error=error)
+                else:
+                    _JobState.release_lock(job_name)
+                return True
+            except Exception as rel_err:
+                last_exc = rel_err
+                logger.error(
+                    "Failed to release job lock for '%s' (attempt %d/2): %s",
+                    job_name, attempt + 1, rel_err, exc_info=True,
+                )
+                if attempt == 0:
+                    time.sleep(0.5)
+        # Final failure — emit a loud ERROR so that the alerting pipeline
+        # (ops dashboard / metrics) picks it up.  The lock will be cleaned up
+        # by the stuck-job recovery job or by stale-lock expiry.
+        logger.error(
+            "ALERT: permanently failed to release job lock for '%s': %s",
+            job_name, last_exc,
+        )
+        return False
+
+    job_errored = False
     try:
         return func(*args, **kwargs)
     except Exception as exc:
-        # Record error in DB
+        job_errored = True
         if db_lock_acquired:
-            try:
-                from app.models import JobState
-                JobState.release_lock(job_name, error=exc)
-            except Exception:
-                pass
+            _release_with_retry(error=exc)
         raise
     finally:
         if db_lock_acquired:
-            try:
-                from app.models import JobState
-                JobState.release_lock(job_name)
-            except Exception:
-                pass
+            if not job_errored:
+                _release_with_retry()
         else:
             with _job_locks_lock:
                 _job_locks[job_name] = False
@@ -131,6 +156,157 @@ def _run_with_lock(job_name, func, *args, **kwargs):
 # Store scheduler globally so we can reschedule jobs when settings change
 _scheduler = None
 _app = None
+
+# Module-level fd holder for the leader-election flock.  Keeping the fd open
+# (and referenced) is what preserves the lock for the lifetime of this
+# worker process; if we let it get GC'd the kernel releases the lock.
+_scheduler_leader_fd = None
+_SCHEDULER_LOCK_PATH = os.environ.get('SENTRIKAT_SCHEDULER_LOCK', '/tmp/sentrikat-scheduler.lock')
+
+
+def _acquire_scheduler_leader_lock(app):
+    """Filesystem-based leader election for multi-worker deployments.
+
+    In a Gunicorn multi-worker setup each worker imports the app and would
+    otherwise start its own APScheduler, causing every cron job to run N
+    times.  We use a simple non-blocking flock(2) against a well-known
+    file; the first worker to get the lock is the scheduler leader, the
+    others log and skip scheduler startup.
+
+    Returns True if this process is the scheduler leader (safe to proceed),
+    False otherwise.  In TESTING mode the lock is always bypassed so that
+    unit tests can freely instantiate schedulers.
+    """
+    global _scheduler_leader_fd
+
+    # Skip lock in test environments to avoid polluting /tmp and to allow
+    # multiple in-process schedulers in the same test run.
+    try:
+        if app.config.get('TESTING'):
+            logger.debug("TESTING mode: skipping scheduler leader lock")
+            return True
+    except Exception:
+        pass
+    if (os.environ.get('FLASK_ENV', '') or '').lower() == 'testing':
+        logger.debug("FLASK_ENV=testing: skipping scheduler leader lock")
+        return True
+    if (os.environ.get('SENTRIKAT_SKIP_SCHEDULER_LOCK', '') or '').lower() in ('1', 'true', 'yes'):
+        logger.debug("SENTRIKAT_SKIP_SCHEDULER_LOCK set: skipping scheduler leader lock")
+        return True
+
+    try:
+        import fcntl
+        fd = os.open(_SCHEDULER_LOCK_PATH, os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError) as lock_err:
+            os.close(fd)
+            logger.info(
+                "Another worker already holds the scheduler lock (%s); "
+                "skipping scheduler startup in this worker: %s",
+                _SCHEDULER_LOCK_PATH, lock_err,
+            )
+            return False
+        # Write our pid for operational visibility
+        try:
+            os.ftruncate(fd, 0)
+            os.write(fd, f"{os.getpid()}\n".encode())
+        except Exception:
+            pass
+        _scheduler_leader_fd = fd  # keep fd alive for process lifetime
+        logger.info(
+            "Acquired scheduler leader lock at %s (pid=%s)",
+            _SCHEDULER_LOCK_PATH, os.getpid(),
+        )
+        return True
+    except ImportError:
+        # Non-POSIX platform (e.g., Windows dev box). Fall through — better
+        # to run scheduler than to not run it at all.
+        logger.warning("fcntl unavailable; cannot enforce scheduler leader lock")
+        return True
+    except Exception as e:
+        logger.error("Scheduler leader lock setup failed: %s", e, exc_info=True)
+        # Fail open: run the scheduler rather than leaving the system with no jobs.
+        return True
+
+
+def _upsert_system_setting(key, value, category='job_metrics'):
+    """Upsert a SystemSettings row by key (NULL organization_id = global)."""
+    if SystemSettings is None:
+        return
+    try:
+        existing = SystemSettings.query.filter_by(key=key, organization_id=None).first()
+        if existing:
+            existing.value = value
+            existing.category = existing.category or category
+        else:
+            existing = SystemSettings(
+                key=key,
+                value=value,
+                category=category,
+                organization_id=None,
+            )
+            db.session.add(existing)
+        db.session.commit()
+    except Exception as e:
+        logger.debug("_upsert_system_setting failed for %s: %s", key, e)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+
+
+def _get_system_setting_int(key, default=0):
+    if SystemSettings is None:
+        return default
+    try:
+        row = SystemSettings.query.filter_by(key=key, organization_id=None).first()
+        if row and row.value is not None:
+            return int(row.value)
+    except Exception:
+        pass
+    return default
+
+
+def _job_listener(event):
+    """Persist success/failure metrics for scheduled jobs in SystemSettings.
+
+    Fires on every EVENT_JOB_EXECUTED and EVENT_JOB_ERROR. Keys:
+      - job_last_success:<job_id>   (unix timestamp str)
+      - job_failure_count:<job_id>  (monotonic int)
+      - job_last_error:<job_id>     (last exception repr)
+      - job_last_error_at:<job_id>  (unix timestamp str)
+    Failures are also logged at ERROR with traceback.
+    """
+    global _app
+    job_id = getattr(event, 'job_id', 'unknown')
+    if _app is None:
+        return
+    try:
+        with _app.app_context():
+            if event.exception:
+                failure_key = f'job_failure_count:{job_id}'
+                cur = _get_system_setting_int(failure_key, 0)
+                _upsert_system_setting(failure_key, str(cur + 1))
+                _upsert_system_setting(
+                    f'job_last_error:{job_id}',
+                    repr(event.exception)[:500],
+                )
+                _upsert_system_setting(
+                    f'job_last_error_at:{job_id}',
+                    str(int(time.time())),
+                )
+                logger.error(
+                    "Scheduled job '%s' failed: %s\n%s",
+                    job_id, event.exception, getattr(event, 'traceback', ''),
+                )
+            else:
+                _upsert_system_setting(
+                    f'job_last_success:{job_id}',
+                    str(int(time.time())),
+                )
+    except Exception as outer:
+        logger.debug("Job listener outer error: %s", outer)
 
 def get_display_timezone(app):
     """Get the configured display timezone from settings, defaulting to UTC."""
@@ -162,9 +338,17 @@ def get_critical_email_settings(app):
         return enabled, hour, minute
 
 def start_scheduler(app):
-    """Start the background scheduler for scheduled jobs"""
+    """Start the background scheduler for scheduled jobs.
+
+    Uses a filesystem leader-election lock so that only one Gunicorn worker
+    actually runs the scheduler (prevents N-way duplicate job execution).
+    """
     global _scheduler, _app
     _app = app
+
+    # Leader election: only one worker should run the scheduler
+    if not _acquire_scheduler_leader_lock(app):
+        return None
 
     scheduler = BackgroundScheduler()
     _scheduler = scheduler
@@ -423,6 +607,16 @@ def start_scheduler(app):
     )
     logger.info("Subscription/license expiration check scheduled at 09:00")
 
+    # Schedule daily orphan-product cleanup (03:00)
+    scheduler.add_job(
+        func=lambda: _run_with_lock('orphan_products_cleanup', orphan_products_cleanup_job, app),
+        trigger=CronTrigger(hour=3, minute=0, timezone=tz),
+        id='orphan_products_cleanup',
+        name='Orphan Products Cleanup (no org, 90d+ stale)',
+        replace_existing=True
+    )
+    logger.info("Orphan products cleanup scheduled daily at 03:00")
+
     # Schedule Patch Tuesday digest (2nd Wednesday of every month at 09:00).
     # day='8-14' + day_of_week='wed' ensures we fire on the Wednesday after
     # Microsoft's second-Tuesday patch release — giving MS time to publish,
@@ -446,6 +640,11 @@ def start_scheduler(app):
         logger.warning(f"CVE known products cache warmup failed (will retry on first use): {e}")
 
     scheduler.start()
+    # Register job-result listener (M14): persist success/failure metrics
+    try:
+        scheduler.add_listener(_job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
+    except Exception as listener_err:
+        logger.warning("Failed to register job listener: %s", listener_err)
     logger.info(f"Scheduler started. CISA KEV sync scheduled at {Config.SYNC_HOUR:02d}:{Config.SYNC_MINUTE:02d}")
 
     return scheduler
@@ -1965,3 +2164,72 @@ def patch_tuesday_digest_job(app):
                 f"Patch Tuesday digest job failed: {e}",
                 exc_info=True,
             )
+
+
+def cleanup_orphan_products(stale_days=90):
+    """Delete products with no org associations and no checkin in N+ days.
+
+    Products can become orphans when:
+      - their last linked organization is deleted
+      - the admin removes the org association manually
+      - auto-approve created a product that was never attached to an org
+
+    We only delete if the product is BOTH orphaned AND stale (no agent
+    report in the last ``stale_days`` days, or never).  This avoids
+    deleting freshly-created products that are about to be attached to
+    an org by the import queue workflow.
+
+    Returns the number of products deleted.
+    """
+    try:
+        from app.models import Product
+    except ImportError:
+        logger.warning("cleanup_orphan_products: Product model unavailable")
+        return 0
+
+    cutoff = datetime.utcnow() - timedelta(days=stale_days)
+    try:
+        orphans = Product.query.filter(
+            ~Product.organizations.any(),
+            or_(
+                Product.last_agent_report.is_(None),
+                Product.last_agent_report < cutoff,
+            ),
+        ).all()
+    except Exception as e:
+        logger.error("cleanup_orphan_products query failed: %s", e, exc_info=True)
+        return 0
+
+    deleted = 0
+    for p in orphans:
+        try:
+            logger.info(
+                "Deleting orphan product id=%s vendor=%s name=%s",
+                p.id, p.vendor, p.product_name,
+            )
+            db.session.delete(p)
+            deleted += 1
+        except Exception as del_err:
+            logger.warning("Failed to delete orphan product id=%s: %s", p.id, del_err)
+
+    if deleted:
+        try:
+            db.session.commit()
+        except Exception as commit_err:
+            logger.error("cleanup_orphan_products commit failed: %s", commit_err, exc_info=True)
+            db.session.rollback()
+            return 0
+
+    return deleted
+
+
+def orphan_products_cleanup_job(app):
+    """Scheduler wrapper for cleanup_orphan_products with app context."""
+    with app.app_context():
+        try:
+            count = cleanup_orphan_products()
+            logger.info(f"Orphan product cleanup completed: {count} products deleted")
+            return count
+        except Exception as e:
+            logger.error(f"Orphan product cleanup job failed: {e}", exc_info=True)
+            return 0
