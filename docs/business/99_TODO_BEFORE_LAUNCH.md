@@ -102,6 +102,36 @@ Questi sono gia' stati fixati nel commit che ha aggiunto l'audit:
       SECRET_KEY, documentare che la loro integrity hash e' firmata con la
       chiave vecchia e non piu' riverificabile dopo la rotazione.
 
+### 0.8 Minor test failure — test_siem_syslog
+
+Dopo il deploy Sprint 4+5 la test suite e' stata girata (1.329 test
+totali, **1.328 passed, 1 failed** — 99.92% pass rate). L'unico fail e':
+
+- `tests/test_siem_syslog.py::TestUpdateSyslogSettings::test_no_data_returns_400`
+  expected: `assert 403 == 400`
+
+**Diagnosi**: l'endpoint `POST /api/settings/syslog` (in `app/reports_api.py:1795`)
+ha il decorator `@requires_professional('SIEM Integration')` che restituisce
+HTTP 403 quando la licensing feature key non e' attiva. Nel container di
+test con configurazione "fresh install" (nessuna licenza professional
+importata) il check licensing scatta PRIMA del check "no data" = 400, e
+quindi il test vede 403 invece di 400.
+
+**NON e' un bug introdotto da Sprint 4+5**. Nessun file di Sprint 4+5
+tocca `reports_api.py` ne' il blueprint di settings syslog. Il test
+verosimilmente falliva gia' prima della Sprint 4, ma la suite non era
+stata girata end-to-end di recente.
+
+**Opzioni di fix** (1-2h, Sprint 6):
+- Aggiungere una licenza pro mock nel fixture `admin_client` di testing.
+- Oppure skippare il test con `@pytest.mark.skipif(not has_pro_license)`.
+- Oppure riordinare i decorator nell'endpoint: prima il check "no data"
+  (400), poi il check licensing (403) — piu' REST-friendly.
+
+**Impatto sul lancio**: ZERO. L'endpoint funziona correttamente in
+produzione perche' in prod la licenza pro e' attiva. Il test failure e'
+un artefatto del test environment.
+
 ---
 
 ## 1. AZIONI LEGALI E SOCIETARIE
