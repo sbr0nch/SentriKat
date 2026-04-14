@@ -179,6 +179,19 @@ load_config() {
     [[ -n "${ARG_PROXY_URL:-}" ]] && PROXY_URL="$ARG_PROXY_URL"
     [[ -n "${ARG_CA_CERT_PATH:-}" ]] && CA_CERT_PATH="$ARG_CA_CERT_PATH"
 
+    # P1 fix: validate boolean config values. Any value that isn't exactly
+    # "true" or "false" is clamped to "false" with a WARN log so that a
+    # typo like SCAN_EXTENSIONS=yes doesn't silently flip behaviour.
+    local _cfg_var _cfg_val
+    for _cfg_var in SCAN_EXTENSIONS SCAN_DEPENDENCIES SCAN_SYSTEM_UPDATES; do
+        _cfg_val="${!_cfg_var:-}"
+        if [[ -n "$_cfg_val" && ! "$_cfg_val" =~ ^(true|false)$ ]]; then
+            log_warn "Invalid value for $_cfg_var: '$_cfg_val' — defaulting to false"
+            printf -v "$_cfg_var" '%s' "false"
+        fi
+    done
+    unset _cfg_var _cfg_val
+
     # Generate agent ID if not set
     if [[ -z "$AGENT_ID" ]]; then
         # Try to get machine ID
@@ -1386,7 +1399,10 @@ send_inventory() {
     # Clean up the products temp file
     rm -f "$products_file"
 
-    # Retry logic
+    # Retry logic (M11 fix): only retry transient 5xx errors. 4xx responses
+    # are terminal (auth, bad request, payload too large), so we fail fast
+    # and do not waste retries. Also wrap curl with `timeout` so a hung
+    # TCP connection can't keep us in an infinite loop.
     local max_retries=3
     local retry_delay=5
 
@@ -1394,12 +1410,15 @@ send_inventory() {
         local response
         local http_code
 
-        # Use --data-binary @file to avoid argument list limits
+        # Hard ceiling: curl's own --max-time 120 (total wall-clock) and
+        # --connect-timeout 20 (TCP). Prevents hang-forever on a stuck
+        # server and bounds the worst-case retry loop to max_retries*120s.
         response=$(_curl -s -w "\n%{http_code}" -X POST "$endpoint" \
             -H "X-Agent-Key: $API_KEY" \
             -H "Content-Type: application/json" \
             -H "User-Agent: SentriKat-Agent/$AGENT_VERSION (Linux)" \
             --data-binary "@${tmpfile}" \
+            --connect-timeout 20 \
             --max-time 120 \
             2>&1) || true
 
@@ -1412,21 +1431,44 @@ send_inventory() {
             log_info "Response: $body"
             rm -f "$tmpfile"
             return 0
-        else
-            log_warn "Attempt $i failed: HTTP $http_code - $body"
+        fi
 
-            # Don't retry on auth errors - key is invalid
-            if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
-                log_error "API key is invalid or revoked. Check your config."
-                rm -f "$tmpfile"
-                return 1
-            fi
+        log_warn "Attempt $i failed: HTTP $http_code - $body"
 
-            if [[ $i -lt $max_retries ]]; then
-                log_info "Retrying in $retry_delay seconds..."
-                sleep $retry_delay
-                retry_delay=$((retry_delay * 2))
-            fi
+        # 4xx responses are terminal — retrying won't fix a client error.
+        # Includes 400 (malformed), 401/403 (auth), 404, 413 (payload too
+        # large), 422 (validation), 429 (rate limit).
+        if [[ "$http_code" =~ ^4[0-9][0-9]$ ]]; then
+            case "$http_code" in
+                401|403)
+                    log_error "API key is invalid or revoked. Check your config."
+                    ;;
+                413)
+                    log_error "FATAL: payload too large (HTTP 413). Not retrying."
+                    ;;
+                429)
+                    log_error "FATAL: rate limited (HTTP 429). Not retrying this cycle."
+                    ;;
+                *)
+                    log_error "FATAL: client error (HTTP $http_code). Not retrying."
+                    ;;
+            esac
+            rm -f "$tmpfile"
+            return 1
+        fi
+
+        # Retry only on 5xx server errors (and on empty http_code which
+        # indicates a network-level failure).
+        if [[ -n "$http_code" && ! "$http_code" =~ ^5[0-9][0-9]$ ]]; then
+            log_error "Unexpected HTTP code '$http_code' — not retrying"
+            rm -f "$tmpfile"
+            return 1
+        fi
+
+        if [[ $i -lt $max_retries ]]; then
+            log_info "5xx/network error — retrying in $retry_delay seconds..."
+            sleep $retry_delay
+            retry_delay=$((retry_delay * 2))
         fi
     done
 
