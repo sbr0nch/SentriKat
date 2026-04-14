@@ -37,11 +37,16 @@ SentriKat is a **self-hosted vulnerability management platform** that discovers 
 - **Multi-source intelligence** — aggregates data from 6+ sources (NVD, CVE.org/Vulnrichment, ENISA EUVD, EPSS, OSV, vendor feeds) with automatic fallback — no single point of failure
 - **European data sovereignty** — integrates the ENISA EUVD (NIS2-mandated EU vulnerability database) alongside US sources
 - **Vendor backport detection** — automatically detects when Linux distros have patched a CVE via backport, eliminating false positives that plague other scanners
+- **SBOM export out-of-the-box** — CycloneDX 1.5, SPDX 2.3 and STIX 2.1 formats, ready for Cyber Resilience Act (CRA) compliance
+- **Built-in compliance gap analysis** — PCI-DSS v4.0, ISO/IEC 27001:2022, SOC 2, CISA BOD 22-01, EU NIS2 reports in JSON/PDF with HMAC integrity
+- **Remediation workflows** — assignments with due dates, SLA policies, risk exception management, and native Jira/GitHub/GitLab/YouTrack ticket creation
+- **Vulnerability trending** — historical snapshots + Chart.js trends dashboard to prove improvement over time
+- **Patch Tuesday automation** — monthly digest email on the 2nd Wednesday covering Microsoft security updates affecting your fleet
 - **Self-hosted, air-gap capable** — runs entirely on your infrastructure, no data leaves your network
-- **Lightweight agents** — transparent bash/PowerShell scripts (not opaque binaries), auditable by your security team
+- **Lightweight agents** — transparent bash/PowerShell scripts (not opaque binaries) with delta scans, gzip compression and offline store-and-forward
 - **GDPR compliant** — built-in data export (`/api/gdpr/export`) and right-to-erasure (`/api/gdpr/delete`) endpoints
 - **Prometheus monitoring** — native `/metrics` endpoint for observability integration
-- **10x cheaper** — EUR 2,499/year vs $25,000-$100,000+ for enterprise alternatives
+- **5-10x cheaper** — starting from EUR 59/month (SaaS) or EUR 4,999/year (on-prem) vs $25,000-$100,000+ for enterprise alternatives
 
 ### How It Works (End-to-End Flow)
 
@@ -98,10 +103,10 @@ SentriKat is a **self-hosted vulnerability management platform** that discovers 
 
 ```
 SentriKat/
-├── app/                          # Core application (47 Python modules)
+├── app/                          # Core application (50+ Python modules)
 │   ├── __init__.py               # Flask app factory + schema migrations
-│   ├── models.py                 # 30 SQLAlchemy models (~2,900 lines)
-│   ├── routes.py                 # Main web UI + API routes (~4,400 lines)
+│   ├── models.py                 # 35+ SQLAlchemy models (~4,300 lines)
+│   ├── routes.py                 # Main web UI + API routes (~7,700 lines)
 │   ├── agent_api.py              # Agent inventory endpoints + 3-phase filtering
 │   ├── filters.py                # Vulnerability matching engine (CPE + keyword)
 │   ├── cpe_mapping.py            # 224 regex CPE patterns + auto-mapping
@@ -112,7 +117,10 @@ SentriKat/
 │   ├── lockfile_parser.py        # Lockfile parsing (11 formats, 7 ecosystems)
 │   ├── osv_client.py             # OSV.dev vulnerability query client
 │   ├── cve_known_products.py     # CVE history lookup for filtering guard
-│   ├── scheduler.py              # 15+ background jobs (APScheduler)
+│   ├── scheduler.py              # 16+ background jobs (APScheduler, incl. Patch Tuesday digest)
+│   ├── sbom_export.py            # SBOM export (CycloneDX 1.5 / SPDX 2.3 / STIX 2.1)
+│   ├── compliance_reports.py     # PCI-DSS / ISO 27001 / SOC 2 gap analysis reports
+│   ├── remediation_api.py        # Assignments, SLA policies, risk exceptions, product aliases
 │   ├── maintenance.py            # Stale asset cleanup, auto-acknowledgment
 │   ├── auth.py                   # Login/session/2FA management
 │   ├── ldap_manager.py           # LDAP authentication provider
@@ -164,18 +172,18 @@ SentriKat/
 │   ├── js/                       # Client-side JavaScript
 │   └── vendor/                   # Bootstrap 5, Chart.js, jQuery
 │
-├── tests/                        # Test suite (214 tests)
+├── tests/                        # Test suite (1,024+ tests across 30+ test files)
 │   ├── test_api_endpoints.py     # API endpoint tests
 │   ├── test_auth.py              # Authentication tests
 │   ├── test_licensing.py         # License validation tests
 │   ├── test_multi_tenant.py      # Organization isolation tests
-│   ├── test_rate_limiting.py     # Rate limit enforcement tests
+│   ├── test_rate_limiter.py      # Rate limit enforcement tests
 │   ├── test_version_utils.py     # Version comparison tests
-│   └── test_vulnerability_filtering.py  # Vulnerability matching tests
+│   └── test_scan_features.py     # Vulnerability matching, SBOM, assignments, compliance reports
 │
 ├── docs/                         # Documentation
 │   ├── API.md                    # API endpoint reference
-│   └── business/                 # Business planning docs (16 documents)
+│   └── business/                 # Business planning docs (22+ documents)
 │
 ├── sentrikat-scan/                # Lightweight dependency scanner (pip package)
 │   ├── pyproject.toml            # PyPI package metadata
@@ -202,7 +210,7 @@ SentriKat/
 └── .env.example                  # Environment template (164 lines, commented)
 ```
 
-### Database Schema (30 Models)
+### Database Schema (35+ Models)
 
 ```
 AUTHENTICATION                 PRODUCTS & INVENTORY           VULNERABILITIES
@@ -214,17 +222,20 @@ SystemSettings                 ProductVersionHistory          VendorFixOverride
                                ServiceCatalog
 AGENTS                         UserCpeMapping                 INTEGRATIONS
 ──────                         CpeDictionaryEntry             ────────────
-Asset                                                         Integration
-AgentApiKey                    REPORTING & ALERTS             ImportQueue
-AgentLicense                   ──────────────────             AgentRegistration
-AgentUsageRecord               AlertLog
-AgentEvent                     ScheduledReport                LDAP/SAML
-InventoryJob                   StaleAssetNotification         ─────────
-                               SharedView                     LDAPGroupMapping
+Asset                          ProductAlias                   Integration
+AgentApiKey                                                   ImportQueue
+AgentLicense                   REMEDIATION & RISK              AgentRegistration
+AgentUsageRecord               ─────────────────
+AgentEvent                     RemediationAssignment          LDAP/SAML
+InventoryJob                   SLAPolicy                      ─────────
+                               RiskException                  LDAPGroupMapping
 CONTAINERS                                                    LDAPSyncLog
-──────────                                                    LDAPAuditLog
-ContainerImage
-ContainerVulnerability
+──────────                     REPORTING & ALERTS             LDAPAuditLog
+ContainerImage                 ──────────────────
+ContainerVulnerability         AlertLog
+                               ScheduledReport
+                               StaleAssetNotification
+                               SharedView
 ```
 
 ### Background Jobs (APScheduler)
@@ -244,6 +255,7 @@ ContainerVulnerability
 | KB Sync | Every 12 hours | Push/pull community CPE mappings to licensing server |
 | License Heartbeat | Every 12 hours | License validation + telemetry |
 | Vulnerability Snapshots | Daily 02:00 UTC | Historical vulnerability state for trending |
+| Patch Tuesday Digest | 2nd Wednesday of month 09:00 | Monthly email digest of MSRC Patch Tuesday CVEs affecting your fleet |
 
 ---
 
@@ -411,6 +423,11 @@ Matched vulnerabilities appear on the dashboard with:
 - Executive summary one-pager PDF (risk score, KPIs, top priorities)
 - CISA BOD 22-01 compliance report (JSON, CSV, PDF)
 - EU NIS2 compliance report — Article 21(2)(d)(e)(g) mapping (JSON, CSV, PDF)
+- **PCI-DSS v4.0 gap analysis report** (Req 6.3, 11.3) — JSON / PDF with PASS/PARTIAL/FAIL/N-A mapping and HMAC integrity
+- **ISO/IEC 27001:2022 gap analysis report** (Annex A.8.8, A.8.16, A.5.24) — JSON / PDF
+- **SOC 2 gap analysis report** (CC7.1, CC7.2, CC7.4, CC6.6) — JSON / PDF
+- **SBOM export** — CycloneDX 1.5, SPDX 2.3, STIX 2.1 bundles for CRA / EO 14028 compliance
+- **Vulnerability trending** — historical snapshots + Chart.js dashboard (total / by severity / open vs resolved)
 - Scheduled reports (daily/weekly/monthly email delivery)
 
 ---
@@ -631,8 +648,41 @@ GET  /api/reports/export/csv             # Export vulnerabilities as CSV (Excel)
 GET  /api/reports/executive-summary      # Executive summary (risk score, KPIs)
 GET  /api/reports/compliance/bod-22-01   # CISA BOD 22-01 compliance report
 GET  /api/reports/compliance/nis2        # EU NIS2 compliance report
+GET  /api/reports/compliance/pci-dss     # PCI-DSS v4.0 gap analysis (JSON/PDF)
+GET  /api/reports/compliance/iso-27001   # ISO/IEC 27001:2022 gap analysis (JSON/PDF)
+GET  /api/reports/compliance/soc2        # SOC 2 gap analysis (JSON/PDF)
+POST /api/reports/patch-tuesday/trigger  # Manually trigger Patch Tuesday digest (dry_run supported)
 GET  /api/reports/scheduled              # List scheduled reports
 POST /api/reports/download               # Generate PDF report
+
+# SBOM Export (CRA / EO 14028 compliance)
+GET  /api/sbom/export/cyclonedx          # CycloneDX 1.5 JSON bundle
+GET  /api/sbom/export/spdx               # SPDX 2.3 JSON bundle
+GET  /api/sbom/export/stix21             # STIX 2.1 bundle with vuln SDOs
+
+# Remediation & SLA
+GET  /api/remediation/assignments        # List assignments (filters: status, assignee, due)
+POST /api/remediation/assignments        # Create assignment
+PUT  /api/remediation/assignments/{id}   # Update assignment (status, assignee, tracker key)
+DELETE /api/remediation/assignments/{id} # Delete assignment
+GET  /api/sla/policies                   # List SLA policies
+POST /api/sla/policies                   # Create SLA policy
+GET  /api/sla/compliance                 # SLA compliance summary
+
+# Risk Exceptions (ISO/SOC2 evidence)
+GET  /api/risk-exceptions                # List accepted risks with justification + expiry
+POST /api/risk-exceptions                # Create risk exception
+PUT  /api/risk-exceptions/{id}           # Update exception (extend expiry, change status)
+DELETE /api/risk-exceptions/{id}         # Remove exception
+
+# Product Aliases (vendor/product disambiguation)
+GET  /api/product-aliases                # List product aliases
+POST /api/product-aliases                # Create alias
+DELETE /api/product-aliases/{id}         # Delete alias
+
+# Vulnerability Trending
+GET  /api/vulnerabilities/trends         # Historical trend data (total / severity / open vs resolved)
+POST /api/vulnerabilities/trends/snapshot # Force snapshot (admin, triggers daily job manually)
 
 # SIEM Integration
 GET  /api/settings/syslog                # Get syslog forwarding config
@@ -715,7 +765,7 @@ Includes: CISA KEV sync, NVD search, vulnerability matching, basic dashboard, CS
 | +100 agents | EUR 1,499 |
 | Unlimited agents | EUR 2,199 |
 
-**Additional features:** LDAP/AD, SAML SSO, email alerts, webhooks (Slack/Teams/Discord), syslog/CEF forwarding (SIEM), multi-organization, backup/restore, white-label branding, full API access, issue tracker integrations (Jira, GitHub, GitLab, YouTrack), scheduled reports, CSV/Excel export, executive summary PDF, NIS2 + BOD 22-01 compliance reports, audit log export, container scanning
+**Additional features:** LDAP/AD, SAML SSO, email alerts, webhooks (Slack/Teams/Discord), syslog/CEF forwarding (SIEM), multi-organization, backup/restore, white-label branding, full API access, issue tracker integrations (Jira, GitHub, GitLab, YouTrack), scheduled reports, CSV/Excel export, executive summary PDF, NIS2 + BOD 22-01 + **PCI-DSS + ISO 27001 + SOC 2** compliance reports, **SBOM export (CycloneDX/SPDX/STIX 2.1)**, **remediation assignments + SLA policies**, **risk exception management**, **vulnerability trending dashboard**, **Patch Tuesday digest automation**, audit log export, container scanning, agent delta scans with gzip compression and offline store-and-forward
 
 ### License Activation
 
@@ -799,7 +849,13 @@ Multiple trackers can be enabled simultaneously:
 
 - **CISA BOD 22-01** — Remediation tracking with due dates, compliance percentage, overdue reporting
 - **EU NIS2 (Directive 2022/2555)** — Article 21 mapping: vulnerability handling (2e), supply chain visibility (2d), cyber hygiene (2g)
+- **Cyber Resilience Act (EU 2024/2847)** — SBOM export (CycloneDX 1.5 / SPDX 2.3 / STIX 2.1) ready for vendor obligations (effective September 2026)
+- **PCI-DSS v4.0** — Gap analysis report mapping Requirements 6.3 (secure software) and 11.3 (vulnerability management) with PASS/PARTIAL/FAIL/N-A per control
+- **ISO/IEC 27001:2022** — Gap analysis report mapping Annex A controls A.8.8 (technical vulnerabilities), A.8.16 (monitoring) and A.5.24 (incident management)
+- **SOC 2** — Gap analysis report mapping CC7.1, CC7.2, CC7.4 (system monitoring) and CC6.6 (vulnerability management)
+- **Patch Tuesday Automation** — Monthly digest email on the 2nd Wednesday covering MSRC-published CVEs matching your fleet
 - **Executive Summary** — Board-ready one-pager with risk score, KPIs, severity breakdown, top priorities
+- **Integrity block** — All compliance reports carry SHA256 + HMAC signatures for audit evidence
 
 ### Authentication Providers
 
@@ -865,11 +921,11 @@ python run.py
 ### Running Tests
 
 ```bash
-# Full suite (214 tests)
+# Full suite (1,024+ tests)
 python -m pytest tests/ -v
 
 # Specific test file
-python -m pytest tests/test_vulnerability_filtering.py -v
+python -m pytest tests/test_scan_features.py -v
 
 # With coverage
 python -m pytest tests/ --cov=app --cov-report=html
