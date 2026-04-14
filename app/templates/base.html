@@ -3273,6 +3273,28 @@
                     </div>
                 </div>
                 {% endif %}
+
+                {# Platform Operations — Sprint 6 cross-repo visibility (super_admin only). #}
+                {% if current_user and current_user.is_super_admin() %}
+                <div class="sidebar-nav-section">
+                    <div class="sidebar-nav-title">Platform Operations</div>
+                    <a href="#" class="sidebar-link" onclick="toggleSubmenu(this, event)" data-tooltip="Cross-Repo Integration">
+                        <i class="bi bi-diagram-3"></i>
+                        <span class="link-text">Cross-Repo Integration</span>
+                        <i class="bi bi-chevron-right submenu-arrow"></i>
+                    </a>
+                    <div class="sidebar-submenu">
+                        <a href="/super-admin/webhook-events" class="sidebar-sublink {{ 'active' if request.path == '/super-admin/webhook-events' else '' }}" data-tooltip="Webhook Events Received">
+                            <i class="bi bi-arrow-down-circle"></i>
+                            Webhook Events
+                        </a>
+                        <a href="/super-admin/usage-uploads" class="sidebar-sublink {{ 'active' if request.path == '/super-admin/usage-uploads' else '' }}" data-tooltip="Usage Metering Uploads">
+                            <i class="bi bi-arrow-up-circle"></i>
+                            Usage Uploads
+                        </a>
+                    </div>
+                </div>
+                {% endif %}
             </nav>
         </aside>
 
