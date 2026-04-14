@@ -2913,6 +2913,29 @@
     {% endif %}
     {% endif %}
 
+    {% if license_revoked_banner %}
+    <div class="license-revoked-banner bg-danger text-white text-center py-2 px-3" style="position: fixed; top: 0; left: 0; right: 0; z-index: 9998; font-size: 0.9rem;">
+        <strong>❌ {{ 'Suspended' if license_revoked_banner.level == 'suspended' else 'Revoked' }}</strong>
+        — {{ license_revoked_banner.message }}
+    </div>
+    <style>
+        .license-revoked-banner ~ * { margin-top: 40px !important; }
+        .license-revoked-banner ~ .top-navbar { margin-top: 40px !important; }
+    </style>
+    {% endif %}
+
+    {% if impersonated %}
+    <div class="impersonation-banner bg-warning text-dark text-center py-2 px-3" style="position: fixed; top: 0; left: 0; right: 0; z-index: 10000; font-size: 0.9rem; border-bottom: 2px solid #d39e00;">
+        <strong>⚠️ Impersonation active</strong> — You are viewing as <code>{{ current_user.email if current_user else 'unknown' }}</code>
+        via SSO from the admin portal (by <code>{{ impersonated_by or 'unknown' }}</code>).
+        <a href="/admin/sso/exit" class="btn btn-sm btn-dark ms-2" style="padding: 1px 10px;">Exit impersonation</a>
+    </div>
+    <style>
+        .impersonation-banner ~ * { margin-top: 44px !important; }
+        .impersonation-banner ~ .top-navbar { margin-top: 44px !important; }
+    </style>
+    {% endif %}
+
     <!-- Clean license-reload param from URL after page load -->
     <script>if(new URLSearchParams(location.search).has('_lrc')){var u=new URL(location);u.searchParams.delete('_lrc');history.replaceState(null,'',u)}</script>
 
