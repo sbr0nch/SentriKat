@@ -1642,13 +1642,23 @@ def _check_saas_expirations():
                     if existing:
                         existing.value = 'false'
                 except Exception:
-                    pass
+                    logger.warning(
+                        "Failed to clear onprem expiration setting "
+                        "for org %s", getattr(org, 'id', '?'),
+                        exc_info=True,
+                    )
 
     try:
         from app import db
         db.session.commit()
     except Exception:
-        pass
+        logger.warning(
+            "Failed to commit onprem expiration clear", exc_info=True
+        )
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
 
 
 def _check_onprem_expiration():

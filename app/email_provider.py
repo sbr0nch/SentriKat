@@ -18,6 +18,12 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 
+# Sprint 4+5 hardening: proper email validation regex. RFC 5322 is
+# pathological; this pragmatic regex rejects the common invalid cases
+# (user@localhost, user@., admin@, empty TLD) while still accepting
+# standard addresses (including +tag, ., _, -, subdomains).
+_EMAIL_REGEX = re.compile(r'^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$')
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -327,12 +333,24 @@ def send_email(to, subject, html_body, reply_to=None, organization_id=None,
         return {'success': False, 'error': 'No recipients'}
 
     # --- Validate email addresses ---
+    # Sprint 4+5 hardening: use a proper regex (was previously just
+    # `'@' in addr and '.' in addr.split('@')[-1]` which accepted
+    # user@localhost, user@. etc). Also reject CRLF to prevent email
+    # header injection via the recipient field.
     validated = []
     for addr in to:
-        if '@' in addr and '.' in addr.split('@')[-1]:
-            validated.append(addr)
-        else:
-            logger.warning(f"Skipping invalid email address: {_obfuscate_email(addr)}")
+        if '\n' in addr or '\r' in addr:
+            logger.warning(
+                f"Skipping email with CR/LF (possible header injection): "
+                f"{_obfuscate_email(addr)}"
+            )
+            continue
+        if not _EMAIL_REGEX.match(addr):
+            logger.warning(
+                f"Skipping invalid email address: {_obfuscate_email(addr)}"
+            )
+            continue
+        validated.append(addr)
     to = validated
     if not to:
         return {'success': False, 'error': 'No valid recipients'}
