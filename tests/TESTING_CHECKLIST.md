@@ -548,6 +548,106 @@ echo '<14>1 2026-02-11T12:00:00Z sentrikat test - - - Test message' | nc -u loca
 
 ---
 
+## Sprint 4 + 5 SECURITY / HARDENING TESTS (from 2026-04-14 audit)
+
+These tests verify the audit findings (see `docs/PRE_LAUNCH_AUDIT_AND_TESTING_PLAN.md`
+PARTE 9). Run all of these before the production launch.
+
+### Migration & schema (BLOCKER 9.1)
+
+- [ ] `find . -path "*alembic*" -name "*.py" | xargs grep -l "remediation_assignments\|risk_exceptions\|product_aliases\|vulnerability_snapshots\|sla_policies"` → returns at least one migration file.
+- [ ] On a fresh DB: `flask db upgrade` runs cleanly, all 5 new tables exist with correct columns.
+- [ ] On a copy of the production DB: `flask db upgrade` runs cleanly without dropping data.
+- [ ] Rollback test: `flask db downgrade` reverses the migration cleanly.
+- [ ] Cross-check indexes: `idx_assign_org_status`, `idx_assign_org_assignee`, `idx_assign_org_due`, `idx_riskexc_org_status`, `idx_riskexc_org_expiry`, `uq_product_alias` all present after upgrade.
+
+### Test coverage (HIGH 9.2)
+
+- [ ] `python3 -m pytest tests/ -q` → 1024+ tests pass, 0 fail.
+- [ ] Search for new test files: `ls tests/test_sbom_export.py tests/test_compliance_reports.py tests/test_remediation_api.py 2>&1` → at least one exists or a documented decision to defer.
+- [ ] If still missing at launch time, write down in `99_TODO_BEFORE_LAUNCH.md` why and the deadline to fill the gap.
+
+### HMAC signing key (HIGH 9.3)
+
+- [ ] In production env file: `SECRET_KEY` is at least 64 hex chars (32 bytes), generated with `secrets.token_hex(32)`.
+- [ ] `SECRET_KEY` is **not** equal to `dev-secret-key`, `change-me`, or any obvious default.
+- [ ] Generate a compliance report (PDF) on staging, copy the integrity hash, change a single character in the JSON body, recompute HMAC manually with `hmac.new(SECRET_KEY, canonical_json, sha256).hexdigest()` → verify the original hash does not match the modified body.
+- [ ] Document the rotation procedure for `SECRET_KEY` (what happens to old reports).
+
+### OpenAPI spec (HIGH 9.4)
+
+- [ ] `curl https://your-instance/api/docs` → Swagger UI loads.
+- [ ] Swagger UI shows entries for `/api/sbom/*`, `/api/reports/compliance/*`, `/api/remediation/*`, `/api/risk-exceptions`, `/api/product-aliases`, `/api/vulnerabilities/trends`, `/api/reports/patch-tuesday/trigger`.
+- [ ] If still missing at launch time, document in `99_TODO_BEFORE_LAUNCH.md`.
+
+### Email throttle race (MEDIUM 9.5)
+
+- [ ] On staging with 5 gunicorn workers: create 10 assignments in 5 seconds via the API (script or `xargs -P 5`). Count emails received in the inbox. Expected: max 5-10 (one per assignment, throttle 1/h). Real with current in-memory throttle: probably more because of multi-worker.
+- [ ] Document the result in launch notes.
+- [ ] If the throttle leaks > 2x the expected count, decide: ship-as-is + monitor Resend quota, OR delay launch to fix.
+
+### CSRF on user-facing blueprints (MEDIUM 9.6)
+
+- [ ] Without a CSRF token, attempt:
+      `curl -X POST -H "Cookie: session=<valid>" -H "Content-Type: application/json" -d '{}' https://your-instance/api/risk-exceptions`
+      Expected after fix: HTTP 400 / 403 "CSRF token missing". Current: probably 200/201.
+- [ ] Same test on `/api/remediation/assignments` (POST).
+- [ ] Same test on `/api/product-aliases` (POST).
+- [ ] After enabling CSRF on these blueprints, verify the web UI still works (POST from the dashboard succeeds because the page includes the token).
+
+### Pagination (MEDIUM 9.7)
+
+- [ ] Seed an org with 1000 risk exceptions: `for i in $(seq 1 1000); do curl -X POST .../api/risk-exceptions -d '{...}'; done`
+- [ ] Call `GET /api/risk-exceptions` → response time should be under 1 second AND payload size under 5MB.
+- [ ] If response is > 5MB or > 5s, pagination is missing — apply the fix.
+- [ ] Same test for `GET /api/product-aliases`.
+
+### PDF & SBOM size limits (MEDIUM 9.8 + 9.9)
+
+- [ ] On a test org with 5000+ products, call `GET /api/sbom/export/cyclonedx` → response size and worker memory.
+- [ ] On the same org, call `GET /api/reports/compliance/pci-dss?format=pdf` → PDF size and worker memory.
+- [ ] If worker RSS exceeds 512MB or response > 100MB, apply the size cap fix.
+
+### Patch Tuesday idempotency (MEDIUM 9.10)
+
+- [ ] Trigger the digest twice in dry_run mode within 1 minute:
+      `curl -X POST .../api/reports/patch-tuesday/trigger?dry_run=true`
+      `curl -X POST .../api/reports/patch-tuesday/trigger?dry_run=true`
+- [ ] Verify the second call does NOT report "would_send" again for orgs already marked as sent.
+- [ ] Manually flip the `patch_tuesday_marker_<YYYY-MM>` setting to `false` for one org and verify the next trigger picks it up again.
+
+### Patch Tuesday rate limit (MEDIUM 9.11)
+
+- [ ] As an admin, call the trigger endpoint 10 times in 1 minute. Expected after fix: HTTP 429 after the 5th call. Current: all 10 succeed.
+
+### Assignment + Jira rollback (MEDIUM 9.12)
+
+- [ ] Configure a Jira integration with **invalid credentials**.
+- [ ] Create an assignment with `create_jira_ticket=true`.
+- [ ] Expected after fix: assignment NOT created in DB (rollback) OR created with explicit `tracker_failed=true` flag.
+- [ ] Current: assignment created with `tracker_issue_key=NULL`, response includes a "warning". Decide: acceptable or block.
+
+### Email validation (MEDIUM 9.13)
+
+- [ ] Try to assign to `user@localhost` → expected after fix: 400 "invalid email format". Current: 200, then email send fails downstream.
+- [ ] Try `attacker@evil.com\nBcc: victim@target.com` (URL encode the newline) → expected: 400. Current: probably 200.
+
+### Format param validation (MEDIUM 9.14)
+
+- [ ] `GET /api/reports/compliance/pci-dss?format=xml` → expected after fix: 400 "format must be json or pdf". Current: silently returns JSON.
+
+### Bare except in scheduler (LOW 9.15)
+
+- [ ] `grep -n "except:" app/scheduler.py | grep -v "except Exception"` → ideally returns nothing.
+- [ ] `grep -n "except.*: pass$" app/scheduler.py` → list of remaining bare passes; convert them to `logger.warning("...", exc_info=True)`.
+
+### Field length limits (LOW 9.16 + 9.17)
+
+- [ ] Try to create a risk exception with a 10MB justification → expected: 400. Current: 201 (DB happy with 10MB Text).
+- [ ] Try to create an assignment with `assigned_to="../../etc/passwd"` → expected: 400. Current: 201.
+
+---
+
 ## Test Environment Teardown
 
 ```bash

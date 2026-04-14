@@ -641,6 +641,270 @@ Cose da chiedere al team SentriKat-web prima del deploy:
 
 ---
 
+## PARTE 9: SECURITY + COMPLETENESS AUDIT FINDINGS (2026-04-14)
+
+Audit eseguito da due agenti indipendenti (security + completeness) sul codice
+Sprint 4 + Sprint 5. Ogni voce qui sotto va RISOLTA o CONSAPEVOLMENTE ACCETTATA
+(con scrittura del rationale) prima del lancio commerciale.
+
+### 9.1 BLOCKER — Migrations Alembic mancanti (CRITICO)
+
+Cinque modelli sono stati definiti in `app/models.py` ma **non esiste alcuna
+migration Alembic** che li crei sul DB:
+
+| Modello | Linea | Tabella |
+|---|---|---|
+| VulnerabilitySnapshot | 2842 | `vulnerability_snapshots` |
+| RemediationAssignment | 4044 | `remediation_assignments` |
+| SLAPolicy | 4115 | `sla_policies` |
+| RiskException | 4147 | `risk_exceptions` |
+| ProductAlias | 4194 | `product_aliases` |
+
+Più i 5+1 indici compositi e l'unique constraint (vedi 8.1) e la ridenominazione
+`jira_issue_key → tracker_issue_key` (con backward compat).
+
+**Impatto:** fresh install crasha con `relation does not exist`. Deploy in
+produzione su DB esistenti idem.
+
+- [ ] **BLOCKER FIX**: creare `alembic/versions/XXXX_sprint4_sprint5_models.py`
+      con CREATE TABLE per le 5 tabelle, CREATE INDEX per i 6 indici, ALTER
+      TABLE RENAME per `jira_issue_key`, e ovviamente downgrade simmetrico per
+      il rollback.
+- [ ] Test della migration su una copia del DB di produzione.
+- [ ] Rollback testato.
+
+### 9.2 HIGH — Test coverage zero per Sprint 4+5
+
+Nessun test file copre le nuove feature critiche:
+
+- [ ] `tests/test_sbom_export.py` — MANCANTE
+- [ ] `tests/test_compliance_reports.py` — MANCANTE
+- [ ] `tests/test_remediation_api.py` — MANCANTE (assignments, SLA, risk
+      exceptions, aliases)
+- [ ] `tests/test_scheduler.py` — esiste ma non copre `patch_tuesday_digest_job`
+      ne' `snapshot_vulnerabilities_daily`
+
+**Minimo accettabile per il lancio**: per ogni endpoint nuovo, almeno 1 test
+positivo + 1 test cross-tenant + 1 test di authorization (free-tier 403).
+Stima: 500+ righe di test, ~3-5 giorni di lavoro.
+
+### 9.3 HIGH — HMAC secret key dei compliance reports
+
+`app/reports_api.py:125` (e `compliance_reports.py`) usa
+`current_app.config.get('SECRET_KEY', '')` come chiave HMAC. Se `SECRET_KEY`
+e' debole o di default, gli auditor possono forgiare i report.
+
+- [ ] Verificare in produzione che `SECRET_KEY` sia generato con
+      `secrets.token_hex(32)` o equivalente, **mai** lasciato al default.
+- [ ] Documentare la procedura di rotazione (quando ruoti SECRET_KEY i
+      vecchi report restano firmati con la vecchia chiave — accettabile per
+      audit storico ma da segnare in changelog).
+- [ ] Considerare un `REPORT_SIGNING_KEY` separato in env per disaccoppiare
+      la rotazione dei report da quella della session key (post-launch
+      improvement).
+
+### 9.4 HIGH — OpenAPI spec non aggiornato
+
+`app/api_docs.py` non include nessuno dei nuovi endpoint Sprint 4+5
+(`/api/sbom/*`, `/api/reports/compliance/{pci-dss,iso-27001,soc2}`,
+`/api/remediation/*`, `/api/sla/*`, `/api/risk-exceptions`,
+`/api/product-aliases`, `/api/vulnerabilities/trends`,
+`/api/reports/patch-tuesday/trigger`).
+
+**Impatto:** Swagger UI nasconde 20+ endpoint. Developer experience
+incompleta. I clienti che integrano via API vanno alla cieca.
+
+- [ ] Aggiungere voci OpenAPI per ogni nuovo endpoint (~2h).
+
+### 9.5 MEDIUM — Email throttle race condition
+
+`app/email_service.py:147-303`. Il throttle e' un dict in-memory:
+- check (line 150) e update (line 303) **non sono atomici** → due thread
+  concorrenti passano entrambi la check
+- Multi-worker gunicorn: ogni worker ha il proprio dict → niente throttling
+  cross-worker
+- Restart server → throttle azzerato → spam temporaneo
+
+**Test manuale** per riprodurre:
+- [ ] Simulare 5 worker gunicorn paralleli (gia' la config standard) e
+      creare 10 assignment in 10 secondi → contare le email arrivate. Atteso
+      con throttle correttamente persistente: max 1 email/assignment. Reale
+      attuale: probabilmente 5+ per assignment.
+
+**Fix** (post-launch o pre-launch a seconda del rischio Resend quota):
+- [ ] Migrare il throttle su una colonna `last_email_sent_at` su
+      `RemediationAssignment` con `UPDATE ... WHERE last_email_sent_at < NOW() - INTERVAL '1 hour'`
+      atomico. Effort: 1 giorno.
+
+### 9.6 MEDIUM — CSRF exempt sui blueprint user-facing
+
+Tre blueprint hanno `csrf.exempt(bp)`:
+- `app/sbom_export.py:21`
+- `app/compliance_reports.py:36`
+- `app/remediation_api.py:26`
+
+**Razionale originale**: gli agent usano API key e non hanno CSRF token. Ma
+questi blueprint **non** servono solo gli agent — servono utenti web che
+fanno POST/PUT/DELETE da browser. Disabilitare CSRF per tutto il blueprint
+e' troppo permissivo.
+
+**Mitigazione attuale**: `SESSION_COOKIE_SAMESITE=Lax` riduce ma non
+elimina il rischio CSRF cross-site.
+
+- [ ] Rimuovere `csrf.exempt(bp)` da `sbom_export`, `compliance_reports`,
+      `remediation_api`.
+- [ ] Verificare che il frontend includa CSRF token su tutte le POST/PUT/DELETE
+      verso questi endpoint (templates Jinja2 dovrebbero gia' usare
+      `{{ csrf_token() }}`).
+- [ ] Endpoint che vengono chiamati da agent (se ce ne sono in questi
+      blueprint, controllare) — esentare singolarmente con `@csrf.exempt`
+      sull'endpoint specifico, non sul blueprint intero.
+
+### 9.7 MEDIUM — Pagination mancante su risk_exceptions e product_aliases
+
+`app/remediation_api.py:672-697` (`list_risk_exceptions`) e
+`app/remediation_api.py:822-838` (`list_product_aliases`) chiamano `.all()`
+senza limiti.
+
+**Impatto:** un'org con 100k+ righe puo' OOM-are il worker o timeoutare la
+risposta. `list_assignments()` e' gia' protetto con `per_page: min(100, ...)`.
+
+- [ ] Aggiungere `?page=&per_page=` con `per_page = min(100, request.args.get('per_page', 50, type=int))`
+      e `query.paginate(...)` su entrambi gli endpoint. Effort: 1h.
+
+### 9.8 MEDIUM — PDF compliance report senza limite di dimensione
+
+`app/compliance_reports.py:576-689`. `_render_pdf()` itera su tutti i
+requirements e tutti i prodotti senza un cap. Org con 100k+ prodotti e
+500k+ vulnerability matches → PDF da 500+ pagine → ReportLab consuma
+memoria linearmente → OOM del worker.
+
+- [ ] Aggiungere `MAX_REPORT_REQUIREMENTS = 200` e `MAX_REPORT_EVIDENCE_PER_REQ = 50`.
+- [ ] Se l'org supera la soglia, scrivere nel report una nota "Truncated to
+      first N items, full data available via /api/reports/compliance/<framework>?format=json".
+- [ ] Test: generare un PDF su un'org con 1000+ prodotti e verificare che
+      il worker non scali sopra 512MB di RSS.
+
+### 9.9 MEDIUM — SBOM export senza limite
+
+`app/sbom_export.py:114-115`. Stesso problema: 100k prodotti → 100MB+ JSON
+→ OOM o timeout.
+
+- [ ] Aggiungere `MAX_SBOM_PRODUCTS = 5000` con HTTP 413 se superato +
+      messaggio chiaro "Use ?product_ids=... to filter or contact support
+      for streaming export".
+
+### 9.10 MEDIUM — Patch Tuesday digest non idempotente in modo robusto
+
+`app/scheduler.py:1571-1572` usa `get_setting(marker_key)` per tracciare
+"already_sent" per org. Problemi:
+1. Se il job fallisce **dopo** aver settato il marker ma **prima** di
+   inviare l'email → digest perso permanentemente per quel mese.
+2. Niente timestamp / expiry → se il marker resta a `'true'` per errore,
+   l'org perde tutti i digest futuri.
+3. Niente trail di chi ha ricevuto cosa.
+
+- [ ] Creare tabella `patch_tuesday_digest_log` con
+      `(id, organization_id, sent_at, success, error, cve_count)`.
+- [ ] Sostituire il check `get_setting('marker', 'false')` con
+      `SELECT 1 FROM patch_tuesday_digest_log WHERE organization_id = :org AND sent_at >= :start_of_month AND success = true`.
+- [ ] Eliminare il marker setting quando il log e' in produzione.
+
+### 9.11 MEDIUM — Patch Tuesday trigger endpoint senza rate limit
+
+`app/routes.py:7644` — `POST /api/reports/patch-tuesday/trigger` ha solo
+`@admin_required`, niente `@limiter.limit(...)`. Un admin puo' triggerarlo
+in loop con `dry_run=false` e bruciare la quota Resend.
+
+- [ ] Aggiungere `@limiter.limit("5/hour")` sull'endpoint. Effort: 5 min.
+
+### 9.12 MEDIUM — Assignment + Jira no rollback
+
+`app/remediation_api.py:299-418`. L'assignment viene committato **prima**
+della chiamata a Jira. Se Jira fallisce, resta nel DB un record con
+`tracker_issue_key=NULL` e l'utente vede solo un warning nel response.
+
+- [ ] Spostare `db.session.commit()` dopo la chiamata a Jira (oppure
+      wrappare in try/except con `db.session.rollback()` su fallimento di
+      Jira).
+- [ ] Se l'utente vuole comunque l'assignment senza ticket → flag esplicito
+      `?allow_partial=true`.
+
+### 9.13 MEDIUM — Email validation troppo permissiva
+
+`app/email_provider.py:337-340`. Validazione attuale: `'@' in addr and '.' in addr.split('@')[-1]`.
+Accetta `user@localhost`, `user@.`, `admin@`, ecc.
+
+- [ ] Sostituire con regex `r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'`.
+- [ ] Aggiungere protezione anti CRLF injection (`'\n' in addr or '\r' in addr → reject`).
+
+### 9.14 MEDIUM — Format parameter non validato nei compliance reports
+
+`app/compliance_reports.py:752`. `fmt = request.args.get('format', 'json').lower()`
+ma poi solo `if fmt == 'pdf':` — qualsiasi altro valore cade silenziosamente
+in JSON.
+
+- [ ] Aggiungere validazione esplicita: `if fmt not in ('json', 'pdf'): return jsonify({'error':'invalid format'}), 400`.
+
+### 9.15 LOW — Bare except clauses in scheduler
+
+`app/scheduler.py` linee 118, 126, 465, 537, 568, 1282, 1374, 1455, 1480,
+1494, 1645, 1651 — multipli `except Exception: pass` o `except: pass` che
+silenziano errori. In particolare i due alle linee 1645 e 1651 sono dentro
+`vulnerability_snapshot_job`: un errore di DB qui significa snapshot persi
+senza alert.
+
+- [ ] Convertire ogni `except: pass` in `except Exception as e: logger.warning("...", exc_info=True)`.
+
+### 9.16 LOW — Field length limits mancanti
+
+`RiskException.justification` e `RemediationAssignment.notes` sono
+`db.Text` senza limite. Un POST da 10MB e' tecnicamente accettato.
+
+- [ ] Aggiungere `MAX_JUSTIFICATION_LEN = 5000`, `MAX_NOTES_LEN = 10000` con
+      check API-side e errore 400.
+
+### 9.17 LOW — assigned_to validation lacking
+
+`app/remediation_api.py:259-260`. `assigned_to` accettato senza regex/length.
+
+- [ ] Length 2-200 + regex `^[a-zA-Z0-9._@\-]+$`.
+
+### 9.18 LOW — PDF error context e Email header injection
+
+Vedi report degli audit per i dettagli — entrambi a basso impatto, post-launch ok.
+
+---
+
+## PARTE 10: AGGIORNAMENTO GO-LIVE CHECKLIST
+
+La 8.8 originale e' stata estesa con i blocker dell'audit:
+
+- [ ] **BLOCKER #1 risolto**: Alembic migration per Sprint 4+5 esiste, testata
+      su copia del DB di produzione, rollback testato.
+- [ ] **HIGH #2 risolto** (o accettato per launch): test minimi (1 happy path
+      + 1 cross-tenant + 1 license-gate) per ogni endpoint nuovo SBOM /
+      compliance / remediation.
+- [ ] **HIGH #3 risolto**: `SECRET_KEY` in produzione e' generato randomamente
+      (>=32 byte hex), non default, documentato in env example.
+- [ ] **HIGH #4 risolto** (o post-launch ok): OpenAPI spec aggiornato.
+- [ ] **MEDIUM #6 risolto**: CSRF re-enabled sui blueprint user-facing.
+- [ ] **MEDIUM #7-9 risolti**: pagination/size limits su risk-exceptions,
+      product-aliases, SBOM, compliance PDF.
+- [ ] **MEDIUM #11 risolto**: rate limit su patch-tuesday/trigger.
+- [ ] **MEDIUM #14 risolto**: format parameter validato.
+- [ ] DB backup completato e verificato.
+- [ ] Test suite al verde (`pytest tests/ -q` → 0 fail).
+- [ ] Smoke test manuale delle feature Sprint 4+5 completato.
+- [ ] Rollback plan documentato e testato.
+- [ ] DNS / SSL verificati.
+- [ ] Monitoring alert configurati per i job nuovi (patch_tuesday_digest,
+      snapshot_vulnerabilities_daily).
+- [ ] Email di comunicazione ai clienti EA pronta (feature nuove in
+      changelog).
+
+---
+
 *Documento generato dalla sessione di audit del 2026-04-09*
 *Esteso il 2026-04-14 con Sprint 4 + Sprint 5 verification*
 *Branch: claude/fix-windows-agent-ping-d4xak*
