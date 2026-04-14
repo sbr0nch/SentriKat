@@ -433,7 +433,13 @@ def save_ldap_settings():
                 logger.error(f"Failed to encrypt LDAP bind password: {type(enc_err).__name__}")
                 return jsonify({'error': 'Failed to encrypt bind password. Check ENCRYPTION_KEY is set.'}), 500
 
-        set_setting('ldap_search_filter', data.get('ldap_search_filter', '(sAMAccountName={username})'), 'ldap', 'LDAP search filter')
+        # B7: validate the filter template (allow-list) before persisting.
+        # A malicious admin could otherwise craft an OR filter such as
+        # (|(uid={username})(uid=admin)) and impersonate users at login.
+        from app.ldap_manager import validate_ldap_search_filter
+        raw_filter = data.get('ldap_search_filter', '(sAMAccountName={username})')
+        validated_filter = validate_ldap_search_filter(raw_filter)
+        set_setting('ldap_search_filter', validated_filter, 'ldap', 'LDAP search filter')
         set_setting('ldap_username_attr', data.get('ldap_username_attr', 'sAMAccountName'), 'ldap', 'LDAP username attribute')
         set_setting('ldap_email_attr', data.get('ldap_email_attr', 'mail'), 'ldap', 'LDAP email attribute')
         set_setting('ldap_use_tls', 'true' if data.get('ldap_use_tls') else 'false', 'ldap', 'Use TLS/STARTTLS')

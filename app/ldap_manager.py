@@ -33,6 +33,67 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def validate_ldap_search_filter(template):
+    """Validate an LDAP search filter template before persisting it.
+
+    Finding B7: a malicious administrator could otherwise save a crafted
+    template such as ``(|(uid={username})(uid=admin))`` and impersonate
+    any user at login time. We use a strict allow-list:
+
+    * exactly one ``{username}`` placeholder
+    * no other curly-brace tokens (blocks e.g. ``{username}{foo}``)
+    * no ``|`` (OR), ``*`` (wildcard), ``>``/``<`` (ranges)
+    * overall shape must match either:
+        - ``(attr={username})``
+        - ``(&(attr={username})(attr=value))``
+      where ``attr`` / ``value`` are simple word characters.
+
+    Raises ``ValueError`` on any violation; returns the trimmed template
+    on success.
+    """
+    import re
+
+    if template is None:
+        raise ValueError("LDAP search filter template is required")
+    template = str(template).strip()
+    if not template:
+        raise ValueError("LDAP search filter template is required")
+
+    # Exactly one {username}
+    if template.count('{username}') != 1:
+        raise ValueError(
+            "LDAP search filter must contain exactly one '{username}' placeholder"
+        )
+
+    # No other curly-brace tokens (after stripping the single placeholder
+    # we expect no '{' or '}' left at all).
+    stripped = template.replace('{username}', '')
+    if '{' in stripped or '}' in stripped:
+        raise ValueError(
+            "LDAP search filter may not contain template tokens other than '{username}'"
+        )
+
+    # Block OR, wildcard, and range comparators
+    forbidden_chars = ('|', '*', '>', '<')
+    for ch in forbidden_chars:
+        if ch in stripped:
+            raise ValueError(
+                f"LDAP search filter may not contain '{ch}' "
+                "(allowed shapes: (attr={username}) or (&(attr={username})(attr=value)))"
+            )
+
+    # Allow-list shape check
+    simple = r'^\(\w+={username}\)$'
+    compound = r'^\(&\(\w+={username}\)\(\w+=\w+\)\)$'
+    if not (re.match(simple, template) or re.match(compound, template)):
+        raise ValueError(
+            "LDAP search filter must match either (attr={username}) or "
+            "(&(attr={username})(attr=value))"
+        )
+
+    return template
+
+
 def _parse_ldap_server(server_str):
     """Parse LDAP server URL, handling ldap://, ldaps://, and bare hostname formats.
 
