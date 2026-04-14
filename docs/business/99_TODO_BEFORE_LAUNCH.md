@@ -3,9 +3,104 @@
 
 ---
 
-**Documento Versione:** 1.0
-**Ultimo Aggiornamento:** Febbraio 2026
+**Documento Versione:** 1.1
+**Ultimo Aggiornamento:** Aprile 2026 (esteso dopo Sprint 4+5 audit)
 **Scopo:** Checklist di azioni necessarie per completare i documenti business e avviare l'azienda
+
+---
+
+## 0. DEBITO TECNICO DA SPRINT 4+5 AUDIT (Aprile 2026)
+
+Questi item sono stati identificati dall'audit security + completeness del
+2026-04-14 e **accettati come debito tecnico** perche' troppo grossi per
+essere fixati prima del lancio. Devono essere pianificati nei Sprint 6-7.
+
+### 0.1 Test coverage automatica per Sprint 4+5 (HIGH — 3-5 giorni)
+
+Al momento **zero** test coprono i moduli nuovi. Serve scrivere minimo:
+- [ ] `tests/test_sbom_export.py` — happy path + license gate + cross-tenant + size cap
+- [ ] `tests/test_compliance_reports.py` — JSON + PDF per i 3 framework, integrity block verification, format validation, size cap
+- [ ] `tests/test_remediation_api.py` — assignments CRUD, SLA policies, risk exceptions, product aliases, cross-tenant, pagination
+- [ ] `tests/test_scheduler_sprint5.py` — patch_tuesday_digest_job (dry-run, idempotency, quota), vulnerability_snapshot_job
+- [ ] `tests/test_agent_delta_scan.py` — delta scan hash detection + gzip round-trip + store-and-forward replay
+
+Target: 80%+ coverage sui 4 moduli nuovi (`sbom_export.py`, `compliance_reports.py`, `remediation_api.py`, `email_service.py` sezione Sprint 4+5).
+
+### 0.2 OpenAPI spec update (HIGH — 2 ore)
+
+- [ ] Aggiornare `app/api_docs.py` con le voci OpenAPI per tutti gli endpoint Sprint 4+5 (20+):
+  - `/api/sbom/export/{cyclonedx,spdx,stix21}`
+  - `/api/reports/compliance/{pci-dss,iso-27001,soc2}`
+  - `/api/remediation/assignments` (GET/POST/PUT/DELETE)
+  - `/api/sla/policies`, `/api/sla/compliance`
+  - `/api/risk-exceptions` (GET/POST/PUT/DELETE)
+  - `/api/product-aliases` (GET/POST/DELETE)
+  - `/api/vulnerabilities/trends`, `/api/vulnerabilities/trends/snapshot`
+  - `/api/reports/patch-tuesday/trigger`
+
+### 0.3 Email throttle DB-backed (MEDIUM — 1 giorno)
+
+`app/email_service.py:147-303` usa un dict in-memory per throttlare le
+email sulle assignments. Problemi:
+1. Multi-worker gunicorn: ogni worker ha il proprio dict → nessun throttle cross-worker
+2. Restart server → azzerato → spam temporaneo
+3. Race condition check/update non atomico
+
+Fix:
+- [ ] Aggiungere tabella `email_throttle (subject_key TEXT PK, last_sent_at TIMESTAMP)` oppure colonna `last_email_sent_at` su `RemediationAssignment`
+- [ ] Sostituire il dict con una `UPDATE ... WHERE last_sent_at < NOW() - INTERVAL '1 hour'` atomica che ritorna il row count (1 = procedi, 0 = throttled)
+- [ ] Test multi-worker con 5 worker gunicorn + 10 POST paralleli = max 1 email per assignment/ora
+
+### 0.4 Patch Tuesday digest idempotency DB-backed (MEDIUM — 1 giorno)
+
+`app/scheduler.py:1571-1572` usa `get_setting(marker_key)` per tracciare
+"already_sent". Problemi: niente timestamp/expiry, mid-run failure → digest perso.
+
+Fix:
+- [ ] Creare tabella `patch_tuesday_digest_log (id, organization_id, sent_at, success, error, cve_count)`
+- [ ] Sostituire il check `get_setting()` con `SELECT 1 FROM patch_tuesday_digest_log WHERE organization_id = :org AND sent_at >= :start_of_month AND success = true`
+- [ ] Eliminare il marker setting una volta che il log e' in produzione
+- [ ] Query dashboard opzionale per vedere chi ha ricevuto cosa e quando
+
+### 0.5 Flask-Migrate / Alembic setup formale (MEDIUM — 2-4 ore)
+
+Sprint 4+5 usa uno script SQL manuale (`migrations/sprint4_sprint5/upgrade.sql`).
+Per i prossimi sprint va inizializzato Alembic proprio:
+
+- [ ] `flask db init` su staging → crea `migrations/alembic.ini` e `migrations/env.py`
+- [ ] `flask db stamp <baseline_revision>` su ogni istanza in esecuzione per marcarla a schema pre-Sprint-4
+- [ ] `flask db migrate -m "sprint4_sprint5_baseline"` → genera revision automatica
+- [ ] Verificare che la revision matchi il contenuto dello script SQL manuale
+- [ ] Applicare con `flask db upgrade` su staging, poi prod
+- [ ] Documentare workflow in `docs/ADMIN_GUIDE.md`
+
+### 0.6 Fix MEDIUM/LOW gia' applicati 2026-04-14
+
+Questi sono gia' stati fixati nel commit che ha aggiunto l'audit:
+
+- [x] CSRF exempt rimosso da `sbom_export`, `compliance_reports`, `remediation_api` blueprint (9.6)
+- [x] Pagination su `list_risk_exceptions` e `list_product_aliases` (9.7)
+- [x] Format param validation `json|pdf` nei compliance reports (9.14)
+- [x] `MAX_SBOM_PRODUCTS = 5000` size cap (9.9)
+- [x] `MAX_REPORT_REQUIREMENTS = 200` + evidence cap nei PDF (9.8)
+- [x] `@limiter.limit("5/hour")` su `/api/reports/patch-tuesday/trigger` (9.11)
+- [x] Email regex + CRLF injection protection in `email_provider.py` (9.13)
+- [x] `assigned_to` validation (regex + length) + `notes` cap (9.17, 9.16)
+- [x] `justification` length cap (9.16)
+- [x] `strict_tracker=true` opt-in rollback su Jira failure (9.12)
+- [x] Bare except critici in `scheduler.py` convertiti a logger.warning (9.15)
+- [x] PDF error context nelle response 500 (9.18)
+- [x] Alembic SQL manual migration scripts in `migrations/sprint4_sprint5/` (BLOCKER 9.1)
+
+### 0.7 BLOCKER NON fixato automaticamente — richiede intervento umano
+
+- [ ] **Verificare SECRET_KEY in produzione** (HIGH 9.3): lanciare sulla VM
+      `python3 -c "import os; k=os.environ.get('SECRET_KEY',''); print('len:', len(k), 'is_hex:', all(c in '0123456789abcdef' for c in k), 'is_default:', k in ('','dev-secret-key','change-me'))"`
+      → se len < 64 o is_default = True → sostituire con
+      `python3 -c "import secrets; print(secrets.token_hex(32))"` e ridepployare.
+- [ ] Se esistono compliance report gia' generati prima del cambio di
+      SECRET_KEY, documentare che la loro integrity hash e' firmata con la
+      chiave vecchia e non piu' riverificabile dopo la rotazione.
 
 ---
 

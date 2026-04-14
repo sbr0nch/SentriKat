@@ -18,7 +18,14 @@ import logging
 logger = logging.getLogger(__name__)
 
 bp = Blueprint('sbom_export', __name__)
-csrf.exempt(bp)
+# NOTE: CSRF is NOT exempted blueprint-wide. SBOM export endpoints are
+# session-authenticated and called from the dashboard UI, so the existing
+# CSRFProtect from flask-wtf applies. Agents do not call these endpoints.
+
+# Sprint 4+5 hardening: cap on products exported in a single bundle to
+# prevent OOM on very large organizations. Orgs needing more can filter
+# with ?product_ids= or use scheduled reports.
+MAX_SBOM_PRODUCTS = 5000
 
 
 def _get_org_products(org_id, product_ids=None):
@@ -113,6 +120,20 @@ def export_cyclonedx():
 
     product_ids = _parse_product_ids(request.args.get('product_ids'))
     products = _get_org_products(org_id, product_ids)
+
+    # Sprint 4+5 hardening: size cap to prevent OOM on very large orgs
+    if len(products) > MAX_SBOM_PRODUCTS:
+        return jsonify({
+            'error': 'SBOM export too large',
+            'message': (
+                f'This bundle would contain {len(products)} products, '
+                f'which exceeds the per-bundle maximum of {MAX_SBOM_PRODUCTS}. '
+                f'Use ?product_ids=1,2,3 to filter or contact support for '
+                f'streaming export.'
+            ),
+            'product_count': len(products),
+            'max_products': MAX_SBOM_PRODUCTS,
+        }), 413
 
     now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     serial_uuid = str(uuid.uuid4())
@@ -223,6 +244,20 @@ def export_spdx():
     product_ids = _parse_product_ids(request.args.get('product_ids'))
     products = _get_org_products(org_id, product_ids)
 
+    # Sprint 4+5 hardening: size cap
+    if len(products) > MAX_SBOM_PRODUCTS:
+        return jsonify({
+            'error': 'SBOM export too large',
+            'message': (
+                f'This bundle would contain {len(products)} products, '
+                f'which exceeds the per-bundle maximum of {MAX_SBOM_PRODUCTS}. '
+                f'Use ?product_ids=1,2,3 to filter or contact support for '
+                f'streaming export.'
+            ),
+            'product_count': len(products),
+            'max_products': MAX_SBOM_PRODUCTS,
+        }), 413
+
     now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     doc_uuid = str(uuid.uuid4())
     doc_namespace = f"https://sentrikat.io/spdx/{org.name}/{doc_uuid}"
@@ -332,6 +367,20 @@ def export_stix21():
 
     product_ids = _parse_product_ids(request.args.get('product_ids'))
     products = _get_org_products(org_id, product_ids)
+
+    # Sprint 4+5 hardening: size cap
+    if len(products) > MAX_SBOM_PRODUCTS:
+        return jsonify({
+            'error': 'SBOM export too large',
+            'message': (
+                f'This bundle would contain {len(products)} products, '
+                f'which exceeds the per-bundle maximum of {MAX_SBOM_PRODUCTS}. '
+                f'Use ?product_ids=1,2,3 to filter or contact support for '
+                f'streaming export.'
+            ),
+            'product_count': len(products),
+            'max_products': MAX_SBOM_PRODUCTS,
+        }), 413
 
     now = _stix_timestamp()
     bundle_id = f"bundle--{uuid.uuid4()}"

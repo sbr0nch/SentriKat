@@ -7644,6 +7644,7 @@ def generate_custom_report():
 @bp.route('/api/reports/patch-tuesday/trigger', methods=['POST'])
 @login_required
 @admin_required
+@limiter.limit("5/hour")
 def trigger_patch_tuesday_digest():
     """
     Manually trigger the Patch Tuesday digest for the current admin's org.

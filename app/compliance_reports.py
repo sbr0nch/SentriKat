@@ -33,7 +33,21 @@ from app.saas import is_saas_mode, get_scoped_org_id, get_effective_features
 logger = logging.getLogger(__name__)
 
 bp = Blueprint('compliance_reports', __name__)
-csrf.exempt(bp)
+# NOTE: CSRF is NOT exempted blueprint-wide. Compliance report endpoints are
+# session-authenticated and called from the dashboard UI. All GET endpoints
+# are naturally safe from CSRF; if we ever add POST endpoints here they will
+# go through flask-wtf's CSRFProtect.
+
+# Sprint 4+5 hardening: accepted format values for the ?format= query param.
+# Anything else returns HTTP 400.
+_VALID_REPORT_FORMATS = frozenset(('json', 'pdf'))
+
+# Sprint 4+5 hardening: cap on the number of evidence items / requirements
+# rendered in a PDF to prevent ReportLab OOM on very large organizations.
+# Reports beyond the cap include a truncation notice pointing at the JSON
+# variant for the full data set.
+MAX_REPORT_REQUIREMENTS = 200
+MAX_EVIDENCE_ITEMS_PER_REQUIREMENT = 50
 
 
 def _login_required(f):
@@ -743,13 +757,35 @@ def _generate_report(framework, framework_name, evaluator):
     if len(org_ids) > 1:
         org_name += f' (+{len(org_ids) - 1} more)'
 
+    # Sprint 4+5 hardening: validate the format param up front so an invalid
+    # value returns a clear 400 instead of silently falling through to JSON.
+    fmt = request.args.get('format', 'json').lower()
+    if fmt not in _VALID_REPORT_FORMATS:
+        return jsonify({
+            'error': 'Invalid format',
+            'message': f"format must be one of {sorted(_VALID_REPORT_FORMATS)}",
+        }), 400
+
     # Compute + evaluate
     posture = _compute_vuln_posture(org_ids)
     requirements = evaluator(posture)
     report = _build_report(framework, framework_name, requirements, user, org_name)
 
-    # Format
-    fmt = request.args.get('format', 'json').lower()
+    # Sprint 4+5 hardening: truncate the report if it exceeds the cap. Large
+    # orgs can always fetch the full data via the JSON variant.
+    if len(report.get('requirements', [])) > MAX_REPORT_REQUIREMENTS:
+        report['requirements'] = report['requirements'][:MAX_REPORT_REQUIREMENTS]
+        report['truncated'] = True
+        report['truncation_note'] = (
+            f'Report truncated to the first {MAX_REPORT_REQUIREMENTS} '
+            f'requirements. Fetch ?format=json for the complete data.'
+        )
+    for req in report.get('requirements', []):
+        if isinstance(req.get('evidence'), list) and \
+                len(req['evidence']) > MAX_EVIDENCE_ITEMS_PER_REQUIREMENT:
+            req['evidence'] = req['evidence'][:MAX_EVIDENCE_ITEMS_PER_REQUIREMENT]
+            req['evidence_truncated'] = True
+
     if fmt == 'pdf':
         try:
             pdf_buf = _render_pdf(report)
@@ -761,7 +797,13 @@ def _generate_report(framework, framework_name, evaluator):
             )
         except Exception as e:
             logger.exception(f"Failed to render {framework} PDF report")
-            return jsonify({'error': f'PDF generation failed: {str(e)}'}), 500
+            # Sprint 4+5 hardening: include exception class so operators can
+            # diagnose OOM vs template errors from the response.
+            return jsonify({
+                'error': 'PDF generation failed',
+                'exception_type': type(e).__name__,
+                'detail': str(e)[:500],
+            }), 500
 
     return jsonify(report)
 

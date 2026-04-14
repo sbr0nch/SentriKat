@@ -19,11 +19,57 @@ from app.saas import is_saas_mode
 from datetime import datetime, date
 from math import ceil
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
 bp = Blueprint('remediation', __name__)
-csrf.exempt(bp)
+# NOTE: CSRF is NOT exempted blueprint-wide. These endpoints are
+# session-authenticated and called from the dashboard UI; the web pages
+# include the CSRF token via flask-wtf. Agents do not call these endpoints.
+
+# Sprint 4+5 hardening: input validation constants.
+_ASSIGNED_TO_REGEX = re.compile(r'^[A-Za-z0-9._+\-@]+$')
+MIN_ASSIGNED_TO_LEN = 2
+MAX_ASSIGNED_TO_LEN = 200
+MAX_JUSTIFICATION_LEN = 5000
+MAX_NOTES_LEN = 10000
+
+# Sprint 4+5 hardening: pagination caps for list endpoints.
+MAX_LIST_PAGE_SIZE = 100
+DEFAULT_LIST_PAGE_SIZE = 50
+
+
+def _validate_assigned_to(value):
+    """Validate an assigned_to field. Returns (ok, error_message)."""
+    if not value or not isinstance(value, str):
+        return False, 'assigned_to is required and must be a string'
+    value = value.strip()
+    if not (MIN_ASSIGNED_TO_LEN <= len(value) <= MAX_ASSIGNED_TO_LEN):
+        return False, (
+            f'assigned_to length must be between {MIN_ASSIGNED_TO_LEN} '
+            f'and {MAX_ASSIGNED_TO_LEN} characters'
+        )
+    if not _ASSIGNED_TO_REGEX.match(value):
+        return False, (
+            'assigned_to contains invalid characters '
+            '(allowed: letters, digits, . _ + - @)'
+        )
+    return True, None
+
+
+def _paginate_args():
+    """Parse ?page=&per_page= from the request with safe defaults."""
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        per_page = int(request.args.get('per_page', DEFAULT_LIST_PAGE_SIZE))
+    except (TypeError, ValueError):
+        per_page = DEFAULT_LIST_PAGE_SIZE
+    per_page = max(1, min(MAX_LIST_PAGE_SIZE, per_page))
+    return page, per_page
 
 
 # ============================================================================
@@ -250,14 +296,35 @@ def get_assignment(assignment_id):
 @org_admin_required
 @limiter.limit("60/minute")
 def create_assignment():
-    """Create a new remediation assignment. Optionally create a Jira/issue-tracker ticket."""
+    """Create a new remediation assignment. Optionally create a Jira/issue-tracker ticket.
+
+    Sprint 4+5 hardening:
+    - validates assigned_to length + regex
+    - caps notes length
+    - supports ?strict_tracker=true to rollback the assignment if the
+      external tracker (Jira/GitHub/...) fails to create the issue
+      (default: legacy behavior — keep the assignment and return a warning).
+    """
     org_id = _org_id_or_400()
     if not org_id:
         return jsonify({'error': 'Organization required'}), 400
 
     data = request.get_json()
-    if not data or not data.get('assigned_to'):
-        return jsonify({'error': 'assigned_to is required'}), 400
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    # Sprint 4+5 hardening: validate assigned_to format
+    ok, err = _validate_assigned_to(data.get('assigned_to'))
+    if not ok:
+        return jsonify({'error': err}), 400
+
+    # Sprint 4+5 hardening: cap notes length
+    notes_value = data.get('notes')
+    if notes_value and len(notes_value) > MAX_NOTES_LEN:
+        return jsonify({
+            'error': 'notes too long',
+            'max_length': MAX_NOTES_LEN,
+        }), 400
 
     user_id = session.get('user_id')
     from app.models import User
@@ -402,10 +469,35 @@ def create_assignment():
             else:
                 warning = f"Assignment created but ticket creation failed: {message}"
                 logger.warning(f"Ticket creation failed for assignment {assignment.id}: {message}")
+                # Sprint 4+5 hardening: if strict_tracker=true, rollback the
+                # assignment so the user is not stuck with an orphan row.
+                if str(data.get('strict_tracker', '')).lower() in ('1', 'true', 'yes'):
+                    try:
+                        db.session.delete(assignment)
+                        db.session.commit()
+                    except Exception:
+                        db.session.rollback()
+                        logger.exception("Failed to rollback assignment after tracker failure")
+                    return jsonify({
+                        'error': 'Assignment not created: tracker creation failed',
+                        'tracker_error': message,
+                    }), 502
 
         except Exception as e:
             warning = f"Assignment created but ticket creation failed: {str(e)}"
             logger.exception(f"Error creating ticket for assignment {assignment.id}")
+            # Sprint 4+5 hardening: rollback under strict_tracker
+            if str(data.get('strict_tracker', '')).lower() in ('1', 'true', 'yes'):
+                try:
+                    db.session.delete(assignment)
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+                    logger.exception("Failed to rollback assignment after tracker exception")
+                return jsonify({
+                    'error': 'Assignment not created: tracker creation failed',
+                    'tracker_error': str(e)[:500],
+                }), 502
 
     # -- Email notification --
     try:
@@ -672,7 +764,11 @@ def sla_compliance():
 @bp.route('/api/risk-exceptions', methods=['GET'])
 @login_required
 def list_risk_exceptions():
-    """List risk exceptions for the current organization with optional filters."""
+    """List risk exceptions for the current organization with optional filters.
+
+    Sprint 4+5 hardening: paginated with ?page= and ?per_page= (max 100) to
+    prevent OOM on orgs with thousands of exceptions.
+    """
     org_id = _org_id_or_400()
     if not org_id:
         return jsonify({'error': 'Organization required'}), 400
@@ -689,11 +785,16 @@ def list_risk_exceptions():
         query = query.filter_by(cve_id=cve_id_filter)
 
     query = query.order_by(RiskException.created_at.desc())
-    exceptions = query.all()
+
+    page, per_page = _paginate_args()
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
 
     return jsonify({
-        'risk_exceptions': [e.to_dict() for e in exceptions],
-        'total': len(exceptions),
+        'risk_exceptions': [e.to_dict() for e in pagination.items],
+        'total': pagination.total,
+        'page': pagination.page,
+        'per_page': pagination.per_page,
+        'pages': pagination.pages,
     })
 
 
@@ -710,6 +811,14 @@ def create_risk_exception():
     data = request.get_json()
     if not data or not data.get('justification'):
         return jsonify({'error': 'justification is required'}), 400
+
+    # Sprint 4+5 hardening: cap the justification length so a malicious
+    # (or careless) client can't write multi-MB text blobs to the DB.
+    if len(data['justification']) > MAX_JUSTIFICATION_LEN:
+        return jsonify({
+            'error': 'justification too long',
+            'max_length': MAX_JUSTIFICATION_LEN,
+        }), 400
 
     # Must specify at least one of: match_id, cve_id, product_id
     if not any(data.get(k) for k in ('match_id', 'cve_id', 'product_id')):
@@ -822,19 +931,28 @@ def delete_risk_exception(exception_id):
 @bp.route('/api/product-aliases', methods=['GET'])
 @login_required
 def list_product_aliases():
-    """List product aliases for the current organization."""
+    """List product aliases for the current organization.
+
+    Sprint 4+5 hardening: paginated with ?page= and ?per_page= (max 100).
+    """
     org_id = _org_id_or_400()
     if not org_id:
         return jsonify({'error': 'Organization required'}), 400
 
-    aliases = ProductAlias.query.filter_by(organization_id=org_id).order_by(
+    query = ProductAlias.query.filter_by(organization_id=org_id).order_by(
         ProductAlias.alias_vendor.asc(),
         ProductAlias.alias_product.asc(),
-    ).all()
+    )
+
+    page, per_page = _paginate_args()
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
 
     return jsonify({
-        'product_aliases': [a.to_dict() for a in aliases],
-        'total': len(aliases),
+        'product_aliases': [a.to_dict() for a in pagination.items],
+        'total': pagination.total,
+        'page': pagination.page,
+        'per_page': pagination.per_page,
+        'pages': pagination.pages,
     })
 
 
