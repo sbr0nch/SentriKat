@@ -297,20 +297,78 @@ def get_usage_history(org_id, metric, days=30):
     return [r.to_dict() for r in records]
 
 
+def _resolve_tenant_email(org_id):
+    """Return the tenant email upstream uses as its primary key.
+
+    The license server identifies tenants by customer email (Sprint 6
+    contract). We prefer ``Organization.billing_email`` when present, and
+    otherwise fall back to the first admin-role user attached to the org.
+    Returns ``None`` only if nothing usable is found — in that case the
+    caller should skip the upload and log a warning.
+    """
+    try:
+        from app.models import Organization, User
+    except Exception:
+        return None
+
+    org = Organization.query.get(org_id)
+    if org is None:
+        return None
+
+    if hasattr(org, 'billing_email'):
+        email = getattr(org, 'billing_email', None)
+        if email:
+            return email.strip().lower()
+
+    try:
+        admin = User.query.filter_by(
+            organization_id=org_id, role='admin'
+        ).order_by(User.id.asc()).first()
+        if admin and admin.email:
+            return admin.email.strip().lower()
+    except Exception:
+        pass
+
+    try:
+        any_user = User.query.filter_by(
+            organization_id=org_id
+        ).order_by(User.id.asc()).first()
+        if any_user and any_user.email:
+            return any_user.email.strip().lower()
+    except Exception:
+        pass
+
+    return None
+
+
+def _iso_hour_floor_utc(dt=None):
+    """ISO-8601 UTC string floored to the hour (Sprint 6 contract).
+
+    The license server normalizes on ``(tenant_id, ts_hour)`` for dedup,
+    so sending anything within the same hour collapses to one row. We
+    floor the minute/second fields to make the idempotency explicit from
+    the client side too.
+    """
+    if dt is None:
+        dt = datetime.utcnow()
+    floored = dt.replace(minute=0, second=0, microsecond=0)
+    return floored.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
 def _build_usage_payload(org_id):
     """Assemble the usage payload the license server expects (H7).
 
-    Schema (matches SentriKat-web ``POST /api/v1/usage``)::
+    Schema (Sprint 6 — ``POST /api/v1/metrics/usage``)::
 
         {
-          "tenant_id":     int,
-          "ts":            int (unix seconds),
-          "agents_active": int,
+          "tenant_id":      "<customer-email>",
+          "ts":             "<ISO-8601 UTC, floored to hour>",
+          "agents_active":  int,
           "products_total": int,
-          "users_active":  int,
-          "api_calls_1h":  int,
-          "storage_bytes": int,
-          "scan_count_1h": int
+          "users_active":   int,
+          "api_calls_1h":   int,
+          "scan_count_1h":  int,
+          "storage_bytes":  int
         }
     """
     usage = get_current_usage(org_id)
@@ -353,15 +411,20 @@ def _build_usage_payload(org_id):
     except Exception:
         storage_bytes = 0
 
+    tenant_email = _resolve_tenant_email(org_id)
+    if not tenant_email:
+        # Signal to the caller that this org has no usable tenant email.
+        raise ValueError(f"no tenant email resolvable for org_id={org_id}")
+
     return {
-        'tenant_id': org_id,
-        'ts': int(time.time()),
+        'tenant_id': tenant_email,
+        'ts': _iso_hour_floor_utc(now),
         'agents_active': int(usage.get('agents_active', 0)),
         'products_total': int(usage.get('products_total', 0)),
         'users_active': int(usage.get('users_active', 0)),
         'api_calls_1h': api_calls_1h,
-        'storage_bytes': storage_bytes,
         'scan_count_1h': scan_count_1h,
+        'storage_bytes': storage_bytes,
     }
 
 
@@ -401,18 +464,21 @@ def send_usage_to_license_server():
 
     For each active organization we build a payload via
     :func:`_build_usage_payload` and ``POST`` it to
-    ``{LICENSE_SERVER_URL}/api/v1/usage`` with ``Authorization: Bearer
-    {SENTRIKAT_METRICS_KEY}``. Network errors retry with 1/2/4s backoff.
+    ``{LICENSE_SERVER_URL}/api/v1/metrics/usage`` with
+    ``Authorization: Bearer {SENTRIKAT_METRICS_KEY}``. Network errors
+    retry with 1/2/4s backoff.
 
-    # TODO: wire into scheduler — planning for the periodic invocation is
-    # owned by another agent; this function is intentionally a standalone
-    # helper that can be called from either a scheduler job or a manual
-    # admin trigger without side effects.
+    The license server expects ``202 Accepted`` from its receiver and
+    normalizes the ``ts`` field to the hour, so sending multiple times
+    per hour is safe (idempotent upstream).
+
+    Called from a scheduler job registered in ``app.scheduler`` — runs
+    at the top of every hour under the scheduler leader lock.
 
     Returns:
         A list of per-tenant result dicts::
 
-            [{'tenant_id': 1, 'success': True, 'status_code': 200}, ...]
+            [{'tenant_id': 'alice@example.com', 'success': True, 'status_code': 202}, ...]
     """
     from app.licensing import LICENSE_SERVER_URL  # lazy import to avoid cycles
 
@@ -443,7 +509,7 @@ def send_usage_to_license_server():
         proxies = None
         verify_ssl = True
 
-    url = f"{LICENSE_SERVER_URL}/api/v1/usage"
+    url = f"{LICENSE_SERVER_URL}/api/v1/metrics/usage"
     headers = {
         'Content-Type': 'application/json',
         'Authorization': f'Bearer {metrics_key}',
@@ -455,20 +521,28 @@ def send_usage_to_license_server():
     for org in orgs:
         try:
             payload = _build_usage_payload(org.id)
+        except ValueError as e:
+            # No tenant email resolvable — skip quietly (org still seeding).
+            logger.info(f"Skipping usage upload for org {org.id}: {e}")
+            results.append({'org_id': org.id, 'success': False, 'skipped': True, 'error': str(e)})
+            continue
         except Exception as e:
             logger.warning(f"Could not build usage payload for org {org.id}: {e}")
-            results.append({'tenant_id': org.id, 'success': False, 'error': str(e)})
+            results.append({'org_id': org.id, 'success': False, 'error': str(e)})
             continue
+
+        tenant_email = payload['tenant_id']
 
         resp, exc = _post_with_retry(
             url, payload, headers, proxies=proxies, verify_ssl=verify_ssl
         )
         if resp is None:
             logger.error(
-                f"Usage upload failed for tenant {org.id} after retries: {exc}"
+                f"Usage upload failed for tenant {tenant_email} after retries: {exc}"
             )
             results.append({
-                'tenant_id': org.id,
+                'tenant_id': tenant_email,
+                'org_id': org.id,
                 'success': False,
                 'error': str(exc) if exc else 'unknown',
             })
@@ -476,22 +550,25 @@ def send_usage_to_license_server():
 
         if 200 <= resp.status_code < 300:
             logger.info(
-                f"Usage upload OK for tenant {org.id}: "
+                f"Usage upload OK for tenant {tenant_email}: "
                 f"{payload['agents_active']} agents, "
-                f"{payload['products_total']} products"
+                f"{payload['products_total']} products, "
+                f"ts={payload['ts']}"
             )
             results.append({
-                'tenant_id': org.id,
+                'tenant_id': tenant_email,
+                'org_id': org.id,
                 'success': True,
                 'status_code': resp.status_code,
             })
         else:
             logger.warning(
-                f"Usage upload rejected for tenant {org.id}: "
-                f"status={resp.status_code}"
+                f"Usage upload rejected for tenant {tenant_email}: "
+                f"status={resp.status_code} body={resp.text[:200] if resp.text else ''}"
             )
             results.append({
-                'tenant_id': org.id,
+                'tenant_id': tenant_email,
+                'org_id': org.id,
                 'success': False,
                 'status_code': resp.status_code,
             })
