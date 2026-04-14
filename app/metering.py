@@ -28,6 +28,7 @@ Usage:
     allowed, message = check_quota(org_id=1, metric='agents_active')
 """
 
+import json
 import logging
 import os
 import time
@@ -577,6 +578,57 @@ def send_usage_to_license_server():
                 'success': False,
                 'status_code': resp.status_code,
             })
+
+    # Sprint 6 observability: persist the last-run summary and per-tenant
+    # state so the /super-admin/usage-uploads page can render without
+    # shelling into the container for docker logs.
+    try:
+        from app.models import SystemSettings
+        from app import db as app_db
+        from datetime import datetime as _dt
+
+        ok_count = sum(1 for r in results if r.get('success'))
+        fail_count = len(results) - ok_count
+
+        summary = {
+            'ran_at': _dt.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC'),
+            'total': len(results),
+            'ok': ok_count,
+            'failed': fail_count,
+            'endpoint': url,
+        }
+
+        def _upsert(key, value):
+            row = SystemSettings.query.filter_by(
+                key=key, organization_id=None
+            ).first()
+            serialized = json.dumps(value, default=str)
+            if row:
+                row.value = serialized
+                row.updated_at = _dt.utcnow()
+            else:
+                row = SystemSettings(
+                    key=key,
+                    value=serialized,
+                    category='observability',
+                    description='Sprint 6 usage upload state',
+                )
+                app_db.session.add(row)
+
+        _upsert('usage_upload:last_run', summary)
+
+        for r in results:
+            tenant = r.get('tenant_id') or f"org-{r.get('org_id', 'unknown')}"
+            _upsert(f'usage_upload:tenant:{tenant}', r)
+
+        app_db.session.commit()
+    except Exception as e:
+        logger.warning(f"Failed to persist usage upload observability: {e}")
+        try:
+            from app import db as app_db
+            app_db.session.rollback()
+        except Exception:
+            pass
 
     return results
 
