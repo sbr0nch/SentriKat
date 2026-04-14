@@ -649,3 +649,201 @@ curl -s -H "X-Agent-Key: YOUR_KEY" https://app.sentrikat.com/api/agent/heartbeat
 | Corporate proxy | Set `HTTPS_PROXY` environment variable for the agent process |
 | SSL inspection | If your firewall does SSL inspection, add the corporate CA to the agent's trust store |
 | Agent not appearing | Check agent logs; verify the API key is correct and active |
+
+---
+
+## 10. Sprint 4 + Sprint 5 Features (Remediation, SBOM, Compliance, Trending)
+
+This section covers the admin-facing aspects of the features shipped in
+Sprint 4 and Sprint 5. The full API reference is in `docs/API.md`.
+
+### 10.1 Remediation Assignments & SLA Policies
+
+**Where:** the **Assignments** page in the admin UI.
+
+**What admins do:**
+- Create and assign remediation tasks to users with a due date.
+- Define **SLA policies** that automatically compute `due_date` for new
+  assignments based on `(severity, asset_type)`.
+- Monitor SLA compliance from the dashboard widget (uses
+  `/api/sla/compliance`).
+- Bulk update statuses inline from the table.
+
+**Issue tracker integration:** when an assignment is linked to a Jira /
+GitHub / GitLab / YouTrack issue, store the key in `tracker_issue_key`,
+the URL in `tracker_issue_url`, and the type in `tracker_type`. Both the
+old field name (`jira_issue_key`) and the new one are accepted by the API.
+
+**Email notifications:** transactional emails are sent only on `created`
+and `resolved`, only to the assignee, and are throttled to **max 1 email
+per assignment per hour**. This is by design to preserve the Resend free
+tier (100/day, 3000/month). If you need a higher cadence, configure a
+paid Resend plan and adjust the throttle in `app/email_service.py`.
+
+**Rate limits:** assignments 60 req/min, SLA policies 30 req/min.
+
+**Database indexes (Sprint 4):**
+- `idx_assign_org_status` on `remediation_assignments(organization_id, status)`
+- `idx_assign_org_assignee` on `remediation_assignments(organization_id, assignee_user_id)`
+- `idx_assign_org_due` on `remediation_assignments(organization_id, due_date)`
+
+If you upgrade from a pre-Sprint-4 deployment, you must add these indexes
+manually or via Alembic migration before deploying — see
+`docs/PRE_LAUNCH_AUDIT_AND_TESTING_PLAN.md` Part 8 for details.
+
+### 10.2 Risk Exception Management
+
+**Where:** the **Risk Exceptions** panel (shield icon in the dashboard
+header) or the API directly (`/api/risk-exceptions`).
+
+**What admins do:**
+- Accept the risk on a vulnerability with a mandatory `justification`.
+- Optionally set an `expires_at` date — without it, the exception is
+  permanent.
+- Revoke or extend exceptions at any time.
+- Use exceptions as **audit evidence** for ISO 27001 and SOC 2 controls
+  (the compliance reports in section 10.4 reference active exceptions
+  in the `evidence` block).
+
+**Behavior:** an active exception removes the affected
+`VulnerabilityMatch` from the active dashboard but keeps it visible in
+the exceptions panel. Expired exceptions auto-flag with `is_expired:
+true` and stop suppressing the match.
+
+**Database indexes (Sprint 4):**
+- `idx_riskexc_org_status` on `risk_exceptions(organization_id, status)`
+- `idx_riskexc_org_expiry` on `risk_exceptions(organization_id, expires_at)`
+
+### 10.3 SBOM Export (CycloneDX / SPDX / STIX 2.1)
+
+**Where:** Dashboard → Export dropdown → SBOM section. Or directly:
+- `GET /api/sbom/export/cyclonedx`
+- `GET /api/sbom/export/spdx`
+- `GET /api/sbom/export/stix21` (Sprint 5)
+
+**Licensing:** SBOM export is gated by the `sbom_export` feature key in
+`PROFESSIONAL_FEATURES`. Free users get HTTP 403 with an upgrade message.
+
+**Rate limit:** 10 requests/hour per organization.
+
+**When to use which format:**
+- **CycloneDX 1.5** — most widely supported, recommended for CRA / EO
+  14028 compliance and supply-chain tooling integration.
+- **SPDX 2.3** — Linux Foundation standard, often required by open-source
+  audits.
+- **STIX 2.1** — for sharing into MISP / ISAC threat intel platforms.
+
+**Validation:** the bundles validate against
+`https://cyclonedx.github.io/cyclonedx.org/tool-center/` and
+`https://oasis-open.github.io/cti-stix-validator/`.
+
+### 10.4 Compliance Gap Analysis Reports (PCI / ISO / SOC 2)
+
+**Where:** Dashboard → Reports dropdown → Compliance section. Or directly
+via API:
+- `GET /api/reports/compliance/pci-dss[?format=json|pdf]`
+- `GET /api/reports/compliance/iso-27001[?format=json|pdf]`
+- `GET /api/reports/compliance/soc2[?format=json|pdf]`
+
+**What you get:** for each framework, a JSON or PDF report mapping the
+relevant controls to your current posture with status `PASS`, `PARTIAL`,
+`FAIL`, or `NOT_APPLICABLE`. Each requirement has `evidence`, `gaps`,
+and `recommendations` blocks.
+
+**Integrity:** every report carries an `integrity` block with HMAC-SHA256
+over the canonical JSON body. Auditors can independently verify the
+report has not been tampered with after generation.
+
+**Mapped controls:**
+- **PCI-DSS v4.0:** Requirements 6.3 (secure software) and 11.3
+  (vulnerability management).
+- **ISO/IEC 27001:2022:** Annex A.8.8 (technical vulnerabilities), A.8.16
+  (monitoring activities), A.5.24 (incident management planning).
+- **SOC 2:** CC7.1, CC7.2, CC7.4 (system monitoring) and CC6.6
+  (vulnerability management).
+
+**Licensing:** included in Professional and above. May be packaged as the
+**Compliance Pack** add-on for Starter/Pro tiers — see
+`docs/business/22_PRICING_ANALYSIS_POST_SPRINT_5.md`.
+
+### 10.5 Vulnerability Trending Dashboard
+
+**Where:** the main dashboard, "Vulnerability Trends" widget (Chart.js).
+
+**Three views:**
+- **Total** — total open vulnerabilities over time
+- **By severity** — stacked area chart with critical/high/medium/low bands
+- **Open vs resolved** — comparison of acknowledged/resolved vs still open
+
+**Data source:** the `vulnerability_snapshots` table, populated daily at
+02:00 UTC by the `snapshot_vulnerabilities_daily` scheduler job. Use
+`POST /api/vulnerabilities/trends/snapshot` to force a snapshot manually
+(admin only) — useful for demos or after a manual cleanup.
+
+**Empty state:** fresh organisations show "No trend data yet — first
+snapshot will be captured at 02:00 UTC".
+
+### 10.6 Patch Tuesday Digest Automation
+
+**Schedule:** every 2nd Wednesday of the month at **09:00** local time
+(scheduler cron `day=8-14, dow=wed, hour=9, minute=0`).
+
+**What it sends:** an email digest to each organization's admin(s) listing
+the MSRC Patch Tuesday CVEs published since the previous run that match
+products installed on the org's fleet. Subject line: *"SentriKat Patch
+Tuesday Digest — &lt;Month Year&gt;"*.
+
+**Manual trigger:** `POST /api/reports/patch-tuesday/trigger?dry_run=true`
+
+The `dry_run=true` mode is the default and returns what *would* be sent
+without actually sending the email. With `dry_run=false` (admin only) the
+email is delivered live.
+
+**Skipped reasons:** the digest is skipped for a given org with a clear
+log entry when:
+- No new matching CVEs since the previous run (`no_new_cves`)
+- Email quota exhausted on the email provider (`quota_exhausted`)
+
+**Note on field names:** the job uses `Vulnerability.date_added`. Do not
+introduce code paths that reference `published_date` — that field does
+**not** exist on the `Vulnerability` model.
+
+### 10.7 Agent Resilience (Sprint 4)
+
+**Delta scan:** the agent computes a SHA256 hash of its inventory and
+sends only a lightweight heartbeat when nothing changes. Forced full
+inventory every 24h. Hash file location:
+- Linux: `/var/lib/sentrikat/last_hash.txt`
+- macOS: `/usr/local/var/sentrikat/last_hash.txt`
+- Windows: `$env:ProgramData\SentriKat\last_hash.txt`
+
+**Gzip compression:** all inventory and heartbeat payloads are
+gzip-compressed (`Content-Encoding: gzip`). Server-side **zip-bomb
+protection** rejects payloads above 10MB decompressed or 2MB compressed
+(HTTP 413 *"Decompressed payload too large"* / *"Compressed payload too
+large"*).
+
+**Store-and-forward:** failed heartbeats are spooled to a local directory
+(max 50 files, oldest deleted on overflow) and replayed in chronological
+order on the next successful heartbeat. Spool directories:
+- Linux: `/var/lib/sentrikat/spool/`
+- macOS: `/usr/local/var/sentrikat/spool/`
+- Windows: `$env:ProgramData\SentriKat\spool\`
+
+### 10.8 Product Aliases (vendor/product disambiguation)
+
+**Where:** API only (no dedicated UI in Sprint 4 — UI planned for Sprint 6).
+
+**What it does:** maps `(alias_vendor, alias_product)` to a canonical
+product so different naming conventions across the fleet (e.g. `openssl`
+vs `openssl-libs` vs `openssl3`) all roll up to the same product record.
+
+**API:**
+- `GET /api/product-aliases`
+- `POST /api/product-aliases {product_id, alias_vendor, alias_product}`
+- `DELETE /api/product-aliases/<id>`
+
+**Constraint:** unique on `(organization_id, alias_vendor, alias_product)`
+— enforced by the `uq_product_alias` index. Duplicate POST returns 409.
+
+**Rate limit:** 30 POST/min.

@@ -192,17 +192,50 @@
 
 ### Core Capabilities
 
-| Feature | SentriKat | Tenable | Qualys | Rapid7 | OpenVAS |
-|---------|-----------|---------|--------|--------|---------|
-| CISA KEV Sync | Native | Manual | Manual | Manual | No |
-| Multi-Source CVSS | 3 sources (NVD/CVE.org/EUVD) | Single (NVD) | Single | Single | Single |
-| ENISA EUVD Integration | Native | No | No | No | Partial |
-| NVD Outage Resilience | Auto-fallback | Degraded | Degraded | Degraded | Degraded |
-| Data Provenance | Per-CVE source tag | No | No | No | No |
-| Push Agents | Win/Linux | Yes | Yes | Yes | No |
-| Agentless Scan | No | Yes | Yes | Yes | Yes |
-| EPSS Scoring | Yes | Yes | Yes | Yes | No |
-| Due Date Tracking | Native | Add-on | Add-on | Add-on | No |
+| Feature | SentriKat | Tenable | Qualys | Rapid7 | Wiz | OpenVAS |
+|---------|-----------|---------|--------|--------|-----|---------|
+| CISA KEV Sync | **Native** | Manual | Manual | Manual | Add-on | No |
+| Multi-Source CVSS | **3 sources (NVD/CVE.org/EUVD)** | Single (NVD) | Single | Single | Single | Single |
+| ENISA EUVD Integration | **Native** | No | No | No | No | Partial |
+| NVD Outage Resilience | **Auto-fallback** | Degraded | Degraded | Degraded | Degraded | Degraded |
+| Data Provenance | **Per-CVE source tag** | No | No | No | No | No |
+| Push Agents | Win/Linux/macOS | Yes | Yes | Yes | Cloud agent | No |
+| Agentless Scan | No | Yes | Yes | Yes | Yes (cloud) | Yes |
+| EPSS Scoring | Yes | Yes | Yes | Yes | Yes | No |
+| Due Date Tracking | **Native** | Add-on | Add-on | Add-on | Add-on | No |
+| Container Scanning | **Native (Trivy)** | Yes | Yes | Yes | Yes | Limited |
+| Code Dependency Scanning (lockfiles) | **Native (OSV)** | Add-on | Add-on | Add-on | Yes | No |
+| Vendor Backport Detection | **Native (OSV/RH/MSRC/Debian)** | No | No | No | No | No |
+
+### SBOM, Compliance & Remediation (Sprint 4 + 5)
+
+| Feature | SentriKat | Tenable | Qualys | Rapid7 | Wiz | OpenVAS |
+|---------|-----------|---------|--------|--------|-----|---------|
+| SBOM Export CycloneDX 1.5 | **Native** | Add-on | Add-on | Add-on | Yes | No |
+| SBOM Export SPDX 2.3 | **Native** | Add-on | No | No | Yes | No |
+| SBOM Export STIX 2.1 | **Native** | No | No | No | No | No |
+| EU CRA Readiness (SBOM + 24h disclosure) | **Native** | Partial | Partial | Partial | Partial | No |
+| PCI-DSS v4.0 Gap Analysis | **Native (JSON+PDF)** | Module | Module | Add-on | No | No |
+| ISO/IEC 27001:2022 Gap Analysis | **Native (JSON+PDF)** | Module | Module | Add-on | No | No |
+| SOC 2 Gap Analysis | **Native (JSON+PDF)** | Module | Module | Add-on | No | No |
+| CISA BOD 22-01 Report | **Native** | Module | Module | Module | No | No |
+| EU NIS2 Article 21 Report | **Native** | No | Partial | No | No | No |
+| Report HMAC Integrity | **Native** | No | No | No | No | No |
+| Vulnerability Trending Dashboard | **Native (Chart.js)** | Yes | Yes | Yes | Yes | No |
+| Remediation Assignments + Due Dates | **Native** | Add-on | Add-on | Yes | Yes | No |
+| SLA Policies + Compliance Tracking | **Native** | Add-on | Add-on | Yes | Yes | No |
+| Risk Exception Management (justification + expiry) | **Native** | Manual | Manual | Manual | Manual | No |
+| Issue Tracker Integration (Jira/GitHub/GitLab/YouTrack) | **Native (4 trackers)** | Jira only | Jira only | Jira/SNow | Jira/SNow | No |
+| Patch Tuesday Automated Digest | **Native** | No | No | No | No | No |
+
+### Agent Resilience (Sprint 4)
+
+| Feature | SentriKat | Tenable | Qualys | Rapid7 | Wiz |
+|---------|-----------|---------|--------|--------|-----|
+| Delta Scan (SHA256 hash diff) | **Native** | No | No | No | No |
+| Gzip Compression with Zip-Bomb Protection | **Native** | Yes | Yes | Yes | Yes |
+| Offline Store-and-Forward | **Native** | No | Partial | No | N/A (cloud only) |
+| Auditable Script Agents (bash/PowerShell) | **Native** | Compiled binary | Compiled binary | Compiled binary | Cloud-only |
 
 ### Authentication
 
@@ -361,6 +394,22 @@ COMPLEX │                │                │ SIMPLE
 | "OpenVAS is free" | "Free in license, expensive in time. Our 5-minute setup vs. their 5-day setup." |
 | "We have Linux expertise" | "Great! But do you want to maintain vulnerability scanning infrastructure?" |
 
+### vs. Wiz
+
+| Objection | Response |
+|-----------|----------|
+| "Wiz is the modern leader" | "Wiz is cloud-only and starts at €50K+/year. We're 10-20x cheaper, support self-hosted, and ship the SBOM + compliance reports they don't have." |
+| "Wiz has a great UX" | "Agreed. We're not far behind on UX, but we're orders of magnitude cheaper and we run on-prem for sovereign deployments." |
+| "Wiz covers cloud" | "We complement cloud security platforms — we cover what's installed on the endpoint and what's in your software bill of materials. Use both." |
+| "Wiz has SBOM" | "Wiz has SBOM as an add-on inside their cloud-only product. We ship CycloneDX 1.5 + SPDX 2.3 + STIX 2.1 out-of-the-box, both SaaS and on-premise, EU-hosted." |
+
+### vs. CRA-only consulting (the new competitive threat)
+
+| Objection | Response |
+|-----------|----------|
+| "We hired a consultant for CRA readiness" | "Consultants give you a one-time PDF. SentriKat gives you a continuously updated SBOM and an integrity-signed compliance report you can regenerate any time the auditor asks. €4,000 of consulting is one-shot. SentriKat at €249-649/month is permanent." |
+| "We just need an SBOM, not a platform" | "Sure. Buy the SBOM export and ignore the rest. We're 10x cheaper than letting a consultant produce it manually every quarter." |
+
 ---
 
 ## RECOMMENDED ACTIONS
@@ -385,4 +434,4 @@ COMPLEX │                │                │ SIMPLE
 
 ---
 
-*Analysis based on public information as of February 2026. Subject to change.*
+*Analysis based on public information as of February 2026. Updated April 2026 with Sprint 4 + Sprint 5 feature parity data and CRA-readiness positioning. Subject to change.*

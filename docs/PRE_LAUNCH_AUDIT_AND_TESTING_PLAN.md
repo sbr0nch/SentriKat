@@ -1,8 +1,8 @@
 # SentriKat Pre-Launch Audit & Testing Plan
 
 **Data**: 2026-04-09
-**Ultimo aggiornamento**: 2026-04-09 (sessione finale pre-lancio)
-**Target lancio**: 2026-04-10 (Early Access)
+**Ultimo aggiornamento**: 2026-04-14 (extended con Sprint 4 + Sprint 5)
+**Target lancio**: 2026-04-10 (Early Access) — esteso con feature Sprint 4+5 prima del lancio GA
 **Scope**: SentriKat (backend/core) + SentriKat-web (landing/portal/license-server)
 
 ---
@@ -481,7 +481,7 @@ G5. Error Handling
 
 ---
 
-## PARTE 7: STATISTICHE SESSIONE
+## PARTE 7: STATISTICHE SESSIONE (audit originario 2026-04-09)
 
 - **Vulnerabilita analizzate**: 15
 - **Fix applicati**: 12 (10 in SentriKat, 2 in SentriKat-web)
@@ -492,6 +492,155 @@ G5. Error Handling
 
 ---
 
+## PARTE 8: SPRINT 4 + SPRINT 5 VERIFICATION (aggiunto 2026-04-14)
+
+Le Sprint 4 e 5 hanno introdotto 15 feature nuove. Questa parte del documento
+cattura tutte le verifiche che vanno fatte **prima** del prossimo deploy in
+produzione perche' queste feature toccano lo schema del DB, lo scheduler, il
+middleware HTTP e il licensing.
+
+### 8.1 Database migration (BLOCKER)
+
+Le seguenti tabelle e colonne sono state aggiunte in Sprint 4 / 5 e **devono
+essere materializzate sul DB di produzione** prima di fare deploy:
+
+**Tabelle nuove:**
+- `remediation_assignments` (Sprint 4)
+- `sla_policies` (Sprint 4)
+- `risk_exceptions` (Sprint 4)
+- `product_aliases` (Sprint 4)
+- `vulnerability_snapshots` (Sprint 5 — gia' usata dal job di snapshotting)
+
+**Colonne nuove su tabelle esistenti:**
+- `remediation_assignments.tracker_issue_key` (rinominata da `jira_issue_key` con
+  backward compat — vedi `app/remediation_api.py`)
+- `remediation_assignments.tracker_issue_url`
+- `remediation_assignments.tracker_type`
+
+**Indici compositi nuovi:**
+- `idx_assign_org_status` su `remediation_assignments (organization_id, status)`
+- `idx_assign_org_assignee` su `remediation_assignments (organization_id, assignee_user_id)`
+- `idx_assign_org_due` su `remediation_assignments (organization_id, due_date)`
+- `idx_riskexc_org_status` su `risk_exceptions (organization_id, status)`
+- `idx_riskexc_org_expiry` su `risk_exceptions (organization_id, expires_at)`
+- `uq_product_alias` unique constraint su `product_aliases (organization_id, alias_vendor, alias_product)`
+
+**Strategia di migration:**
+
+- [ ] **Opzione A (consigliata)**: scrivere una Alembic migration dedicata che
+      crea le 5 tabelle nuove, aggiunge le 3 colonne su `remediation_assignments`
+      (se stanno gia' esistendo con il nome vecchio `jira_issue_key`, fare ALTER
+      TABLE RENAME) e crea i 5+1 indici.
+- [ ] **Opzione B (tampone)**: far girare `db.create_all()` al primo avvio post
+      deploy e fare ALTER TABLE manuali per la ridenominazione di
+      `jira_issue_key`. Rischio piu' alto, documentare le query esatte.
+- [ ] Backup completo del DB di produzione prima della migration.
+- [ ] Rollback plan: script che rimuove i nuovi indici/tabelle in caso di errore.
+- [ ] Test della migration su copia del DB di produzione prima di applicarla in
+      prod.
+
+### 8.2 Scheduler jobs nuovi (verifica post-deploy)
+
+Verificare che i seguenti job siano registrati e attivi dopo il deploy:
+
+- [ ] `patch_tuesday_digest` — cron `day=8-14, dow=wed, hour=9, minute=0`
+      (Sprint 5). Test manuale: `POST /api/reports/patch-tuesday/trigger?dry_run=true`.
+- [ ] `snapshot_vulnerabilities_daily` — giornaliero 02:00 UTC (Sprint 5).
+      Verificare che scriva una riga su `vulnerability_snapshots` per ogni org.
+- [ ] `app.scheduler.get_jobs()` su shell Flask mostra tutti e 16+ i job.
+
+### 8.3 Sprint 4 hardening — verifica che sia tutto attivo
+
+- [ ] **Email throttling** per notifiche remediation: max 1 email per
+      assignment/ora, solo su `created` e `resolved`, solo all'assignee (no CC
+      admin). Preserva il Resend free tier (100/day, 3000/month).
+- [ ] **Zip bomb protection** sul middleware gzip: max 10MB decompressed /
+      2MB compressed. Testare con payload malevolo → 413.
+- [ ] **Rate limits**:
+  - SBOM export: 10 req/ora
+  - Remediation assignments: 60 req/minuto
+  - Risk exceptions: 30 req/minuto
+  - Product aliases: 30 req/minuto
+- [ ] **Licensing gate** su SBOM: feature key `sbom_export` in
+      `PROFESSIONAL_FEATURES`. Utente Free → 403 con messaggio di upgrade.
+- [ ] **DB composite indexes** effettivamente creati (vedi 8.1).
+
+### 8.4 Smoke test delle feature nuove (manuale, ~30 min)
+
+Seguire la sequenza completa almeno una volta su un'istanza reale prima del
+deploy in produzione:
+
+- [ ] Login come admin di un org con dati di test.
+- [ ] **Assignments**: creare, assegnare, cambiare status inline, aprire modal
+      dettaglio, creare ticket Jira fittizio, verificare tracker_issue_url
+      salvato.
+- [ ] **SLA policies**: creare una policy, applicarla a una severity, verificare
+      che due_date venga calcolata correttamente.
+- [ ] **Risk exception**: creare con justification, verificare che il CVE
+      "scompaia" dal dashboard attivo, verificare expiry warning.
+- [ ] **Product alias**: creare un alias, verificare che il prodotto alias si
+      risolva sul prodotto canonico.
+- [ ] **SBOM export CycloneDX**: download, apertura JSON, validare su
+      cyclonedx.org/tool-center/.
+- [ ] **SBOM export SPDX**: download, validare.
+- [ ] **SBOM export STIX 2.1**: download, validare su oasis-open.github.io/cti-stix-validator/.
+- [ ] **Compliance report PCI-DSS**: JSON + PDF, verificare integrity block.
+- [ ] **Compliance report ISO 27001**: JSON + PDF.
+- [ ] **Compliance report SOC 2**: JSON + PDF.
+- [ ] **Vulnerability trending widget**: visibile su dashboard, 3 toggle
+      funzionanti.
+- [ ] **Patch Tuesday trigger manuale**: `POST /api/reports/patch-tuesday/trigger?dry_run=true`.
+- [ ] **Agent delta scan**: seconda esecuzione agent senza cambi invia
+      `delta=unchanged`, gzip visibile nel tcpdump.
+- [ ] **Agent store-and-forward**: stoppare server, correre agent 3 volte,
+      riavviare server, verificare replay in ordine.
+
+### 8.5 Test suite automatica
+
+- [ ] `python3 -m pytest tests/ -q` → 1.024+ test pass, 0 fail.
+- [ ] Tempo totale della suite < 5 minuti (se piu' alto indagare regressioni di
+      performance nei test).
+- [ ] Nessun `DeprecationWarning` nuovo rispetto alla baseline precedente.
+- [ ] Coverage su `app/sbom_export.py`, `app/compliance_reports.py`,
+      `app/remediation_api.py` ≥ 70%.
+
+### 8.6 Telemetry / Prometheus
+
+- [ ] `GET /metrics` contiene i counter nuovi:
+  - `sentrikat_assignments{status="open|in_progress|resolved"}`
+  - `sentrikat_assignments_overdue`
+  - `sentrikat_assignments_with_tracker_ticket`
+  - `sentrikat_risk_exceptions{status="active|revoked|expired"}`
+  - `sentrikat_product_aliases_total`
+- [ ] I valori riflettono lo stato reale del DB.
+
+### 8.7 Web (sentrikat-web) coordinamento
+
+Cose da chiedere al team SentriKat-web prima del deploy:
+
+- [ ] Aggiungere SBOM, assignments, compliance reports e vulnerability trending
+      alla feature list della landing page.
+- [ ] Aggiornare la tabella comparativa vs Tenable/Qualys/Rapid7/Wiz.
+- [ ] Aggiornare la pricing table con i nuovi prezzi (vedi
+      `docs/business/22_PRICING_ANALYSIS_POST_SPRINT_5.md`) — solo se
+      l'aumento viene approvato.
+- [ ] Preparare 3 screenshot: trending dashboard, assignments page, compliance
+      report PDF preview.
+
+### 8.8 Go-live checklist (estratto minimo)
+
+- [ ] DB backup completato e verificato.
+- [ ] Alembic migration testata su copia del DB di produzione.
+- [ ] Test suite al verde.
+- [ ] Smoke test manuale delle feature Sprint 4+5 completato.
+- [ ] Rollback plan documentato e testato.
+- [ ] DNS / SSL verificati.
+- [ ] Monitoring alert configurati per i job nuovi (patch_tuesday_digest,
+      snapshot_vulnerabilities_daily).
+- [ ] Email di comunicazione ai clienti EA pronta (feature nuove in changelog).
+
+---
+
 *Documento generato dalla sessione di audit del 2026-04-09*
-*Ultima modifica: sessione finale pre-lancio*
-*Branch: claude/recover-blocked-session-J4dQt*
+*Esteso il 2026-04-14 con Sprint 4 + Sprint 5 verification*
+*Branch: claude/fix-windows-agent-ping-d4xak*

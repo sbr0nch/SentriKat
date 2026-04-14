@@ -25,6 +25,13 @@
 17. [Dependency Scanning (Code Dependencies)](#dependency-scanning-code-dependencies)
 18. [GDPR & Privacy](#gdpr--privacy)
 19. [Prometheus Metrics](#prometheus-metrics)
+20. [SBOM Export](#sbom-export) — *Sprint 4 + Sprint 5*
+21. [Compliance Reports](#compliance-reports) — *Sprint 5*
+22. [Remediation Assignments & SLA](#remediation-assignments--sla) — *Sprint 4*
+23. [Risk Exceptions](#risk-exceptions) — *Sprint 4*
+24. [Product Aliases](#product-aliases) — *Sprint 4*
+25. [Vulnerability Trending](#vulnerability-trending) — *Sprint 5*
+26. [Patch Tuesday Digest](#patch-tuesday-digest) — *Sprint 5*
 
 ---
 
@@ -1522,6 +1529,11 @@ Returns Prometheus text format metrics.
 | `sentrikat_vulnerability_matches_by_severity` | Gauge | Matches by severity (CRITICAL/HIGH/MEDIUM/LOW) |
 | `sentrikat_api_keys_active` | Gauge | Active agent API keys |
 | `sentrikat_subscriptions` | Gauge | Subscriptions by status (SaaS only) |
+| `sentrikat_assignments{status}` | Gauge | Remediation assignments by status (`open`, `in_progress`, `resolved`) — *Sprint 4* |
+| `sentrikat_assignments_overdue` | Gauge | Remediation assignments past their `due_date` — *Sprint 4* |
+| `sentrikat_assignments_with_tracker_ticket` | Gauge | Assignments linked to an external issue tracker — *Sprint 4* |
+| `sentrikat_risk_exceptions{status}` | Gauge | Risk exceptions by status (`active`, `revoked`, `expired`) — *Sprint 4* |
+| `sentrikat_product_aliases_total` | Gauge | Product aliases configured — *Sprint 4* |
 
 **Prometheus scrape config:**
 ```yaml
@@ -1538,3 +1550,403 @@ scrape_configs:
 ```bash
 SENTRIKAT_METRICS_KEY=your-secure-random-key-here
 ```
+
+---
+
+## SBOM Export
+
+*Sprint 4 + Sprint 5* — Export the organization's software inventory + matched
+vulnerabilities as a Software Bill of Materials in industry-standard formats.
+
+All endpoints are:
+- **Licensing-gated** (feature key `sbom_export` in `PROFESSIONAL_FEATURES`). Free users get HTTP 403 with an upgrade message.
+- **Rate-limited** to 10 requests/hour per organization (HTTP 429 on overflow).
+- **Org-scoped** — the bundle contains only data belonging to the caller's organization.
+
+### CycloneDX 1.5 Export
+
+```http
+GET /api/sbom/export/cyclonedx
+Cookie: session=<token>
+```
+
+Returns a CycloneDX 1.5 JSON bundle with `bomFormat`, `specVersion`,
+`components` (one per product, with `purl` like `pkg:apt/openssl/openssl@1.1.1k`)
+and `vulnerabilities` (one per matched CVE with `ratings`, `affects` refs,
+`source`).
+
+**Validation:** the resulting JSON validates against
+`https://cyclonedx.github.io/cyclonedx.org/tool-center/`.
+
+### SPDX 2.3 Export
+
+```http
+GET /api/sbom/export/spdx
+```
+
+Returns an SPDX 2.3 JSON bundle (`spdxVersion: "SPDX-2.3"`) with `packages`
+array — each package has `SPDXID`, `name`, `versionInfo`, `externalRefs`
+(`cpe23Type` if available), and `licenseDeclared`.
+
+### STIX 2.1 Export *(Sprint 5)*
+
+```http
+GET /api/sbom/export/stix21
+```
+
+Returns a STIX 2.1 bundle (`type: "bundle"`) with:
+- `vulnerability` SDOs — one per matched CVE, with `external_references[0].source_name = "cve"`
+- `software` SCOs — one per affected product, with `name` and `version`
+- `relationship` SROs — `relationship_type: "affects"` linking vuln → software
+
+**Validation:** the bundle validates against
+`https://oasis-open.github.io/cti-stix-validator/`.
+
+**Use cases:** Cyber Resilience Act (EU 2024/2847) compliance, EO 14028
+(US federal), supply chain security, threat intel sharing (MISP/ISAC).
+
+---
+
+## Compliance Reports
+
+*Sprint 5* — Gap analysis reports for major security frameworks. All endpoints
+support `?format=json` (default) and `?format=pdf`. Every report carries an
+`integrity` block (`{algorithm: "HMAC-SHA256", hash, signed_at}`) computed
+over the canonical JSON body so auditors can verify the report has not been
+tampered with after generation.
+
+All endpoints are **licensing-gated** (feature key `compliance_reports` —
+included in Professional and above, or sold as the *Compliance Pack* add-on)
+and **rate-limited** to 10 requests/hour per organization.
+
+### PCI-DSS v4.0 Gap Analysis
+
+```http
+GET /api/reports/compliance/pci-dss[?format=json|pdf]
+```
+
+Maps the organization's posture against PCI-DSS v4.0 Requirements **6.3**
+(Develop and maintain secure systems and software) and **11.3** (Regularly
+test security of systems and networks).
+
+**Response (JSON):**
+```json
+{
+  "framework": "PCI-DSS",
+  "version": "4.0",
+  "generated_at": "2026-04-14T08:30:00Z",
+  "organization": { "id": 1, "name": "Acme" },
+  "requirements": [
+    {
+      "id": "6.3",
+      "title": "Develop and maintain secure systems and software",
+      "status": "PASS|PARTIAL|FAIL|NOT_APPLICABLE",
+      "evidence": [...],
+      "gaps": [...],
+      "recommendations": [...]
+    }
+  ],
+  "integrity": {
+    "algorithm": "HMAC-SHA256",
+    "hash": "...",
+    "signed_at": "2026-04-14T08:30:00Z"
+  }
+}
+```
+
+### ISO/IEC 27001:2022 Gap Analysis
+
+```http
+GET /api/reports/compliance/iso-27001[?format=json|pdf]
+```
+
+Maps controls **Annex A.8.8** (Management of technical vulnerabilities),
+**Annex A.8.16** (Monitoring activities) and **Annex A.5.24** (Information
+security incident management planning and preparation).
+
+### SOC 2 Gap Analysis
+
+```http
+GET /api/reports/compliance/soc2[?format=json|pdf]
+```
+
+Maps the Trust Services Criteria **CC7.1**, **CC7.2**, **CC7.4** (System
+operations / monitoring) and **CC6.6** (Logical and physical access
+controls — vulnerability management).
+
+### Existing reports (unchanged)
+
+- `GET /api/reports/compliance/bod-22-01` — CISA BOD 22-01
+- `GET /api/reports/compliance/nis2` — EU NIS2 Article 21(2)(d)(e)(g)
+
+---
+
+## Remediation Assignments & SLA
+
+*Sprint 4* — Track who owns the fix for which vulnerability, when it's due,
+and whether the SLA has been met.
+
+### List Assignments
+
+```http
+GET /api/remediation/assignments?status=open&assignee=42&overdue=true&page=1&per_page=50
+```
+
+**Filters:** `status` (`open` / `in_progress` / `resolved`), `assignee`
+(user_id), `overdue` (boolean), `severity`, `cve_id`, `product_id`,
+`tracker_type`.
+
+### Get Assignment Details
+
+```http
+GET /api/remediation/assignments/<assignment_id>
+```
+
+### Create Assignment
+
+```http
+POST /api/remediation/assignments
+Content-Type: application/json
+
+{
+  "vulnerability_match_id": 123,
+  "assignee_user_id": 42,
+  "due_date": "2026-05-01",
+  "severity": "HIGH",
+  "notes": "Patch openssl on prod-web-01"
+}
+```
+
+Returns 201 with the created assignment. The system will compute `due_date`
+automatically if not provided and an applicable `SLAPolicy` exists.
+
+### Update Assignment
+
+```http
+PUT /api/remediation/assignments/<assignment_id>
+Content-Type: application/json
+
+{
+  "status": "in_progress",
+  "tracker_issue_key": "SEC-1234",
+  "tracker_issue_url": "https://acme.atlassian.net/browse/SEC-1234",
+  "tracker_type": "jira"
+}
+```
+
+The `tracker_issue_key` field replaces the legacy `jira_issue_key` field but
+the old name is still accepted for backward compatibility.
+
+### Delete Assignment
+
+```http
+DELETE /api/remediation/assignments/<assignment_id>
+```
+
+### SLA Policies
+
+```http
+GET    /api/sla/policies                  # List all policies for the org
+POST   /api/sla/policies                  # Create policy
+PUT    /api/sla/policies/<policy_id>      # Update
+DELETE /api/sla/policies/<policy_id>      # Delete
+```
+
+A policy maps `(severity, asset_type)` → days-to-remediate. New assignments
+inherit a `due_date` from the matching policy if one exists.
+
+### SLA Compliance Summary
+
+```http
+GET /api/sla/compliance
+```
+
+Returns aggregate compliance counters: `compliant`, `at_risk`, `breached`,
+broken down by severity and assignee. Used by the dashboard.
+
+**Rate limits:** assignments 60 req/min, SLA policies 30 req/min.
+
+---
+
+## Risk Exceptions
+
+*Sprint 4* — Accept-the-risk workflow with mandatory justification, optional
+expiry, and ISO/SOC2 audit evidence.
+
+### List Risk Exceptions
+
+```http
+GET /api/risk-exceptions?status=active&cve_id=CVE-2024-1234
+```
+
+### Create Risk Exception
+
+```http
+POST /api/risk-exceptions
+Content-Type: application/json
+
+{
+  "vulnerability_match_id": 123,
+  "justification": "WAF mitigation in place; production patching scheduled for Q3.",
+  "expires_at": "2026-12-31T23:59:59Z",
+  "approved_by_user_id": 1
+}
+```
+
+`justification` is **required** (HTTP 400 if missing). `expires_at` is
+optional — if omitted the exception is permanent (the UI shows "Permanent"
+in the Expires column).
+
+### Update Risk Exception
+
+```http
+PUT /api/risk-exceptions/<exception_id>
+Content-Type: application/json
+
+{
+  "status": "revoked",
+  "expires_at": "2026-06-30T00:00:00Z"
+}
+```
+
+Used to extend expiry, revoke an active exception, or change status.
+
+### Delete Risk Exception
+
+```http
+DELETE /api/risk-exceptions/<exception_id>
+```
+
+**Behavior:**
+- An active exception removes the affected `VulnerabilityMatch` from the
+  active dashboard (it still appears in the exceptions panel).
+- Expired exceptions are automatically flagged with `is_expired: true` and
+  no longer suppress the match.
+- Cross-tenant access returns 404 (not 403, to avoid id enumeration).
+
+**Rate limit:** 30 POST/min per organization.
+
+---
+
+## Product Aliases
+
+*Sprint 4* — Vendor/product disambiguation. Useful when the same software
+appears under different names in your fleet (e.g. `openssl` vs `openssl-libs`
+vs `openssl3`) and you want them all to map to the same canonical product.
+
+### List Aliases
+
+```http
+GET /api/product-aliases
+```
+
+Returns the alias rows with embedded canonical product info.
+
+### Create Alias
+
+```http
+POST /api/product-aliases
+Content-Type: application/json
+
+{
+  "product_id": 42,
+  "alias_vendor": "OpenSSL",
+  "alias_product": "openssl-libs"
+}
+```
+
+Returns 201 with the created alias. Returns 409 if `(organization_id,
+alias_vendor, alias_product)` is already mapped (unique constraint
+`uq_product_alias`).
+
+### Delete Alias
+
+```http
+DELETE /api/product-aliases/<alias_id>
+```
+
+**Rate limit:** 30 POST/min.
+
+---
+
+## Vulnerability Trending
+
+*Sprint 5* — Historical snapshots of vulnerability state for trend analysis.
+
+### Get Trends
+
+```http
+GET /api/vulnerabilities/trends?days=30
+```
+
+Returns an array of daily snapshots:
+
+```json
+{
+  "trends": [
+    {
+      "date": "2026-04-01",
+      "total": 1247,
+      "critical": 12,
+      "high": 88,
+      "medium": 510,
+      "low": 637,
+      "open": 980,
+      "resolved": 267
+    }
+  ]
+}
+```
+
+The daily snapshot is captured by the `snapshot_vulnerabilities_daily` job
+at 02:00 UTC. The dashboard widget consumes this endpoint with three views:
+total, by severity, and open vs resolved.
+
+### Force Snapshot (admin)
+
+```http
+POST /api/vulnerabilities/trends/snapshot
+```
+
+Manually triggers a snapshot for the current organization. Useful for
+demos and tests. Admin only (returns 403 for non-admin users).
+
+---
+
+## Patch Tuesday Digest
+
+*Sprint 5* — Monthly automated email digest of MSRC Patch Tuesday CVEs
+affecting your fleet, sent on the 2nd Wednesday of each month at 09:00.
+
+### Manual Trigger
+
+```http
+POST /api/reports/patch-tuesday/trigger?dry_run=true
+```
+
+Triggers the digest job manually. With `dry_run=true` (default for safety) the
+endpoint returns what *would* be sent without actually sending the email:
+
+```json
+{
+  "organizations_scanned": 12,
+  "matches_found": 47,
+  "email_would_be_sent": true,
+  "skipped_reasons": {
+    "no_new_cves": 3,
+    "quota_exhausted": 1
+  }
+}
+```
+
+With `dry_run=false` (admin only) the email is actually delivered. Each
+organization that has at least one matching CVE since the previous Patch
+Tuesday digest receives an email subject like *"SentriKat Patch Tuesday
+Digest — April 2026"*.
+
+**Notes:**
+- Uses `Vulnerability.date_added` (not `published_date` — that field does
+  not exist on the model).
+- Respects the Resend free tier quota (skips orgs over quota with a
+  `quota_exhausted` log entry).
+- The scheduler cron is `day=8-14, dow=wed, hour=9, minute=0`.
