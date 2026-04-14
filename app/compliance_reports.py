@@ -19,7 +19,7 @@ Endpoints:
 """
 
 from flask import Blueprint, request, jsonify, session, send_file
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 import logging
 
@@ -29,6 +29,56 @@ from app.models import (
     product_organizations, RemediationAssignment, SlaPolicy, RiskException,
 )
 from app.saas import is_saas_mode, get_scoped_org_id, get_effective_features
+
+
+def _get_report_timezone():
+    """Return the tenant's configured report timezone (H8).
+
+    Compliance reports compute "overdue for >30/60/90 days" cutoffs. The rest
+    of the platform (SLA policy scheduler, dashboard displays) runs in the
+    tenant-configured ``display_timezone``. Using ``datetime.utcnow()`` here
+    while every other clock uses a tz-aware local time caused reports to
+    disagree with the SLA compliance dashboard by up to 24h for tenants
+    far from UTC — especially visible around calendar day boundaries.
+
+    We now load ``display_timezone`` from SystemSettings and compute cutoffs
+    as tz-aware datetimes in that zone, then convert to naive UTC only at
+    the very end when comparing against DB columns (which store naive UTC
+    for historical reasons; see ``default=datetime.utcnow`` on models).
+
+    Falls back silently to UTC if the setting is missing or points at an
+    unknown tz name.
+    """
+    tz_name = 'UTC'
+    try:
+        from app.settings_api import get_setting
+        tz_name = get_setting('display_timezone', 'UTC') or 'UTC'
+    except Exception:
+        tz_name = 'UTC'
+
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(tz_name), tz_name
+    except Exception:
+        try:
+            import pytz
+            return pytz.timezone(tz_name), tz_name
+        except Exception:
+            logger.warning("Unknown display_timezone %r — falling back to UTC", tz_name)
+            return timezone.utc, 'UTC'
+
+
+def _tz_cutoff_utc_naive(tz, days):
+    """Return a naive-UTC datetime ``days`` days before "now" in ``tz``.
+
+    The DB stores naive UTC datetimes on VulnerabilityMatch.created_at etc.,
+    so after computing the cutoff in the tenant's local time we convert
+    back to UTC and strip tzinfo for the comparison to work with SQLAlchemy.
+    """
+    local_now = datetime.now(tz)
+    cutoff_local = local_now - timedelta(days=days)
+    cutoff_utc = cutoff_local.astimezone(timezone.utc).replace(tzinfo=None)
+    return cutoff_utc
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +132,17 @@ def _compute_vuln_posture(org_ids):
         'matches_high': 0,
         'matches_medium': 0,
         'matches_low': 0,
+        # M10: separate counters for CVEs whose NVD analysis is still
+        # pending or whose match confidence is below 'high'. These are
+        # tracked so the "Data quality notice" section can surface the
+        # percentage of findings the auditor should treat as provisional.
+        # The scoring rules are unchanged — we only expose the metric.
+        'matches_critical_awaiting': 0,
+        'matches_high_awaiting': 0,
+        'matches_medium_awaiting': 0,
+        'matches_low_awaiting': 0,
+        'total_awaiting': 0,
+        'pct_awaiting': 0.0,
         'open_critical': 0,
         'open_high': 0,
         'overdue_critical_30d': 0,
@@ -94,6 +155,9 @@ def _compute_vuln_posture(org_ids):
         'has_sla_policies': False,
         'has_risk_exceptions': False,
         'resolved_assignments_count': 0,
+        # H8: record which timezone was used to compute cutoffs so the
+        # auditor can reproduce the numbers.
+        'report_timezone': 'UTC',
     }
 
     if not org_ids:
@@ -135,6 +199,44 @@ def _compute_vuln_posture(org_ids):
         elif sev == 'LOW':
             posture['matches_low'] = count
 
+    # M10: count matches whose NVD data is still provisional. A match is
+    # "awaiting" when:
+    #   - the Vulnerability.nvd_status is one of the NVD pending states, OR
+    #   - the VulnerabilityMatch.match_confidence is not 'high' (i.e. the
+    #     match was produced by keyword/vendor_product heuristics rather
+    #     than a verified CPE range).
+    # We compute per-severity breakdowns so the Data Quality Notice can
+    # explain which severity buckets are most impacted.
+    awaiting_nvd_states = ('Awaiting Analysis', 'Received', 'Undergoing Analysis')
+    awaiting_counts = db.session.query(
+        func.upper(Vulnerability.severity).label('sev'),
+        func.count(VulnerabilityMatch.id),
+    ).join(
+        Vulnerability, Vulnerability.id == VulnerabilityMatch.vulnerability_id,
+    ).filter(
+        VulnerabilityMatch.product_id.in_(org_product_ids),
+        db.or_(
+            Vulnerability.nvd_status.in_(awaiting_nvd_states),
+            VulnerabilityMatch.match_confidence != 'high',
+        ),
+    ).group_by(func.upper(Vulnerability.severity)).all()
+
+    for sev, count in awaiting_counts:
+        posture['total_awaiting'] += count
+        if sev == 'CRITICAL':
+            posture['matches_critical_awaiting'] = count
+        elif sev == 'HIGH':
+            posture['matches_high_awaiting'] = count
+        elif sev == 'MEDIUM':
+            posture['matches_medium_awaiting'] = count
+        elif sev == 'LOW':
+            posture['matches_low_awaiting'] = count
+
+    if posture['total_matches']:
+        posture['pct_awaiting'] = round(
+            (posture['total_awaiting'] / posture['total_matches']) * 100, 1
+        )
+
     # Open (unacknowledged) by severity
     posture['open_critical'] = db.session.query(VulnerabilityMatch).join(
         Vulnerability, Vulnerability.id == VulnerabilityMatch.vulnerability_id,
@@ -152,10 +254,14 @@ def _compute_vuln_posture(org_ids):
         func.upper(Vulnerability.severity) == 'HIGH',
     ).count()
 
-    # Overdue critical (open and older than 30/90 days)
-    now = datetime.utcnow()
-    cutoff_30 = now - timedelta(days=30)
-    cutoff_90 = now - timedelta(days=90)
+    # Overdue critical (open and older than 30/90 days).
+    # H8: cutoffs are computed in the tenant's display_timezone so compliance
+    # reports agree with the SLA dashboard around calendar-day boundaries.
+    tz, tz_name = _get_report_timezone()
+    posture['report_timezone'] = tz_name
+    now = datetime.now(tz).astimezone(timezone.utc).replace(tzinfo=None)
+    cutoff_30 = _tz_cutoff_utc_naive(tz, 30)
+    cutoff_90 = _tz_cutoff_utc_naive(tz, 90)
 
     posture['overdue_critical_30d'] = db.session.query(VulnerabilityMatch).join(
         Vulnerability, Vulnerability.id == VulnerabilityMatch.vulnerability_id,
@@ -544,7 +650,7 @@ def _evaluate_soc2(posture):
 # Report builder + PDF renderer
 # ============================================================================
 
-def _build_report(framework, framework_name, requirements, user, org_name):
+def _build_report(framework, framework_name, requirements, user, org_name, posture=None):
     """Assemble final report dict with scoring + integrity block."""
     total = len(requirements)
     pass_ = sum(1 for r in requirements if r['status'] == 'PASS')
@@ -566,6 +672,7 @@ def _build_report(framework, framework_name, requirements, user, org_name):
         'organization': org_name,
         'generated_at': datetime.utcnow().isoformat() + 'Z',
         'generated_by': user.username if user else 'unknown',
+        'report_timezone': (posture or {}).get('report_timezone', 'UTC'),
         'summary': {
             'total_requirements': total,
             'pass': pass_,
@@ -576,6 +683,31 @@ def _build_report(framework, framework_name, requirements, user, org_name):
         },
         'requirements': requirements,
     }
+
+    # M10: Data Quality Notice — surface the share of CVE matches whose NVD
+    # data is still pending ("Awaiting Analysis" / "Received" /
+    # "Undergoing Analysis") or whose match was produced by a lower-
+    # confidence heuristic. The PCI scoring is intentionally unchanged; this
+    # section exists so the auditor can contextualise the numbers.
+    if posture is not None:
+        report['data_quality_notice'] = {
+            'description': (
+                'The following metrics indicate CVE matches whose underlying '
+                'data is still provisional. These matches are included in '
+                'the scoring as-is, but an auditor should treat them as '
+                'lower-confidence evidence until NVD completes its analysis '
+                'or the match is manually verified.'
+            ),
+            'total_matches': posture.get('total_matches', 0),
+            'total_awaiting': posture.get('total_awaiting', 0),
+            'pct_awaiting': posture.get('pct_awaiting', 0.0),
+            'by_severity': {
+                'critical': posture.get('matches_critical_awaiting', 0),
+                'high': posture.get('matches_high_awaiting', 0),
+                'medium': posture.get('matches_medium_awaiting', 0),
+                'low': posture.get('matches_low_awaiting', 0),
+            },
+        }
 
     # Reuse existing integrity helper from reports_api to stay consistent
     try:
@@ -769,7 +901,7 @@ def _generate_report(framework, framework_name, evaluator):
     # Compute + evaluate
     posture = _compute_vuln_posture(org_ids)
     requirements = evaluator(posture)
-    report = _build_report(framework, framework_name, requirements, user, org_name)
+    report = _build_report(framework, framework_name, requirements, user, org_name, posture=posture)
 
     # Sprint 4+5 hardening: truncate the report if it exceeds the cap. Large
     # orgs can always fetch the full data via the JSON variant.
