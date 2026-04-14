@@ -557,3 +557,117 @@ class TestRoleBasedAccess:
 
         # Should succeed
         assert response.status_code == 200
+
+
+class TestPasswordResetAtomic:
+    """Regression tests for finding B1: password reset token must be atomic
+    (single-use) and the plaintext token must never appear in HTTP responses.
+    """
+
+    def _make_user(self, db_session, password='OldPassword!23'):
+        from app.models import User, Organization
+        org = Organization(name='reset_org', display_name='Reset Org', active=True)
+        db_session.add(org)
+        db_session.flush()
+        user = User(
+            username='resetuser',
+            email='reset@example.com',
+            role='user',
+            is_active=True,
+            auth_type='local',
+            organization_id=org.id,
+        )
+        user.set_password(password)
+        db_session.add(user)
+        db_session.commit()
+        return user
+
+    def test_request_reset_never_returns_token_in_json(self, app, client, db_session, monkeypatch):
+        user = self._make_user(db_session)
+
+        # Force email sending to fail to exercise the previously-buggy branch
+        def _boom(*args, **kwargs):
+            raise RuntimeError("SMTP not configured")
+        monkeypatch.setattr('app.email_alerts.send_password_reset_email', _boom, raising=False)
+
+        resp = client.post('/api/auth/request-password-reset', json={'email': user.email})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        # The plaintext token must NEVER be leaked in the response body,
+        # even when email delivery fails.
+        assert 'token' not in data
+        assert 'note' not in data
+        assert data.get('message')
+
+    def test_reset_token_is_single_use_atomic(self, app, client, db_session):
+        user = self._make_user(db_session)
+        token = user.generate_password_reset_token()
+
+        # First POST succeeds
+        r1 = client.post('/api/auth/reset-password', json={
+            'token': token,
+            'new_password': 'NewPassword!23',
+        })
+        assert r1.status_code == 200, r1.get_json()
+
+        # Second POST with the same token must fail - atomic consumption
+        r2 = client.post('/api/auth/reset-password', json={
+            'token': token,
+            'new_password': 'AnotherPassword!23',
+        })
+        assert r2.status_code == 400
+        assert 'invalid' in (r2.get_json().get('error') or '').lower() \
+            or 'expired' in (r2.get_json().get('error') or '').lower()
+
+        # Verify password was actually updated to the first new value.
+        from app.models import User
+        refreshed = User.query.get(user.id)
+        assert refreshed.check_password('NewPassword!23')
+        assert not refreshed.check_password('AnotherPassword!23')
+        # Token fields were cleared.
+        assert refreshed.password_reset_token is None
+        assert refreshed.password_reset_expires is None
+
+
+class TestLDAPFilterValidation:
+    """Regression tests for finding B7: LDAP filter template allow-list."""
+
+    def test_valid_simple_filter(self):
+        from app.ldap_manager import validate_ldap_search_filter
+        assert validate_ldap_search_filter('(uid={username})') == '(uid={username})'
+        assert validate_ldap_search_filter('(sAMAccountName={username})') == '(sAMAccountName={username})'
+
+    def test_valid_compound_filter(self):
+        from app.ldap_manager import validate_ldap_search_filter
+        template = '(&(uid={username})(objectClass=person))'
+        assert validate_ldap_search_filter(template) == template
+
+    def test_rejects_or_pipe(self):
+        import pytest
+        from app.ldap_manager import validate_ldap_search_filter
+        with pytest.raises(ValueError):
+            validate_ldap_search_filter('(|(uid={username})(uid=admin))')
+
+    def test_rejects_wildcard(self):
+        import pytest
+        from app.ldap_manager import validate_ldap_search_filter
+        with pytest.raises(ValueError):
+            validate_ldap_search_filter('(uid={username}*)')
+
+    def test_rejects_missing_placeholder(self):
+        import pytest
+        from app.ldap_manager import validate_ldap_search_filter
+        with pytest.raises(ValueError):
+            validate_ldap_search_filter('(uid=admin)')
+
+    def test_rejects_multiple_placeholders(self):
+        import pytest
+        from app.ldap_manager import validate_ldap_search_filter
+        with pytest.raises(ValueError):
+            validate_ldap_search_filter('(&(uid={username})(cn={username}))')
+
+    def test_rejects_extra_template_tokens(self):
+        import pytest
+        from app.ldap_manager import validate_ldap_search_filter
+        with pytest.raises(ValueError):
+            validate_ldap_search_filter('(uid={username}{evil})')
