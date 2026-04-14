@@ -457,6 +457,19 @@ def start_scheduler(app):
     )
     logger.info("License heartbeat scheduled every 12 hours")
 
+    # Schedule hourly usage metering upload to the license server (H7 — Sprint 6).
+    # Fires at minute=5 to avoid colliding with the top-of-hour tick that many
+    # external services use. The license server floors `ts` to the hour anyway,
+    # so the exact firing minute does not affect dedup.
+    scheduler.add_job(
+        func=lambda: _run_with_lock('usage_metering_upload', usage_metering_upload_job, app),
+        trigger=CronTrigger(minute=5, timezone=tz),
+        id='usage_metering_upload',
+        name='Usage Metering Upload (hourly)',
+        replace_existing=True
+    )
+    logger.info("Usage metering upload scheduled hourly at minute 5")
+
     # Schedule KB sync (every 12 hours, offset by 5 minutes from license heartbeat)
     scheduler.add_job(
         func=lambda: _run_with_lock('kb_sync', kb_sync_job, app),
@@ -1340,6 +1353,26 @@ def license_heartbeat_job(app):
 
         except Exception as e:
             logger.error(f"License heartbeat job failed: {str(e)}", exc_info=True)
+
+
+def usage_metering_upload_job(app):
+    """Hourly job: push per-tenant usage snapshots to the license server (H7)."""
+    with app.app_context():
+        try:
+            from app.metering import send_usage_to_license_server
+            logger.info("Starting hourly usage metering upload...")
+            results = send_usage_to_license_server()
+            if not results:
+                logger.info("Usage metering: no active tenants to report")
+                return
+            ok = sum(1 for r in results if r.get('success'))
+            fail = len(results) - ok
+            logger.info(
+                f"Usage metering upload complete: {ok} ok, {fail} failed "
+                f"(of {len(results)} tenants)"
+            )
+        except Exception as e:
+            logger.error(f"Usage metering upload job failed: {e}", exc_info=True)
 
 
 def nvd_cpe_dict_sync_job(app):

@@ -375,6 +375,8 @@ def create_app(config_class=Config):
     app.register_blueprint(gdpr_api.gdpr_bp)
     from app import license_webhook  # B3: license-server event receiver
     app.register_blueprint(license_webhook.license_webhook_bp)
+    from app import sso_api  # Sprint 6 contract: admin SSO impersonation
+    app.register_blueprint(sso_api.sso_api_bp)
     from app import remediation_api
     app.register_blueprint(remediation_api.bp)
     from app import sbom_export
