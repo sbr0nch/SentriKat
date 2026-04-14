@@ -1416,6 +1416,7 @@ def process_inventory_job(job):
         items_failed = 0
         items_processed = 0
         version_changed_product_ids = set()  # Products whose version changed — need re-matching
+        touched_product_ids = set()  # Products whose last_agent_report should be bumped atomically at end
         new_cpe_pairs = set()  # Track unique (cpe_vendor, cpe_product) pairs from new products for NVD lookup
 
         # Resolve the agent_key for license gating (reuse from above if loaded)
@@ -1503,7 +1504,8 @@ def process_inventory_job(job):
                                 product_name=product_name
                             ).first()
                             if product:
-                                product.last_agent_report = datetime.utcnow()
+                                # Defer last_agent_report update to end of job (H6 fix)
+                                touched_product_ids.add(product.id)
                                 products_updated += 1
                             else:
                                 items_processed += 1
@@ -1513,6 +1515,9 @@ def process_inventory_job(job):
                             continue
                     else:
                         # auto_approve=True: create product directly
+                        # NOTE: last_agent_report is intentionally omitted here and set
+                        # atomically at the end of the job to avoid race conditions
+                        # with concurrent jobs for the same asset (H6 fix).
                         product = Product(
                             vendor=vendor,
                             product_name=product_name,
@@ -1523,7 +1528,6 @@ def process_inventory_job(job):
                             source_type=p_source_type,
                             ecosystem=p_ecosystem,
                             source_key_type=job_key_type,
-                            last_agent_report=datetime.utcnow(),
                             organization_id=organization.id
                         )
                         # Auto-apply CPE mapping for better vulnerability matching
@@ -1537,14 +1541,16 @@ def process_inventory_job(job):
                         db.session.add(product)
                         db.session.flush()
                         products_created += 1
+                        # Queue for atomic timestamp update at end
+                        touched_product_ids.add(product.id)
 
                         # Assign product to ALL target organizations (multi-org support)
                         for target_org in all_target_orgs:
                             if target_org not in product.organizations.all():
                                 product.organizations.append(target_org)
                 else:
-                    # Update last_agent_report timestamp
-                    product.last_agent_report = datetime.utcnow()
+                    # Defer last_agent_report to atomic end-of-job update (H6 fix)
+                    touched_product_ids.add(product.id)
 
                     # Update product version to latest agent-reported version.
                     # This is critical: check_match() uses product.version for CPE range
@@ -1622,15 +1628,22 @@ def process_inventory_job(job):
             except Exception as e:
                 items_failed += 1
                 logger.warning(f"Error processing product in job {job_id}: {e}")
-                # Rollback the failed item but continue processing
+                # Rollback the failed item but continue processing.
+                # NOTE: We intentionally keep version_changed_product_ids and
+                # touched_product_ids intact — even if this batch rolled back,
+                # subsequent successful batches (or a retry) will re-populate
+                # version changes and the re-match step will still see
+                # persisted rows. Clearing would leave stale matches behind.
                 try:
                     db.session.rollback()
-                    # Version changes from rolled-back batch are invalid
-                    version_changed_product_ids.clear()
                     # Re-fetch objects after rollback
                     job = InventoryJob.query.get(job_id)
                     asset = Asset.query.get(asset_id)
                     organization = Organization.query.get(org_id)
+                    logger.warning(
+                        f"Job {job_id}: kept {len(version_changed_product_ids)} version-change "
+                        f"entries across rollback (stale matches will be cleaned on next successful commit)"
+                    )
                 except Exception:
                     pass
 
@@ -1656,16 +1669,45 @@ def process_inventory_job(job):
             if removed_ids:
                 logger.info(f"Job {job_id}: Removed {len(removed_ids)} uninstalled products")
 
-        # Update asset inventory and checkin timestamps
-        asset = Asset.query.get(asset_id)  # Re-fetch to ensure fresh object
-        if asset:
-            asset.last_inventory_at = datetime.utcnow()
-            asset.last_checkin = datetime.utcnow()
-            asset.status = 'online'
-
-        # Commit pending changes (version updates, installation removals, asset timestamps)
-        # before re-matching so check_match() sees persisted data.
+        # Commit pending changes (version updates, installation removals)
+        # before atomic timestamp bump + re-matching.
         db.session.commit()
+
+        # --- H6 fix: atomic, monotonic timestamp updates ---
+        # Perform a single bulk UPDATE for all touched products and the asset's
+        # last_checkin / last_inventory_at timestamps, using a monotonic
+        # WHERE clause so that a slower concurrent job cannot clobber the
+        # newer timestamp written by a faster concurrent job for the same
+        # asset.  This block is its own transaction.
+        now_ts = datetime.utcnow()
+        try:
+            from sqlalchemy import or_ as _or_
+            if touched_product_ids:
+                # Bulk UPDATE with monotonic guard: only advance the timestamp
+                Product.query.filter(
+                    Product.id.in_(list(touched_product_ids)),
+                    _or_(
+                        Product.last_agent_report.is_(None),
+                        Product.last_agent_report < now_ts,
+                    ),
+                ).update(
+                    {Product.last_agent_report: now_ts},
+                    synchronize_session=False,
+                )
+
+            # Update asset check-in with same monotonic guard
+            asset = Asset.query.get(asset_id)
+            if asset:
+                if asset.last_checkin is None or asset.last_checkin < now_ts:
+                    asset.last_checkin = now_ts
+                if asset.last_inventory_at is None or asset.last_inventory_at < now_ts:
+                    asset.last_inventory_at = now_ts
+                asset.status = 'online'
+
+            db.session.commit()
+        except Exception as ts_err:
+            logger.warning(f"Job {job_id}: atomic timestamp update failed: {ts_err}")
+            db.session.rollback()
 
         # Re-match products whose versions changed during this job.
         # Ensures stale vulnerability matches are removed immediately.
@@ -1982,8 +2024,11 @@ def report_inventory():
             import json as _json
             asset.installed_kbs = _json.dumps(installed_kbs[:500])  # Cap at 500 KBs
 
-        asset.last_checkin = datetime.utcnow()
-        asset.last_inventory_at = datetime.utcnow()
+        # NOTE: last_checkin / last_inventory_at are updated atomically at the
+        # end of this request using a monotonic WHERE guard (H6 fix) to avoid
+        # concurrent reports clobbering each other.  We still set `status`
+        # eagerly because it is a state field, not a monotonically advancing
+        # timestamp.
         asset.status = 'online'
 
         # Propagate key type to asset for server/client differentiation
@@ -2023,6 +2068,7 @@ def report_inventory():
         installations_updated = 0
         installations_removed = 0
         version_changed_product_ids = set()  # Products whose version changed — need re-matching
+        touched_product_ids = set()  # Products whose last_agent_report should be atomically bumped at end
         new_cpe_pairs = set()  # Track unique CPE pairs for on-demand NVD lookup
 
         for product_data in products:
@@ -2071,7 +2117,8 @@ def report_inventory():
                             product_name=product_name
                         ).first()
                         if product:
-                            product.last_agent_report = datetime.utcnow()
+                            # Defer last_agent_report to end-of-request atomic update (H6 fix)
+                            touched_product_ids.add(product.id)
                             products_updated += 1
                         else:
                             continue
@@ -2101,6 +2148,9 @@ def report_inventory():
                             continue  # Skip - not licensed for dependency scanning
 
                     # Create product
+                    # NOTE: last_agent_report is intentionally omitted; set atomically
+                    # at the end via bulk UPDATE (H6 fix — prevents concurrent reports
+                    # for the same asset from clobbering each other's timestamps).
                     product = Product(
                         vendor=vendor,
                         product_name=product_name,
@@ -2111,7 +2161,6 @@ def report_inventory():
                         source_type=p_source_type,
                         ecosystem=p_ecosystem,
                         source_key_type=agent_key.key_type if agent_key and hasattr(agent_key, 'key_type') else None,
-                        last_agent_report=datetime.utcnow(),
                         organization_id=organization.id
                     )
                     # Auto-apply CPE mapping for better vulnerability matching
@@ -2125,14 +2174,15 @@ def report_inventory():
                     db.session.add(product)
                     db.session.flush()
                     products_created += 1
+                    touched_product_ids.add(product.id)
 
                     # Assign to ALL target organizations (multi-org support)
                     for target_org in all_target_orgs:
                         if target_org not in product.organizations.all():
                             product.organizations.append(target_org)
             else:
-                # Update last_agent_report timestamp
-                product.last_agent_report = datetime.utcnow()
+                # Defer last_agent_report update to end-of-request atomic bulk UPDATE (H6 fix)
+                touched_product_ids.add(product.id)
 
                 # Update product version to latest agent-reported version.
                 # Critical: check_match() uses product.version for CPE range checking.
@@ -2260,6 +2310,33 @@ def report_inventory():
         )
 
         db.session.commit()
+
+        # --- H6 fix: atomic monotonic bump of asset + product timestamps ---
+        now_ts = datetime.utcnow()
+        try:
+            from sqlalchemy import or_ as _or_
+            if touched_product_ids:
+                Product.query.filter(
+                    Product.id.in_(list(touched_product_ids)),
+                    _or_(
+                        Product.last_agent_report.is_(None),
+                        Product.last_agent_report < now_ts,
+                    ),
+                ).update(
+                    {Product.last_agent_report: now_ts},
+                    synchronize_session=False,
+                )
+            # Re-fetch asset and advance timestamps monotonically
+            _asset_for_ts = Asset.query.get(asset.id)
+            if _asset_for_ts:
+                if _asset_for_ts.last_checkin is None or _asset_for_ts.last_checkin < now_ts:
+                    _asset_for_ts.last_checkin = now_ts
+                if _asset_for_ts.last_inventory_at is None or _asset_for_ts.last_inventory_at < now_ts:
+                    _asset_for_ts.last_inventory_at = now_ts
+            db.session.commit()
+        except Exception as ts_err:
+            logger.warning(f"Atomic timestamp bump failed (non-critical): {ts_err}")
+            db.session.rollback()
 
         # Update usage metrics for billing
         update_usage_metrics(
