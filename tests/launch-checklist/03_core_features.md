@@ -1,0 +1,238 @@
+# 03 — Core Features (Part C)
+
+> **Durata:** 2-3h. **Priorita':** 🟠 Alta (skippabile se hai fretta, le
+> feature sono stabili da mesi, test di regressione se vuoi).
+
+Test delle feature "non nuove" — le cose che esistevano gia' prima di
+Sprint 4+5. Ogni sottosezione e' indipendente: saltane quelle che non
+usi (es. salta LDAP se non vendi a clienti enterprise nei primi mesi).
+
+---
+
+## C.1 Settings > System sub-tabs
+
+- [ ] Click Settings > System → pill nav mostra: Sync & Updates,
+      General, Security, Data Retention
+- [ ] Ogni sub-tab apre una card diversa
+- [ ] Switch a un'altra main tab (Email, Compliance) → tutte le sub-pane
+      di System si nascondono
+- [ ] Torna su System → si ricorda l'ultima sub-tab attiva
+- [ ] User non-admin: General e Security NON appaiono
+- [ ] Salva un setting in ogni sub-tab → persiste dopo reload
+
+## C.2 LDAP Authentication (skip se non usi LDAP)
+
+Config (Settings > Authentication > LDAP):
+
+| Field | Value (test env) |
+|---|---|
+| Server | `ldap://localhost` |
+| Port | `389` |
+| Base DN | `dc=sentrikat,dc=test` |
+| Bind DN | `cn=readonly,dc=sentrikat,dc=test` |
+| Bind Password | `readonly` |
+| Search Filter | `(uid={username})` |
+| Username Attr | `uid` |
+| Email Attr | `mail` |
+
+- [ ] Enable LDAP, save config
+- [ ] Test Connection → succeeds
+- [ ] Search LDAP users → trova john.doe, jane.admin, marco.rossi
+- [ ] Invita `john.doe` a un org
+- [ ] Logout, login come `john.doe / password123` → success
+- [ ] User mostra `auth_type: ldap` in admin panel
+- [ ] Wrong password → error chiaro
+- [ ] User inesistente → error chiaro
+- [ ] Disable LDAP → bottone login sparisce
+
+## C.3 SAML SSO (skip se non usi SAML)
+
+Config (Settings > Authentication > SAML):
+- IdP Metadata URL: `http://localhost:8080/realms/sentrikat/protocol/saml/descriptor`
+- SP Entity ID: `sentrikat-saml`
+- SP ACS URL: `http://localhost:5000/saml/acs`
+- Auto-provision: Enabled
+
+- [ ] Enable SAML, paste metadata URL, save
+- [ ] Test SAML Config → validates successfully
+- [ ] Visita `/api/saml/metadata` → XML valido
+- [ ] Click "Login with SSO" → redirect a Keycloak
+- [ ] Login come `testuser / password123`
+- [ ] Redirect back a SentriKat, logged in
+- [ ] User auto-provisioned (Settings > Users)
+- [ ] Test LDAP user via SAML (`john.doe` attraverso Keycloak)
+- [ ] SAML attributes mapped: email, nome
+- [ ] Logout → session cleared
+
+## C.4 Audit Logs
+
+- [ ] Fai azioni: crea user, salva settings, esegui sync
+- [ ] Settings > Compliance > Audit Logs → entries visibili
+      (timestamp, user, action, resource, details)
+- [ ] Filter by action → si aggiorna
+- [ ] Filter by user → si aggiorna
+- [ ] Export CSV → file scaricato
+- [ ] File rotation: `ls -la /var/log/sentrikat/audit.log*` (max 20MB,
+      50 backups)
+
+## C.5 Data Retention
+
+- [ ] Settings > System > Data Retention
+- [ ] Set audit log retention = 365 giorni
+- [ ] Set sync history = 90 giorni
+- [ ] Set session log = 30 giorni
+- [ ] Save → success toast
+- [ ] Persiste dopo reload
+- [ ] Scheduler logs mostrano `cleanup_old_data` alle 3:00 AM
+- [ ] Auto-acknowledge: enable + "Run Auto-Acknowledge Now"
+- [ ] Verifica match acknowledged (se ci sono dati rilevanti)
+
+## C.6 Compliance Reports pre-Sprint5 (CISA + NIS2 + Executive)
+
+### CISA BOD 22-01
+- [ ] Settings > Compliance > Reports → click BOD 22-01 JSON → download
+- [ ] CSV → download
+- [ ] PDF → download
+- [ ] Dati reali (CVE IDs, date, count) — non placeholder
+
+### NIS2 Directive
+- [ ] NIS2 JSON → download con Article 21 mapping
+- [ ] NIS2 CSV → download
+- [ ] NIS2 PDF → download
+- [ ] Sezioni: supply_chain, vulnerability_handling, cyber_hygiene
+- [ ] compliance_status calcolato (COMPLIANT / PARTIALLY / NON-COMPLIANT)
+- [ ] MTTR calcolato se ci sono match acknowledged
+
+### Executive Summary
+- [ ] Dashboard > Export > Executive Summary PDF → one-pager
+- [ ] Settings > Compliance > Executive Summary JSON → download
+- [ ] Risk score (0-100) calcolato
+- [ ] Top 5 urgent vulnerabilities listed
+- [ ] KPIs: total matches, critical, overdue, remediation rate
+
+## C.7 CSV Export
+
+- [ ] Dashboard > Export > Export CSV (Excel) → download
+- [ ] Apre in Excel senza problemi di encoding (UTF-8 BOM)
+- [ ] 18 colonne presenti: CVE ID, severity, product, vendor, ecc.
+- [ ] Applica filter `priority=critical` → re-export → CSV solo critical
+- [ ] Filter acknowledged passa correttamente nel export
+
+## C.8 Scheduled Reports
+
+- [ ] Settings > Compliance > Scheduled Reports
+- [ ] Crea: daily, 09:00, summary type, recipient email
+- [ ] Toggle "send to managers"
+- [ ] Save → appare in lista
+- [ ] Click "Send Now" → report spedito (check email o logs)
+- [ ] `last_sent` aggiornato
+- [ ] Crea weekly report con NIS2 type
+- [ ] Toggle off → `enabled: false`
+- [ ] Delete → rimosso
+- [ ] Scheduler logs: `process_scheduled_reports` ogni 10 min
+
+## C.9 Notifications
+
+### Email Alerts
+- [ ] Configure SMTP (Settings > Email & Alerts)
+- [ ] Test email → delivered
+- [ ] Sync → se nuovi CVE critici, alert spedito
+- [ ] AlertLog table contiene record sent
+
+### Slack / Teams / Webhook
+- [ ] Settings > Integrations > Slack: webhook URL, test → delivered
+- [ ] Settings > Integrations > Teams: webhook URL, test → delivered
+- [ ] Generic Webhook: URL + format + test → delivered
+
+### Issue Trackers
+- [ ] Settings > Integrations > Jira: configure, test connection
+- [ ] Crea issue da vulnerability → verifica in Jira
+
+## C.10 License Activation
+
+### Online
+- [ ] Settings > License
+- [ ] Note Installation ID
+- [ ] Inserisci activation code, click Activate Online
+- [ ] Server raggiungibile → license activates, features unlock
+- [ ] Server non raggiungibile → fallback offline con messaggio chiaro
+
+### Installation ID stability
+- [ ] Restart SentriKat → ID stesso
+- [ ] Docker: imposta `SENTRIKAT_INSTALLATION_ID` in .env → rebuild → stesso
+- [ ] Docker senza env var → rebuild → NUOVO ID = license invalida
+
+### License Heartbeat
+- [ ] Logs: `license_heartbeat` ogni 12h
+- [ ] Telemetry: agent count, product count, org count spediti
+- [ ] Offline: nessun errore se portale irraggiungibile
+
+## C.11 EPSS Scoring
+
+- [ ] Run CISA KEV sync (per avere vulnerabilita')
+- [ ] Vulnerability detail → EPSS score mostrato
+- [ ] No score → trigger EPSS sync manualmente
+- [ ] DB: `epss_score`, `epss_percentile`, `epss_fetched_at` popolati
+- [ ] Dopo server rebuild → scores persistono (sono in PostgreSQL)
+- [ ] Color coding: Critical 95%+, High 85%+, Medium 70%+, Low <70%
+
+## C.12 CPE Dictionary
+
+- [ ] Settings > System > Sync → stats CPE dictionary
+- [ ] Entries > 0 (dovrebbero essere migliaia)
+- [ ] Last sync timestamps (bulk download + incremental)
+- [ ] Aggiungi "Apache HTTP Server" → CPE auto-mapped
+- [ ] Lookup strategies: exact (0.92), product-only (0.88), alias (0.60-0.85)
+- [ ] KB sync status se abilitato
+
+## C.13 2FA / TOTP
+
+### Setup utente
+- [ ] Login come user → profile
+- [ ] Enable 2FA → QR code
+- [ ] Scan con Google Authenticator / Authy
+- [ ] Codice 6 cifre per verificare → 2FA enabled
+- [ ] Logout, login → chiede 2FA code
+- [ ] Codice giusto → access
+- [ ] Codice sbagliato → denied
+
+### Force per org
+- [ ] Admin imposta `totp_required: true` su un user
+- [ ] User forzato a setup TOTP al prossimo login
+- [ ] Non puo' bypassare
+
+### Disable
+- [ ] User disabilita 2FA dal profile
+- [ ] Next login → no prompt
+
+## C.14 SIEM / Syslog forwarding
+
+Test setup:
+```bash
+# Listener UDP (terminale dedicato)
+nc -u -l -p 5514
+
+# Oppure TCP
+nc -l -p 5514
+```
+
+- [ ] Settings > SIEM / Syslog: host=localhost, port=5514, UDP, CEF, On
+- [ ] Save → success toast
+- [ ] Click "Test Connection"
+- [ ] CEF: listener riceve `CEF:0|SentriKat|VulnerabilityManagement|1.0|test|...`
+- [ ] Switch to JSON → structure JSON nel listener
+- [ ] Switch to RFC5424 → structure RFC
+- [ ] Switch UDP → TCP → funziona over TCP
+- [ ] Disable → no piu' eventi forward
+- [ ] Reload page → settings persisted
+
+---
+
+## ✅ Gate C
+
+- [ ] Tutto quello che ti serve per il lancio e' green (skippa il resto)
+- [ ] Nota a lato le feature che hai deciso di NON promuovere al lancio
+      commerciale (es. "LDAP/SAML: disponibili ma non testate, offerte
+      on-request")
+
+Prossima: [`04_sprint4_5_features.md`](04_sprint4_5_features.md)

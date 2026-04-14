@@ -173,10 +173,16 @@ services:
       - sentrikat
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/api/health"]
+      # Simple TCP check: nginx is up if port 80 is listening.
+      # The previous wget-based check followed the HTTP→HTTPS 301 redirect
+      # and failed SSL validation against the production certificate from
+      # inside the container, reporting the container as unhealthy for
+      # ~90 hours straight while real traffic was served normally.
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 80 || exit 1"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
+      start_period: 10s
       start_period: 10s
 
 volumes:
