@@ -29,6 +29,8 @@ Usage:
 """
 
 import logging
+import os
+import time
 from datetime import datetime, timedelta
 
 from app import db
@@ -38,6 +40,12 @@ from app.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+#: Backoff delays (seconds) between retries when posting usage to the
+#: license server. Mirrors :data:`app.licensing.HEARTBEAT_RETRY_DELAYS`
+#: but with one fewer step (three retries: 1, 2, 4s).
+USAGE_UPLOAD_RETRY_DELAYS = (1, 2, 4)
 
 
 def get_current_usage(org_id):
@@ -287,6 +295,208 @@ def get_usage_history(org_id, metric, days=30):
     ).order_by(UsageRecord.period_start.asc()).all()
 
     return [r.to_dict() for r in records]
+
+
+def _build_usage_payload(org_id):
+    """Assemble the usage payload the license server expects (H7).
+
+    Schema (matches SentriKat-web ``POST /api/v1/usage``)::
+
+        {
+          "tenant_id":     int,
+          "ts":            int (unix seconds),
+          "agents_active": int,
+          "products_total": int,
+          "users_active":  int,
+          "api_calls_1h":  int,
+          "storage_bytes": int,
+          "scan_count_1h": int
+        }
+    """
+    usage = get_current_usage(org_id)
+    now = datetime.utcnow()
+    one_hour_ago = now - timedelta(hours=1)
+
+    # api_calls in the last hour, if the metric is tracked
+    api_calls_1h = 0
+    try:
+        rec = UsageRecord.query.filter(
+            UsageRecord.organization_id == org_id,
+            UsageRecord.metric == 'api_calls',
+            UsageRecord.recorded_at >= one_hour_ago,
+        ).order_by(UsageRecord.recorded_at.desc()).first()
+        if rec:
+            api_calls_1h = int(rec.value or 0)
+    except Exception:
+        api_calls_1h = 0
+
+    scan_count_1h = 0
+    try:
+        rec = UsageRecord.query.filter(
+            UsageRecord.organization_id == org_id,
+            UsageRecord.metric == 'scans',
+            UsageRecord.recorded_at >= one_hour_ago,
+        ).order_by(UsageRecord.recorded_at.desc()).first()
+        if rec:
+            scan_count_1h = int(rec.value or 0)
+    except Exception:
+        scan_count_1h = 0
+
+    storage_bytes = 0
+    try:
+        rec = UsageRecord.query.filter(
+            UsageRecord.organization_id == org_id,
+            UsageRecord.metric == 'storage_bytes',
+        ).order_by(UsageRecord.recorded_at.desc()).first()
+        if rec:
+            storage_bytes = int(rec.value or 0)
+    except Exception:
+        storage_bytes = 0
+
+    return {
+        'tenant_id': org_id,
+        'ts': int(time.time()),
+        'agents_active': int(usage.get('agents_active', 0)),
+        'products_total': int(usage.get('products_total', 0)),
+        'users_active': int(usage.get('users_active', 0)),
+        'api_calls_1h': api_calls_1h,
+        'storage_bytes': storage_bytes,
+        'scan_count_1h': scan_count_1h,
+    }
+
+
+def _post_with_retry(url, payload, headers, proxies=None, verify_ssl=True):
+    """POST with exponential backoff (1/2/4s). Returns (response, exc)."""
+    import requests as _requests
+    last_exc = None
+    for attempt, delay in enumerate([0] + list(USAGE_UPLOAD_RETRY_DELAYS[:-1]), start=1):
+        if delay:
+            time.sleep(delay)
+        try:
+            resp = _requests.post(
+                url,
+                json=payload,
+                timeout=15,
+                headers=headers,
+                proxies=proxies,
+                verify=verify_ssl,
+            )
+            return resp, None
+        except (_requests.ConnectionError, _requests.Timeout) as e:
+            last_exc = e
+            logger.info(
+                f"Usage upload attempt {attempt}/{len(USAGE_UPLOAD_RETRY_DELAYS)} "
+                f"failed: {type(e).__name__}: {e}"
+            )
+            continue
+        except Exception as e:
+            last_exc = e
+            logger.warning(f"Usage upload attempt {attempt}: unexpected error: {e}")
+            continue
+    return None, last_exc
+
+
+def send_usage_to_license_server():
+    """Push per-tenant usage snapshots to the upstream license server (H7).
+
+    For each active organization we build a payload via
+    :func:`_build_usage_payload` and ``POST`` it to
+    ``{LICENSE_SERVER_URL}/api/v1/usage`` with ``Authorization: Bearer
+    {SENTRIKAT_METRICS_KEY}``. Network errors retry with 1/2/4s backoff.
+
+    # TODO: wire into scheduler — planning for the periodic invocation is
+    # owned by another agent; this function is intentionally a standalone
+    # helper that can be called from either a scheduler job or a manual
+    # admin trigger without side effects.
+
+    Returns:
+        A list of per-tenant result dicts::
+
+            [{'tenant_id': 1, 'success': True, 'status_code': 200}, ...]
+    """
+    from app.licensing import LICENSE_SERVER_URL  # lazy import to avoid cycles
+
+    # Prefer the dedicated metrics key; fall back to the provision key with
+    # a deprecation warning (matches /metrics — see app/metrics_api.py).
+    metrics_key = (os.environ.get('SENTRIKAT_METRICS_KEY') or '').strip()
+    if not metrics_key:
+        fallback = (os.environ.get('SENTRIKAT_PROVISION_KEY') or '').strip()
+        if fallback:
+            logger.warning(
+                "DEPRECATION: usage upload using SENTRIKAT_PROVISION_KEY — "
+                "set SENTRIKAT_METRICS_KEY (fallback removed in Sprint 6)"
+            )
+            metrics_key = fallback
+
+    if not metrics_key:
+        logger.error(
+            "send_usage_to_license_server: no SENTRIKAT_METRICS_KEY configured, "
+            "aborting usage upload"
+        )
+        return []
+
+    try:
+        from config import Config
+        proxies = Config.get_proxies()
+        verify_ssl = Config.get_verify_ssl()
+    except Exception:
+        proxies = None
+        verify_ssl = True
+
+    url = f"{LICENSE_SERVER_URL}/api/v1/usage"
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {metrics_key}',
+        'User-Agent': 'SentriKat-Usage/1.0',
+    }
+
+    results = []
+    orgs = Organization.query.filter_by(active=True).all()
+    for org in orgs:
+        try:
+            payload = _build_usage_payload(org.id)
+        except Exception as e:
+            logger.warning(f"Could not build usage payload for org {org.id}: {e}")
+            results.append({'tenant_id': org.id, 'success': False, 'error': str(e)})
+            continue
+
+        resp, exc = _post_with_retry(
+            url, payload, headers, proxies=proxies, verify_ssl=verify_ssl
+        )
+        if resp is None:
+            logger.error(
+                f"Usage upload failed for tenant {org.id} after retries: {exc}"
+            )
+            results.append({
+                'tenant_id': org.id,
+                'success': False,
+                'error': str(exc) if exc else 'unknown',
+            })
+            continue
+
+        if 200 <= resp.status_code < 300:
+            logger.info(
+                f"Usage upload OK for tenant {org.id}: "
+                f"{payload['agents_active']} agents, "
+                f"{payload['products_total']} products"
+            )
+            results.append({
+                'tenant_id': org.id,
+                'success': True,
+                'status_code': resp.status_code,
+            })
+        else:
+            logger.warning(
+                f"Usage upload rejected for tenant {org.id}: "
+                f"status={resp.status_code}"
+            )
+            results.append({
+                'tenant_id': org.id,
+                'success': False,
+                'status_code': resp.status_code,
+            })
+
+    return results
 
 
 def get_all_orgs_usage_summary():

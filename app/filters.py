@@ -1,6 +1,7 @@
 from app import db
 from app.models import Product, Vulnerability, VulnerabilityMatch, VendorFixOverride
 from app.version_utils import _version_sort_key, _version_in_range, detect_version_format
+from datetime import date
 import re
 import json
 
@@ -416,6 +417,82 @@ def has_vendor_fix_override(vulnerability, product):
         return None
 
 
+def _has_active_risk_exception(vulnerability, product):
+    """
+    Check if there's an active RiskException that suppresses this CVE/product match.
+
+    Priority order (most specific wins):
+      1. Asset-specific: exception where product_id == product.id (scoped to any
+         org that owns this product).
+      2. Wildcard: exception where product_id IS NULL, scoped to any org that
+         owns this product (applies org-wide to all products with that CVE).
+
+    An exception is considered active when:
+      - status == 'active'
+      - expires_at is NULL (permanent) OR expires_at >= today
+
+    Note: check_match() is org-agnostic (VulnerabilityMatch rows are shared
+    across all orgs that own a product). We therefore suppress the match if
+    ANY org owning this product has an active exception for the CVE. In
+    practice most deployments are single-tenant-per-product, so this matches
+    the operator's intent. Multi-tenant product sharing is rare.
+    """
+    if not vulnerability.cve_id or not product:
+        return False
+
+    try:
+        from app.models import RiskException, product_organizations
+        from sqlalchemy import select, or_, and_
+
+        # Collect all org ids that own this product (M2M + legacy FK)
+        org_ids = set()
+        m2m_rows = db.session.execute(
+            select(product_organizations.c.organization_id).where(
+                product_organizations.c.product_id == product.id
+            )
+        ).scalars().all()
+        org_ids.update(m2m_rows)
+        if getattr(product, 'organization_id', None):
+            org_ids.add(product.organization_id)
+
+        if not org_ids:
+            return False
+
+        today = date.today()
+        active_filter = and_(
+            RiskException.status == 'active',
+            or_(
+                RiskException.expires_at.is_(None),
+                RiskException.expires_at >= today,
+            ),
+        )
+
+        # 1) Asset-specific (most restrictive) — product_id exactly matches.
+        specific = RiskException.query.filter(
+            RiskException.organization_id.in_(org_ids),
+            RiskException.cve_id == vulnerability.cve_id,
+            RiskException.product_id == product.id,
+            active_filter,
+        ).first()
+        if specific:
+            return True
+
+        # 2) Wildcard — org-wide exception for this CVE (product_id IS NULL).
+        wildcard = RiskException.query.filter(
+            RiskException.organization_id.in_(org_ids),
+            RiskException.cve_id == vulnerability.cve_id,
+            RiskException.product_id.is_(None),
+            active_filter,
+        ).first()
+        return wildcard is not None
+    except Exception:
+        # Fail-open: never crash match evaluation because of an exception
+        # lookup error. Correctness here is best-effort; the worst case is
+        # showing a CVE that should have been suppressed, which is strictly
+        # safer than silently suppressing a real vuln.
+        return False
+
+
 def check_match(vulnerability, product):
     """
     Check if a vulnerability matches a product.
@@ -428,6 +505,13 @@ def check_match(vulnerability, product):
 
     Also checks for vendor fix overrides (Path B: in-place patches).
     If an approved override exists, the match is suppressed.
+
+    Risk Exceptions: if an active, non-expired RiskException exists for this
+    CVE and either (a) the exact product (asset-specific, highest priority) or
+    (b) org-wide (product_id IS NULL, wildcard), the match is suppressed and
+    the function returns ([], None, None). Call sites already treat an empty
+    reasons list as "no match" (see match_vulnerabilities_to_products and
+    cleanup_invalid_matches), so no call-site changes are required.
 
     Returns:
         tuple: (match_reasons: list, match_method: str, match_confidence: str)
@@ -509,6 +593,11 @@ def check_match(vulnerability, product):
     # Check for vendor fix override (Path B: in-place vendor patch)
     # If a match was found but an approved override exists, suppress it
     if result_reasons and has_vendor_fix_override(vulnerability, product):
+        return [], None, None
+
+    # Check for active RiskException — if the org has formally accepted this
+    # risk, suppress the match so it doesn't reappear in counts/reports.
+    if result_reasons and _has_active_risk_exception(vulnerability, product):
         return [], None, None
 
     return result_reasons, result_method, result_confidence

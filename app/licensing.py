@@ -16,6 +16,7 @@ import base64
 import hashlib
 import logging
 import os
+import time
 import uuid
 import socket
 import threading
@@ -25,6 +26,52 @@ from flask import jsonify, has_request_context
 from sqlalchemy import func
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Exceptions
+# ============================================================================
+
+class LicenseRevokedException(Exception):
+    """Raised when a license has been revoked by the upstream license server.
+
+    Callers (middleware, decorators, scheduled jobs) should catch this and
+    deny access or degrade the service accordingly. Revocation is signalled
+    via the ``SystemSettings`` key ``license_revoked`` (set by the license
+    server webhook receiver or the heartbeat response handler).
+    """
+
+
+# ============================================================================
+# Plan Enum (M13)
+# ============================================================================
+
+#: Canonical set of subscription plan names recognised across licensing,
+#: metering and the admin UI. Use :func:`validate_plan_name` to check inputs.
+VALID_PLAN_NAMES = frozenset({'free', 'starter', 'pro', 'business', 'enterprise'})
+
+
+def validate_plan_name(name):
+    """Validate that ``name`` is a known plan identifier.
+
+    Args:
+        name: Plan name to validate (case-insensitive).
+
+    Returns:
+        The normalised lower-case plan name.
+
+    Raises:
+        ValueError: If ``name`` is not in :data:`VALID_PLAN_NAMES`.
+    """
+    if not isinstance(name, str):
+        raise ValueError(f"Plan name must be a string, got {type(name).__name__}")
+    normalized = name.strip().lower()
+    if normalized not in VALID_PLAN_NAMES:
+        raise ValueError(
+            f"Unknown plan name: {name!r}. "
+            f"Valid plans: {sorted(VALID_PLAN_NAMES)}"
+        )
+    return normalized
 
 # App version (read from VERSION file)
 _VERSION_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'VERSION')
@@ -345,7 +392,23 @@ def get_installation_id_display():
 # ============================================================================
 
 class LicenseInfo:
-    """Holds current license information"""
+    """Holds current license information.
+
+    The :attr:`is_valid` property reflects three independent conditions:
+
+    1. The signed payload was successfully verified (``_signature_valid``).
+    2. The license has not expired (``not is_expired``).
+    3. The license has NOT been revoked by the upstream license server
+       (``not revoked``). Revocation state is populated by :func:`get_license`
+       from the ``SystemSettings`` key ``license_revoked`` (written by the
+       license-server webhook receiver in :mod:`app.license_webhook` and
+       the heartbeat response handler in :func:`license_heartbeat`).
+
+    Hardware-lock enforcement is tracked separately via
+    :attr:`is_hardware_match` so that callers can still distinguish between
+    a license that is mathematically valid but simply not issued for this
+    installation and one that has been revoked or expired.
+    """
 
     def __init__(self):
         self.edition = 'community'
@@ -361,12 +424,33 @@ class LicenseInfo:
         self.max_agents = 5  # Demo includes 5 agents (PRO has 10+ with agent packs)
         self.max_agent_api_keys = 0
         self.features = []
-        self.is_valid = False
+        # Underlying signature/parse validity. ``is_valid`` is exposed as a
+        # property that folds in expiry + revocation so every caller gets the
+        # full enforcement story without having to remember each flag.
+        self._signature_valid = False
         self.is_expired = False
         self.days_until_expiry = None
         self.error = None
         self.licensed_installation_id = None  # The installation ID this license is for
         self.is_hardware_match = False  # Does license match this installation?
+        # B2: revocation flag — set by get_license() from SystemSettings.
+        self.revoked = False
+
+    @property
+    def is_valid(self):
+        """Return True iff the license is signature-valid, unexpired and not revoked."""
+        if self.revoked:
+            return False
+        if self.is_expired:
+            return False
+        return self._signature_valid
+
+    @is_valid.setter
+    def is_valid(self, value):
+        # Keep backwards compatibility: existing code writes to ``is_valid``
+        # directly during parsing. We store it in ``_signature_valid`` so the
+        # property can then layer expiry/revocation on top.
+        self._signature_valid = bool(value)
 
     def get_effective_edition(self):
         """Get the effective edition considering expiration and hardware match."""
@@ -498,8 +582,55 @@ _license_lock = threading.Lock()
 LICENSE_CACHE_SECONDS = 60
 
 
+def _apply_revocation_flag(license_info):
+    """B2: Overlay the persisted ``license_revoked`` flag onto a LicenseInfo.
+
+    The flag lives in ``SystemSettings(key='license_revoked', value='true')``
+    and is written either by the webhook receiver (push from license server)
+    or by the heartbeat response handler. We read it here so every consumer
+    of :func:`get_license` automatically honours revocation without needing
+    to make a second query.
+    """
+    try:
+        from app.models import SystemSettings
+        row = SystemSettings.query.filter_by(key='license_revoked').first()
+        if row and (row.value or '').strip().lower() == 'true':
+            license_info.revoked = True
+            if not license_info.error:
+                license_info.error = 'License has been revoked by the license server'
+        else:
+            license_info.revoked = False
+    except Exception as e:
+        # Never let a DB hiccup turn into a hard license failure — log and
+        # treat as not-revoked (fail-open on transient errors).
+        logger.debug(f"Could not read license_revoked flag: {e}")
+        license_info.revoked = False
+    return license_info
+
+
+def check_license_active_or_raise():
+    """Raise :class:`LicenseRevokedException` if the current license is revoked.
+
+    Callers (middleware, feature gates, critical jobs) can use this to abort
+    early on a revoked license. It does **not** raise for merely-expired or
+    hardware-mismatched licenses — use :meth:`LicenseInfo.is_valid` /
+    :meth:`LicenseInfo.is_professional` for those conditions.
+    """
+    license_info = get_license()
+    if license_info.revoked:
+        raise LicenseRevokedException(
+            license_info.error or 'License has been revoked by the license server'
+        )
+    return license_info
+
+
 def get_license():
-    """Get current license info with thread-safe caching (60s TTL)."""
+    """Get current license info with thread-safe caching (60s TTL).
+
+    The returned :class:`LicenseInfo` has the revocation flag from
+    ``SystemSettings['license_revoked']`` already applied, so
+    ``license.is_valid`` honours revocation out of the box.
+    """
     global _current_license, _license_load_time
 
     # Request-level dedup: avoid re-validating within the same HTTP request
@@ -514,6 +645,9 @@ def get_license():
     if (_current_license is not None and
         _license_load_time is not None and
         (now - _license_load_time).total_seconds() <= LICENSE_CACHE_SECONDS):
+        # Always refresh revocation flag even on cache hit — webhook pushes
+        # must take effect within the same request, not after 60s.
+        _apply_revocation_flag(_current_license)
         if has_request_context():
             from flask import g
             g._license_info = _current_license
@@ -531,6 +665,8 @@ def get_license():
             _current_license = load_license()
             _license_load_time = datetime.utcnow()
             result = _current_license
+
+    _apply_revocation_flag(result)
 
     if has_request_context():
         from flask import g
@@ -1131,6 +1267,184 @@ def get_agent_usage():
 
 LICENSE_SERVER_URL = os.environ.get('SENTRIKAT_LICENSE_SERVER', '') or 'https://license.sentrikat.com/api'
 
+#: Backoff delays (in seconds) between heartbeat retries — exponential:
+#: 1, 2, 4, 8. Four attempts total before declaring failure.
+HEARTBEAT_RETRY_DELAYS = (1, 2, 4, 8)
+
+#: Consecutive heartbeat failures allowed before the operator alert is raised.
+HEARTBEAT_FAILURE_ALERT_THRESHOLD = 3
+
+
+def _persist_heartbeat_failure():
+    """Bump ``license_heartbeat_failures`` and set alert if threshold reached.
+
+    H5: previously heartbeat failures were silently swallowed. We now record
+    every terminal failure and raise a ``license_heartbeat_alert`` flag after
+    three consecutive failures so the admin UI / alerting cron can surface it.
+    """
+    try:
+        from app.models import SystemSettings
+        from app import db as app_db
+        row = SystemSettings.query.filter_by(key='license_heartbeat_failures').first()
+        try:
+            current = int((row.value or '0')) if row else 0
+        except (TypeError, ValueError):
+            current = 0
+        new_val = current + 1
+        if row:
+            row.value = str(new_val)
+        else:
+            row = SystemSettings(
+                key='license_heartbeat_failures',
+                value=str(new_val),
+                category='licensing',
+                description='Consecutive license-server heartbeat failures',
+            )
+            app_db.session.add(row)
+
+        if new_val >= HEARTBEAT_FAILURE_ALERT_THRESHOLD:
+            logger.error(
+                f"License heartbeat has failed {new_val} times consecutively — "
+                "raising license_heartbeat_alert"
+            )
+            alert = SystemSettings.query.filter_by(key='license_heartbeat_alert').first()
+            if alert:
+                alert.value = 'true'
+            else:
+                alert = SystemSettings(
+                    key='license_heartbeat_alert',
+                    value='true',
+                    category='licensing',
+                    description='True when license heartbeat has failed repeatedly',
+                )
+                app_db.session.add(alert)
+
+        app_db.session.commit()
+        return new_val
+    except Exception as e:
+        logger.warning(f"Could not persist heartbeat failure counter: {e}")
+        try:
+            from app import db as app_db
+            app_db.session.rollback()
+        except Exception:
+            pass
+        return None
+
+
+def _reset_heartbeat_failure_counter():
+    """Clear the heartbeat failure counter and alert flag on success (H5)."""
+    try:
+        from app.models import SystemSettings
+        from app import db as app_db
+        changed = False
+        row = SystemSettings.query.filter_by(key='license_heartbeat_failures').first()
+        if row and row.value != '0':
+            row.value = '0'
+            changed = True
+        alert = SystemSettings.query.filter_by(key='license_heartbeat_alert').first()
+        if alert and (alert.value or '').lower() == 'true':
+            alert.value = 'false'
+            changed = True
+        if changed:
+            app_db.session.commit()
+    except Exception as e:
+        logger.debug(f"Could not reset heartbeat counter: {e}")
+        try:
+            from app import db as app_db
+            app_db.session.rollback()
+        except Exception:
+            pass
+
+
+def _apply_updated_limits_from_heartbeat(updated_limits):
+    """H9: Persist plan limits returned by the license server.
+
+    The heartbeat response may include ``updated_limits`` with new per-plan
+    caps (e.g., after a plan change or agent-pack purchase). We look up the
+    Subscription for the relevant organization and mirror the values onto
+    the associated SubscriptionPlan record. ``models.py`` is NOT modified —
+    we only issue query/setattr/commit against the existing schema.
+    """
+    if not isinstance(updated_limits, dict):
+        return
+    try:
+        from app.models import Subscription
+        from app import db as app_db
+    except Exception as e:
+        logger.debug(f"updated_limits: models unavailable: {e}")
+        return
+
+    # Determine which subscription to update. In on-premise mode there is
+    # usually one org so we update the first active subscription we find.
+    sub = Subscription.query.filter(
+        Subscription.status.in_(('active', 'trialing'))
+    ).first()
+    if not sub or not sub.plan:
+        logger.info("updated_limits received but no active subscription/plan to update")
+        return
+
+    plan = sub.plan
+    mapping = {
+        'max_agents': 'max_agents',
+        'max_users': 'max_users',
+        'max_products': 'max_products',
+        'max_organizations': 'max_organizations',
+        'max_api_keys': 'max_api_keys',
+    }
+    # Storage: license server uses GB, SubscriptionPlan stores MB.
+    changed = {}
+    try:
+        for src_key, attr in mapping.items():
+            if src_key in updated_limits and hasattr(plan, attr):
+                new_val = updated_limits[src_key]
+                if new_val is None:
+                    new_val = -1
+                old_val = getattr(plan, attr)
+                if old_val != new_val:
+                    setattr(plan, attr, new_val)
+                    changed[attr] = new_val
+
+        if 'max_storage_gb' in updated_limits and hasattr(plan, 'max_storage_mb'):
+            gb = updated_limits['max_storage_gb']
+            if gb is not None:
+                new_mb = int(gb) * 1024
+                if plan.max_storage_mb != new_mb:
+                    plan.max_storage_mb = new_mb
+                    changed['max_storage_mb'] = new_mb
+
+        # Optional plan rename (server authoritative name) — validate against enum.
+        if 'plan_name' in updated_limits and hasattr(plan, 'name'):
+            try:
+                new_name = validate_plan_name(updated_limits['plan_name'])
+                if plan.name != new_name:
+                    plan.name = new_name
+                    changed['name'] = new_name
+            except ValueError as ve:
+                logger.warning(f"updated_limits: ignoring invalid plan_name: {ve}")
+
+        # Features may be a list or JSON string.
+        if 'features' in updated_limits and hasattr(plan, 'features'):
+            feats = updated_limits['features']
+            try:
+                plan.features = json.dumps(feats) if not isinstance(feats, str) else feats
+                changed['features'] = True
+            except Exception:
+                pass
+
+        if changed:
+            app_db.session.commit()
+            logger.info(
+                f"Updated subscription plan from heartbeat "
+                f"(sub={sub.id}, plan={plan.name}): {changed}"
+            )
+    except Exception as e:
+        logger.warning(f"Failed to apply updated_limits from heartbeat: {e}")
+        try:
+            app_db.session.rollback()
+        except Exception:
+            pass
+
+
 def license_heartbeat():
     """
     Send a heartbeat to the SentriKat license server.
@@ -1141,9 +1455,15 @@ def license_heartbeat():
     - Checks if the license has been revoked or suspended
     - Retrieves any updated license terms (e.g., expanded agent packs)
 
-    This runs every 12 hours via the scheduler. If the server is unreachable,
-    the local license continues to work (graceful degradation). The license
-    is ONLY invalidated if the server explicitly returns a revocation response.
+    Runs every 12 hours via the scheduler. On network/transport errors we now
+    (H5) retry with exponential backoff (1, 2, 4, 8 seconds — four total
+    attempts) and, on complete failure, persist a ``license_heartbeat_failures``
+    counter. After :data:`HEARTBEAT_FAILURE_ALERT_THRESHOLD` consecutive
+    failures we also set ``license_heartbeat_alert='true'`` so the admin
+    dashboard can surface the problem. On success we reset the counter.
+
+    Any ``updated_limits`` returned in the response are persisted to the
+    matching :class:`Subscription`/:class:`SubscriptionPlan` record (H9).
 
     Returns dict with 'success' bool and 'message' or 'error'.
     """
@@ -1175,18 +1495,60 @@ def license_heartbeat():
                 'api_keys': AgentApiKey.query.filter(AgentApiKey.active == True).count() or 0,
             },
         }
+    except Exception as e:
+        logger.error(f"License heartbeat: failed to build payload: {e}")
+        return {'success': False, 'error': f'Could not build heartbeat payload: {e}'}
 
-        response = _requests.post(
-            f'{LICENSE_SERVER_URL}/v1/heartbeat',
-            json=payload,
-            timeout=15,
-            proxies=proxies,
-            verify=verify_ssl,
-            headers={'Content-Type': 'application/json'}
+    # H5: exponential backoff retry loop.
+    last_exc = None
+    response = None
+    for attempt, delay in enumerate([0] + list(HEARTBEAT_RETRY_DELAYS[:-1]), start=1):
+        if delay:
+            time.sleep(delay)
+        try:
+            response = _requests.post(
+                f'{LICENSE_SERVER_URL}/v1/heartbeat',
+                json=payload,
+                timeout=15,
+                proxies=proxies,
+                verify=verify_ssl,
+                headers={'Content-Type': 'application/json'}
+            )
+            break  # got an HTTP response, stop retrying (even for 5xx)
+        except (_requests.ConnectionError, _requests.Timeout) as e:
+            last_exc = e
+            logger.info(
+                f"License heartbeat attempt {attempt}/{len(HEARTBEAT_RETRY_DELAYS)} "
+                f"failed: {type(e).__name__}: {e}"
+            )
+            continue
+        except Exception as e:
+            last_exc = e
+            logger.warning(
+                f"License heartbeat attempt {attempt}: unexpected error: {e}"
+            )
+            continue
+
+    if response is None:
+        # All retries exhausted — record failure + maybe raise alert.
+        count = _persist_heartbeat_failure()
+        logger.error(
+            f"License heartbeat failed after {len(HEARTBEAT_RETRY_DELAYS)} retries "
+            f"(consecutive failures: {count}): {last_exc}"
         )
+        return {
+            'success': False,
+            'error': str(last_exc) if last_exc else 'unknown',
+            'message': 'Heartbeat failed after retries',
+            'consecutive_failures': count,
+        }
 
+    try:
         if response.status_code == 200:
-            data = response.json()
+            try:
+                data = response.json()
+            except Exception:
+                data = {}
 
             # Check for license revocation
             if data.get('status') == 'revoked':
@@ -1196,17 +1558,21 @@ def license_heartbeat():
                 from app import db
                 revoked = SystemSettings.query.filter_by(key='license_revoked').first()
                 if not revoked:
-                    revoked = SystemSettings(key='license_revoked', value='true', category='license')
+                    revoked = SystemSettings(key='license_revoked', value='true', category='licensing')
                     db.session.add(revoked)
                 else:
                     revoked.value = 'true'
                 db.session.commit()
+                # Successful comms → reset failure counter.
+                _reset_heartbeat_failure_counter()
                 return {'success': False, 'error': 'License has been revoked'}
 
-            # Check for updated limits (e.g., agent pack purchased)
+            # H9: persist any updated limits from the server.
             if data.get('updated_limits'):
                 logger.info(f"License server provided updated limits: {data['updated_limits']}")
+                _apply_updated_limits_from_heartbeat(data['updated_limits'])
 
+            _reset_heartbeat_failure_counter()
             return {
                 'success': True,
                 'message': data.get('message', 'Heartbeat acknowledged'),
@@ -1216,24 +1582,27 @@ def license_heartbeat():
         elif response.status_code == 404:
             # License not found on server - could be first-time or server migration
             logger.info("License heartbeat: license not found on server (may be offline-only)")
+            _reset_heartbeat_failure_counter()
             return {'success': True, 'message': 'License not registered on server'}
 
         else:
             logger.warning(f"License heartbeat returned {response.status_code}")
-            return {'success': False, 'error': f'Server returned {response.status_code}'}
-
-    except _requests.ConnectionError:
-        # Server unreachable - graceful degradation, don't invalidate license
-        logger.info("License heartbeat: server unreachable (offline mode)")
-        return {'success': True, 'message': 'Server unreachable, continuing offline'}
-
-    except _requests.Timeout:
-        logger.info("License heartbeat: server timeout")
-        return {'success': True, 'message': 'Server timeout, continuing offline'}
-
+            count = _persist_heartbeat_failure()
+            return {
+                'success': False,
+                'error': f'Server returned {response.status_code}',
+                'message': 'Heartbeat failed after retries',
+                'consecutive_failures': count,
+            }
     except Exception as e:
-        logger.error(f"License heartbeat failed: {e}")
-        return {'success': False, 'error': str(e)}
+        logger.error(f"License heartbeat: error processing response: {e}")
+        count = _persist_heartbeat_failure()
+        return {
+            'success': False,
+            'error': str(e),
+            'message': 'Heartbeat failed after retries',
+            'consecutive_failures': count,
+        }
 
 
 # ============================================================================

@@ -22,11 +22,26 @@ VERSION_PATTERN = re.compile(
     re.IGNORECASE
 )
 
+# Non-greedy product name: up to 40 chars, but stops as soon as we see a
+# clause-ending word (allowing, enables, allows, when, with, that, which,
+# could, permits, lets, leads, causes, may) or punctuation. Then we
+# require an explicit version token to anchor the end of the product name
+# so stretches like "Windows Server 2019 that allows a remote attacker to
+# run code via 3.5.0" don't get glued together.
+_CLAUSE_VERBS = (
+    r'allowing|enables|allows|enabling|when|with|that|which|could|'
+    r'permits|permit|lets|leads|causes|may|might|resulting|before|'
+    r'prior|through|up\s+to|in\s+the|via'
+)
 PRODUCT_VERSION_PATTERN = re.compile(
-    r'(?:in|affecting|vulnerability in|flaw in|issue in)\s+'
-    r'([A-Z][\w\s-]{2,30}?)\s+'
-    r'(?:version\s+)?'
-    r'(\d+(?:\.\d+){1,4}(?:[-.]?\w+)?)',
+    r'(?:\bin|affecting|vulnerability\s+in|flaw\s+in|issue\s+in)\s+'
+    # Product name: starts with capital, non-greedy, length 2-40, no
+    # internal clause verbs, no sentence-ending punctuation.
+    r'(?P<product>[A-Z](?:(?!\b(?:' + _CLAUSE_VERBS + r')\b)[\w.-][\w\s.-]{1,38}?))'
+    r'\s+(?:version\s+|v)?'
+    # Anchor on an explicit dotted or semver-ish version number.
+    r'(?P<version>\d+(?:\.\d+){1,4}(?:[-.]?[A-Za-z0-9]+)?)'
+    r'(?=\b)',
     re.IGNORECASE
 )
 
@@ -71,8 +86,8 @@ def parse_cve_description(description):
     # Try to extract product + version pattern
     match = PRODUCT_VERSION_PATTERN.search(description)
     if match:
-        product_text = match.group(1).strip()
-        version = match.group(2).strip()
+        product_text = match.group('product').strip()
+        version = match.group('version').strip()
 
         # Clean up product name
         product_text = re.sub(r'\s+', ' ', product_text).strip()

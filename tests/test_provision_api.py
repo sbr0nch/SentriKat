@@ -240,3 +240,74 @@ class TestProvisionStatus:
                 )
                 assert resp.status_code == 404
                 assert resp.get_json()['exists'] is False
+
+
+class TestProvisionB8Regressions:
+    """Regression tests for finding B8: idempotency, atomic savepoint,
+    and the org_id information leak on duplicate email (H4)."""
+
+    def test_duplicate_email_does_not_leak_existing_org_id(self, client, app):
+        """409 must not echo the existing organization id (H4)."""
+        with patch('app.provision_api._PROVISION_KEY', 'test-key'):
+            with patch('app.provision_api.is_saas_mode', return_value=True):
+                with app.app_context():
+                    from app.models import SubscriptionPlan
+                    if SubscriptionPlan.query.count() == 0:
+                        SubscriptionPlan.seed_default_plans()
+
+                client.post('/api/provision', json={
+                    'email': 'leak@test.com',
+                    'full_name': 'Leak User',
+                    'company_name': 'Leak Corp'
+                }, headers={'X-Provision-Key': 'test-key'})
+
+                resp = client.post('/api/provision', json={
+                    'email': 'leak@test.com',
+                    'full_name': 'Leak Second',
+                    'company_name': 'Leak Second Corp'
+                }, headers={'X-Provision-Key': 'test-key'})
+                assert resp.status_code == 409
+                body = resp.get_json()
+                assert 'existing_org_id' not in body
+                assert 'organization_id' not in body
+
+    def test_idempotency_key_returns_cached_result(self, client, app):
+        """A retry with the same idempotency_key must NOT create a new org
+        and must return the same payload."""
+        with patch('app.provision_api._PROVISION_KEY', 'test-key'):
+            with patch('app.provision_api.is_saas_mode', return_value=True):
+                with app.app_context():
+                    from app.models import SubscriptionPlan
+                    if SubscriptionPlan.query.count() == 0:
+                        SubscriptionPlan.seed_default_plans()
+
+                payload = {
+                    'email': 'idem@test.com',
+                    'full_name': 'Idem User',
+                    'company_name': 'Idem Corp',
+                    'idempotency_key': 'stripe-session-abc123',
+                }
+                r1 = client.post('/api/provision', json=payload,
+                                 headers={'X-Provision-Key': 'test-key'})
+                assert r1.status_code == 201
+                org_id_1 = r1.get_json()['tenant']['organization_id']
+                temp_pw_1 = r1.get_json()['tenant']['temporary_password']
+
+                # Replay
+                r2 = client.post('/api/provision', json=payload,
+                                 headers={'X-Provision-Key': 'test-key'})
+                assert r2.status_code == 201
+                org_id_2 = r2.get_json()['tenant']['organization_id']
+                temp_pw_2 = r2.get_json()['tenant']['temporary_password']
+
+                # Same org and same cached payload
+                assert org_id_1 == org_id_2
+                assert temp_pw_1 == temp_pw_2
+
+                # Verify only one org was created
+                with app.app_context():
+                    from app.models import Organization
+                    orgs = Organization.query.filter(
+                        Organization.display_name == 'Idem Corp'
+                    ).all()
+                    assert len(orgs) == 1

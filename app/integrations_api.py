@@ -37,7 +37,18 @@ csrf.exempt(bp)  # API endpoints use session auth, not CSRF tokens
 # ============================================================================
 
 def get_integration_by_api_key(api_key):
-    """Look up integration by API key."""
+    """Look up integration by API key (GLOBAL lookup).
+
+    WARNING: This function intentionally performs a global lookup because it
+    is the only way to find an integration starting from an incoming bearer
+    token. Every caller MUST enforce tenant scoping afterwards by checking
+    ``integration.organization_id`` against the authentication context (either
+    the integration's own org when the key alone authenticates the request,
+    or the session user's scoped org when a session cookie is also present).
+
+    The :func:`api_key_or_login_required` decorator centralises that check
+    for every integration endpoint in this module.
+    """
     if not api_key:
         return None
     return Integration.query.filter_by(api_key=api_key, is_active=True).first()
@@ -55,7 +66,19 @@ def validate_org_access(user, org_id):
 
 
 def api_key_or_login_required(f):
-    """Allow authentication via API key OR session login."""
+    """Allow authentication via API key OR session login.
+
+    Security properties enforced here (see finding B4):
+
+    * API-key-only request: ``request.integration`` is set to the matched
+      integration. The integration's ``organization_id`` is the authoritative
+      tenant for the request.
+    * API key + session cookie: if the session user does NOT belong to the
+      integration's organization we return **404** (not 403) so we do not
+      leak whether an API key is valid for a different tenant.
+    * Session-only request: ``request.integration`` is None and the endpoint
+      is responsible for using ``get_scoped_org_id`` (already imported).
+    """
     @wraps(f)
     def decorated(*args, **kwargs):
         # Check for API key in header
@@ -63,10 +86,39 @@ def api_key_or_login_required(f):
 
         if api_key:
             integration = get_integration_by_api_key(api_key)
-            if integration:
-                request.integration = integration
-                return f(*args, **kwargs)
-            return jsonify({'error': 'Invalid API key'}), 401
+            if not integration:
+                return jsonify({'error': 'Invalid API key'}), 401
+
+            # If a session cookie is also present, ensure the session user
+            # is actually in the integration's tenant. Otherwise a user in
+            # org A could hand-craft a request with an API key belonging to
+            # org B and act cross-tenant via their browser session.
+            if 'user_id' in session:
+                from app.auth import _safe_get_user
+                session_user = _safe_get_user(session.get('user_id'))
+                if session_user is not None:
+                    session_org_id = get_scoped_org_id(session_user)
+                    is_super = (
+                        session_user.role == 'super_admin'
+                        or getattr(session_user, 'is_admin', False) is True
+                    )
+                    # super_admin in on-premise mode can cross orgs; in SaaS
+                    # mode get_scoped_org_id forces a concrete org_id so the
+                    # equality check still applies.
+                    if (
+                        not is_super or is_saas_mode()
+                    ) and session_org_id is not None and integration.organization_id != session_org_id:
+                        logger.warning(
+                            "API key for integration %s (org %s) used with session "
+                            "user %s scoped to org %s - returning 404 to avoid leak",
+                            integration.id, integration.organization_id,
+                            session_user.id, session_org_id,
+                        )
+                        # 404 not 403: we must not leak that the key exists.
+                        return jsonify({'error': 'Not found'}), 404
+
+            request.integration = integration
+            return f(*args, **kwargs)
 
         # Fall back to session authentication
         if 'user_id' not in session:
@@ -131,8 +183,33 @@ def import_software():
             )
             return jsonify({'error': 'Cannot import data into a different organization'}), 403
     else:
-        # Session auth (manual import): use request data
-        org_id = data.get('organization_id')
+        # Session auth (manual import): use scoped org_id rather than trusting
+        # the request body. A non-super-admin user cannot import software into
+        # an organization they do not belong to (B4).
+        from app.auth import _safe_get_user
+        session_user = _safe_get_user(session.get('user_id'))
+        if not session_user:
+            return jsonify({'error': 'Authentication required'}), 401
+        requested_org_id = data.get('organization_id')
+        scoped_org_id = get_scoped_org_id(session_user)
+        is_super = (
+            session_user.role == 'super_admin'
+            or getattr(session_user, 'is_admin', False) is True
+        )
+        if requested_org_id is not None:
+            try:
+                requested_org_id = int(requested_org_id)
+            except (TypeError, ValueError):
+                return jsonify({'error': 'Invalid organization_id'}), 400
+            if not is_super and requested_org_id != scoped_org_id:
+                logger.warning(
+                    "User %s (org %s) attempted to import into org %s",
+                    session_user.id, scoped_org_id, requested_org_id,
+                )
+                return jsonify({'error': 'Not found'}), 404
+            org_id = requested_org_id
+        else:
+            org_id = scoped_org_id
 
     # Validate organization if specified
     if org_id:
@@ -313,8 +390,24 @@ def import_sbom():
             )
             return jsonify({'error': 'Cannot import SBOM into a different organization'}), 403
     else:
-        # Session auth: use request params
-        org_id = request.args.get('organization_id', type=int)
+        # Session auth: use scoped org_id, reject cross-tenant overrides (B4).
+        from app.auth import _safe_get_user
+        session_user = _safe_get_user(session.get('user_id'))
+        if not session_user:
+            return jsonify({'error': 'Authentication required'}), 401
+        requested_org_id = request.args.get('organization_id', type=int)
+        scoped_org_id = get_scoped_org_id(session_user)
+        is_super = (
+            session_user.role == 'super_admin'
+            or getattr(session_user, 'is_admin', False) is True
+        )
+        if requested_org_id is not None and not is_super and requested_org_id != scoped_org_id:
+            logger.warning(
+                "User %s (org %s) attempted SBOM import into org %s",
+                session_user.id, scoped_org_id, requested_org_id,
+            )
+            return jsonify({'error': 'Not found'}), 404
+        org_id = requested_org_id if requested_org_id is not None else scoped_org_id
 
     auto_approve = request.args.get('auto_approve', 'false').lower() == 'true'
     if integration and integration.auto_approve:

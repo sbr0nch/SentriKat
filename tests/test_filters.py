@@ -497,6 +497,115 @@ class TestVendorFixOverride:
         assert result is not None, "Override with CPE names should be found"
 
 
+class TestRiskExceptionSuppression:
+    """B5: check_match must suppress matches when an active RiskException exists."""
+
+    def test_no_exception_returns_match(self, app, db_session, test_org,
+                                        sample_product, sample_vulnerability):
+        from app.filters import check_match
+        reasons, _, _ = check_match(sample_vulnerability, sample_product)
+        assert len(reasons) > 0
+
+    def test_active_asset_specific_exception_suppresses(self, app, db_session, test_org,
+                                                        sample_product, sample_vulnerability):
+        from app.models import RiskException
+        from app.filters import check_match
+
+        exc = RiskException(
+            organization_id=test_org.id,
+            cve_id='CVE-2024-1234',
+            product_id=sample_product.id,
+            justification='accepted for testing',
+            approved_by='tester',
+            status='active',
+        )
+        db_session.add(exc)
+        db_session.commit()
+
+        reasons, method, confidence = check_match(sample_vulnerability, sample_product)
+        assert len(reasons) == 0
+        assert method is None
+        assert confidence is None
+
+    def test_active_wildcard_exception_suppresses(self, app, db_session, test_org,
+                                                  sample_product, sample_vulnerability):
+        from app.models import RiskException
+        from app.filters import check_match
+
+        exc = RiskException(
+            organization_id=test_org.id,
+            cve_id='CVE-2024-1234',
+            product_id=None,  # wildcard — applies to any product in the org
+            justification='org-wide acceptance',
+            approved_by='tester',
+            status='active',
+        )
+        db_session.add(exc)
+        db_session.commit()
+
+        reasons, _, _ = check_match(sample_vulnerability, sample_product)
+        assert len(reasons) == 0
+
+    def test_expired_exception_does_not_suppress(self, app, db_session, test_org,
+                                                 sample_product, sample_vulnerability):
+        from datetime import date, timedelta
+        from app.models import RiskException
+        from app.filters import check_match
+
+        exc = RiskException(
+            organization_id=test_org.id,
+            cve_id='CVE-2024-1234',
+            product_id=sample_product.id,
+            justification='expired exception',
+            approved_by='tester',
+            status='active',
+            expires_at=date.today() - timedelta(days=1),
+        )
+        db_session.add(exc)
+        db_session.commit()
+
+        reasons, _, _ = check_match(sample_vulnerability, sample_product)
+        assert len(reasons) > 0, "Expired exception must not suppress matches"
+
+    def test_revoked_exception_does_not_suppress(self, app, db_session, test_org,
+                                                 sample_product, sample_vulnerability):
+        from app.models import RiskException
+        from app.filters import check_match
+
+        exc = RiskException(
+            organization_id=test_org.id,
+            cve_id='CVE-2024-1234',
+            product_id=sample_product.id,
+            justification='rev',
+            approved_by='tester',
+            status='revoked',
+        )
+        db_session.add(exc)
+        db_session.commit()
+
+        reasons, _, _ = check_match(sample_vulnerability, sample_product)
+        assert len(reasons) > 0
+
+    def test_other_cve_exception_does_not_suppress(self, app, db_session, test_org,
+                                                   sample_product, sample_vulnerability):
+        from app.models import RiskException
+        from app.filters import check_match
+
+        exc = RiskException(
+            organization_id=test_org.id,
+            cve_id='CVE-2099-9999',  # different CVE
+            product_id=sample_product.id,
+            justification='x',
+            approved_by='tester',
+            status='active',
+        )
+        db_session.add(exc)
+        db_session.commit()
+
+        reasons, _, _ = check_match(sample_vulnerability, sample_product)
+        assert len(reasons) > 0
+
+
 class TestExtractCoreProductName:
     """Tests for the extract_core_product_name function."""
 

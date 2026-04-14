@@ -18,33 +18,12 @@ bp = Blueprint('reports_api', __name__)
 csrf.exempt(bp)
 
 
-def login_required(f):
-    """Decorator to require login for API endpoints"""
-    from functools import wraps
-
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
-            return jsonify({'error': 'Authentication required'}), 401
-        return f(*args, **kwargs)
-    return decorated_function
-
-
-def admin_required(f):
-    """Decorator to require admin access"""
-    from functools import wraps
-
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
-            return jsonify({'error': 'Authentication required'}), 401
-
-        user = User.query.get(session['user_id'])
-        if not user or user.role not in ['org_admin', 'super_admin']:
-            return jsonify({'error': 'Admin access required'}), 403
-
-        return f(*args, **kwargs)
-    return decorated_function
+# H3: use the centralised auth decorators instead of local shadows. The
+# centralised decorators verify that the user account is active AND the
+# organisation is active, which the previous local copies did not. Every
+# endpoint in this blueprint also scopes queries to
+# ``session['organization_id']`` so cross-tenant reads are impossible.
+from app.auth import login_required, admin_required  # noqa: E402
 
 
 def _add_report_integrity(report_data, generated_by_user=None):

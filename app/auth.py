@@ -7,7 +7,7 @@ from functools import wraps
 from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session, flash
 from app import db, csrf, limiter
 from app.models import User, Organization
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime
 import os
@@ -249,6 +249,74 @@ def org_admin_required(f):
 
         return f(*args, **kwargs)
     return decorated_function
+
+def csrf_protect_session(f):
+    """Manual CSRF check for session-authenticated state-changing endpoints.
+
+    Finding B9: blueprints that call ``csrf.exempt(bp)`` still contain
+    session-only state-changing endpoints. Because ``SESSION_COOKIE_SAMESITE``
+    is intentionally left at ``'Lax'`` (Strict breaks password-reset links
+    that arrive as GET navigations from external email clients), a malicious
+    cross-origin POST sent from an attacker site can still carry the session
+    cookie for top-level navigations. This decorator therefore requires the
+    caller to submit a valid Flask-WTF CSRF token in the ``X-CSRFToken``
+    header (matching the existing template convention).
+
+    The decorator is a no-op when:
+        * authentication is disabled (local dev / tests)
+        * the request carries a valid integration API key or bearer token,
+          because in that case the attack surface is authenticated by a
+          credential the browser never sends automatically.
+
+    It must be placed AFTER ``@login_required`` (or equivalent) so that the
+    session is guaranteed to exist by the time we check.
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        from flask import current_app
+        if not AUTH_ENABLED:
+            return f(*args, **kwargs)
+
+        # Skip in environments where global CSRF is explicitly disabled
+        # (tests). Production always has CSRF enabled globally; this
+        # decorator is specifically for blueprints that opt out per-bp via
+        # csrf.exempt(). Respecting the global flag keeps the test suite
+        # stable without weakening real deployments.
+        if not current_app.config.get('WTF_CSRF_ENABLED', True):
+            return f(*args, **kwargs)
+
+        # Skip CSRF check for API-key/bearer authenticated requests.
+        if request.headers.get('X-API-Key') or request.headers.get('Authorization'):
+            return f(*args, **kwargs)
+
+        # Only enforce on state-changing methods.
+        if request.method not in ('POST', 'PUT', 'PATCH', 'DELETE'):
+            return f(*args, **kwargs)
+
+        token = (
+            request.headers.get('X-CSRFToken')
+            or request.headers.get('X-CSRF-Token')
+            or (request.form.get('csrf_token') if request.form else None)
+        )
+        if not token:
+            logger.warning(
+                "CSRF token missing on %s from %s", request.path, request.remote_addr
+            )
+            return jsonify({'error': 'CSRF token missing'}), 400
+
+        try:
+            from flask_wtf.csrf import validate_csrf
+            validate_csrf(token)
+        except Exception as exc:
+            logger.warning(
+                "CSRF validation failed on %s from %s: %s",
+                request.path, request.remote_addr, exc,
+            )
+            return jsonify({'error': 'Invalid CSRF token'}), 400
+
+        return f(*args, **kwargs)
+    return decorated
+
 
 def get_current_user():
     """Get current logged-in user"""
@@ -627,6 +695,7 @@ def auth_status():
 
 @auth_bp.route('/api/auth/change-password', methods=['POST'])
 @login_required
+@csrf_protect_session
 def change_password():
     """Change user password (for expired passwords or voluntary change)"""
     import logging
@@ -715,30 +784,34 @@ def request_password_reset():
         token = user.generate_password_reset_token()
         logger.info(f"Password reset token generated for user: {user.username} from {request.remote_addr}")
 
-        # Attempt to send email
-        email_sent = False
-        fallback_token = None
+        # Attempt to send email. NEVER leak the plaintext token in the HTTP
+        # response (finding B1): proxies, WAFs, and browser history all
+        # capture response bodies, and the token is single-use credential
+        # material. If email delivery fails we log a server-side error and
+        # return the same generic success message so callers cannot use the
+        # endpoint as an oracle for "is email configured?".
         try:
             from app.email_alerts import send_password_reset_email
             base_url = request.host_url.rstrip('/')
             success, details = send_password_reset_email(user, token, base_url)
             if success:
-                email_sent = True
                 logger.info(f"Password reset email sent to {user.email}")
             else:
-                logger.warning(f"Failed to send password reset email to {user.email}: {details}")
-                fallback_token = token
+                logger.error(
+                    f"Failed to send password reset email to {user.email}: {details}. "
+                    f"Token was generated but not delivered; user must request a new one "
+                    f"or contact an administrator."
+                )
         except Exception as e:
-            logger.warning(f"Failed to send password reset email to {user.email}: {e}")
-            # If email sending fails, return token as fallback for self-hosted setups
-            fallback_token = token
+            logger.error(
+                f"Failed to send password reset email to {user.email}: {e}. "
+                f"Token was generated but not delivered."
+            )
 
-        response_data = {'message': success_message}
-        if fallback_token:
-            response_data['token'] = fallback_token
-            response_data['note'] = 'Email sending is not configured or failed. Use this token directly to reset your password.'
-
-        return jsonify(response_data)
+        # Always return a generic message regardless of email delivery
+        # status, to avoid leaking whether the account exists or whether
+        # email delivery is configured.
+        return jsonify({'message': success_message})
 
     except Exception as e:
         logger.error(f"Password reset request error: {e}")
@@ -767,7 +840,7 @@ def reset_password():
         return jsonify({'error': 'New password is required'}), 400
 
     try:
-        # Verify token
+        # Verify token (read-only lookup for user identity + policy checks).
         user = User.verify_password_reset_token(token)
         if not user:
             logger.warning(f"Invalid/expired password reset token used from {request.remote_addr}")
@@ -778,18 +851,64 @@ def reset_password():
         if not is_valid:
             return jsonify({'error': error_msg}), 400
 
-        # Set new password (may raise ValueError for password history violation)
-        try:
-            user.update_password(new_password)
-        except ValueError as e:
-            return jsonify({'error': str(e)}), 400
+        # Password history check (we re-implement it here rather than calling
+        # update_password() because we need to defer the password swap to a
+        # single atomic UPDATE that also consumes the reset token, so two
+        # concurrent POSTs with the same token cannot both win.)
+        import hashlib
+        from werkzeug.security import generate_password_hash, check_password_hash
+        from app.settings_api import get_setting
+        from app.models import PasswordHistory
 
-        # Clear the reset token (single-use)
-        user.clear_password_reset_token()
+        history_count = int(get_setting('password_history_count', '0') or '0')
+        if history_count > 0 and user.password_hash:
+            recent = PasswordHistory.query.filter_by(user_id=user.id).order_by(
+                PasswordHistory.created_at.desc()
+            ).limit(history_count).all()
+            for entry in recent:
+                if check_password_hash(entry.password_hash, new_password):
+                    return jsonify({'error': f'Cannot reuse any of your last {history_count} passwords'}), 400
+            if check_password_hash(user.password_hash, new_password):
+                return jsonify({'error': f'Cannot reuse any of your last {history_count} passwords'}), 400
 
-        # Reset failed login attempts
-        user.failed_login_attempts = 0
-        user.locked_until = None
+        new_hash = generate_password_hash(new_password)
+        old_hash = user.password_hash
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        now = datetime.utcnow()
+
+        # Atomic single-use token consumption + password swap. The WHERE
+        # clause guarantees that only one concurrent POST with the same token
+        # wins: the row-level UPDATE is serialized by the DB, so a lost race
+        # finds password_reset_token = NULL and rowcount == 0. We deliberately
+        # do NOT use RETURNING to stay portable across SQLite (tests) and
+        # PostgreSQL (prod); rowcount is sufficient to detect the winner.
+        result = db.session.execute(
+            text(
+                "UPDATE users "
+                "SET password_hash = :ph, "
+                "    password_reset_token = NULL, "
+                "    password_reset_expires = NULL, "
+                "    password_changed_at = :now, "
+                "    must_change_password = 0, "
+                "    failed_login_attempts = 0, "
+                "    locked_until = NULL "
+                "WHERE password_reset_token = :token_hash "
+                "  AND password_reset_expires > :now"
+            ),
+            {"ph": new_hash, "now": now, "token_hash": token_hash},
+        )
+
+        if result.rowcount == 0:
+            db.session.rollback()
+            logger.warning(
+                f"Password reset token race lost or already consumed from {request.remote_addr}"
+            )
+            return jsonify({'error': 'Invalid or expired reset token. Please request a new password reset.'}), 400
+
+        # Record the old hash in history only after the atomic swap wins,
+        # so lost races do not pollute history.
+        if history_count > 0 and old_hash:
+            db.session.add(PasswordHistory(user_id=user.id, password_hash=old_hash))
 
         db.session.commit()
 
@@ -816,6 +935,7 @@ def reset_password():
 
 @auth_bp.route('/api/auth/2fa/setup', methods=['POST'])
 @login_required
+@csrf_protect_session
 def setup_2fa():
     """Generate 2FA secret and return QR code data"""
     current_user = get_current_user()
@@ -880,6 +1000,7 @@ def get_2fa_qrcode():
 @auth_bp.route('/api/auth/2fa/verify', methods=['POST'])
 @limiter.limit("5 per minute")
 @login_required
+@csrf_protect_session
 def verify_2fa():
     """Verify 2FA code and enable 2FA"""
     import logging
@@ -908,6 +1029,7 @@ def verify_2fa():
 
 @auth_bp.route('/api/auth/2fa/disable', methods=['POST'])
 @login_required
+@csrf_protect_session
 def disable_2fa():
     """Disable 2FA (requires password verification)"""
     import logging

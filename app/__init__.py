@@ -373,6 +373,8 @@ def create_app(config_class=Config):
     app.register_blueprint(provision_api.provision_bp)
     app.register_blueprint(metrics_api.metrics_bp)
     app.register_blueprint(gdpr_api.gdpr_bp)
+    from app import license_webhook  # B3: license-server event receiver
+    app.register_blueprint(license_webhook.license_webhook_bp)
     from app import remediation_api
     app.register_blueprint(remediation_api.bp)
     from app import sbom_export

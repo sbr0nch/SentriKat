@@ -26,8 +26,13 @@ from functools import wraps
 
 from flask import Blueprint, request, jsonify
 from app import db, csrf, limiter
-from app.models import Organization, User, Subscription, SubscriptionPlan, UserOrganization
+from app.models import Organization, User, Subscription, SubscriptionPlan, UserOrganization, SystemSettings
 from app.saas import is_saas_mode
+
+# B8: idempotency keys are stored in system_settings with this prefix so we
+# can deduplicate identical provisioning requests without adding a new table.
+_IDEMPOTENCY_PREFIX = 'idempotency:provision:'
+_IDEMPOTENCY_CATEGORY = 'provisioning'
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +120,8 @@ def provision_tenant():
         }
     }
     """
+    import json as _json
+
     data = request.get_json()
     if not data:
         return jsonify({'error': 'No data provided'}), 400
@@ -131,16 +138,46 @@ def provision_tenant():
     if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
         return jsonify({'error': 'Invalid email format'}), 400
 
-    # Check if user already exists
+    # ------------------------------------------------------------------
+    # B8.1 — Idempotency: a network retry from the License Server must
+    # not create duplicate orgs. If the caller provides `idempotency_key`
+    # and we have already completed a provisioning with that key, return
+    # the cached result verbatim.
+    # ------------------------------------------------------------------
+    idempotency_key = (data.get('idempotency_key') or '').strip()
+    idem_setting_key = None
+    if idempotency_key:
+        # Defensive length cap; SystemSettings.key is VARCHAR(100).
+        if len(idempotency_key) > 80:
+            return jsonify({'error': 'idempotency_key too long (max 80 chars)'}), 400
+        idem_setting_key = f'{_IDEMPOTENCY_PREFIX}{idempotency_key}'
+        cached = SystemSettings.query.filter_by(
+            key=idem_setting_key, organization_id=None
+        ).first()
+        if cached and cached.value:
+            try:
+                payload = _json.loads(cached.value)
+                logger.info(
+                    "Idempotent provisioning replay for key=%s", idempotency_key
+                )
+                return jsonify(payload), 201
+            except Exception as parse_err:  # pragma: no cover - defensive
+                logger.error(
+                    "Failed to parse cached idempotency payload for %s: %s",
+                    idempotency_key, parse_err,
+                )
+
+    # Check if user already exists. Response intentionally does NOT echo
+    # the existing organization id (H4 information leak).
     existing_user = User.query.filter_by(email=email).first()
     if existing_user:
         return jsonify({
             'error': 'User with this email already exists',
             'code': 'USER_EXISTS',
-            'existing_org_id': existing_user.organization_id
         }), 409
 
-    # Get subscription plan
+    # B8.2 — Resolve subscription plan BEFORE starting any writes so that a
+    # bad `plan_name` does not leave behind a half-created Organization/User.
     plan_name = data.get('plan_name', 'free')
     plan = SubscriptionPlan.query.filter_by(name=plan_name, is_active=True).first()
     if not plan:
@@ -154,73 +191,73 @@ def provision_tenant():
         return jsonify({'error': 'No subscription plans configured'}), 500
 
     try:
-        # 1. Create Organization
-        org_slug = _generate_org_slug(company_name)
-        org = Organization(
-            name=org_slug,
-            display_name=company_name,
-            description=f'SaaS tenant provisioned on {datetime.utcnow().strftime("%Y-%m-%d")}',
-            active=True
-        )
-        db.session.add(org)
-        db.session.flush()  # Get org.id
+        # ------------------------------------------------------------------
+        # B8.2 — Atomic savepoint around Org/User/Membership/Subscription.
+        # If anything inside fails, the nested transaction is rolled back
+        # and we never leave orphan rows. The outer commit below persists
+        # both the tenant and (optionally) the idempotency cache entry.
+        # ------------------------------------------------------------------
+        with db.session.begin_nested():
+            # 1. Create Organization
+            org_slug = _generate_org_slug(company_name)
+            org = Organization(
+                name=org_slug,
+                display_name=company_name,
+                description=f'SaaS tenant provisioned on {datetime.utcnow().strftime("%Y-%m-%d")}',
+                active=True
+            )
+            db.session.add(org)
+            db.session.flush()  # Get org.id
 
-        # 2. Create User (org_admin)
-        temp_password = _generate_temp_password()
-        user = User(
-            username=email,  # Use email as username for SaaS
-            email=email,
-            full_name=full_name[:100],
-            organization_id=org.id,
-            auth_type='local',
-            role='org_admin',
-            is_admin=True,
-            is_active=True,
-            can_manage_products=True,
-            can_view_all_orgs=False,
-            must_change_password=True  # Force password change on first login
-        )
-        user.set_password(temp_password)
-        db.session.add(user)
-        db.session.flush()  # Get user.id
+            # 2. Create User (org_admin)
+            temp_password = _generate_temp_password()
+            user = User(
+                username=email,  # Use email as username for SaaS
+                email=email,
+                full_name=full_name[:100],
+                organization_id=org.id,
+                auth_type='local',
+                role='org_admin',
+                is_admin=True,
+                is_active=True,
+                can_manage_products=True,
+                can_view_all_orgs=False,
+                must_change_password=True  # Force password change on first login
+            )
+            user.set_password(temp_password)
+            db.session.add(user)
+            db.session.flush()  # Get user.id
 
-        # 3. Create UserOrganization membership
-        membership = UserOrganization(
-            user_id=user.id,
-            organization_id=org.id,
-            role='org_admin'
-        )
-        db.session.add(membership)
+            # 3. Create UserOrganization membership
+            membership = UserOrganization(
+                user_id=user.id,
+                organization_id=org.id,
+                role='org_admin'
+            )
+            db.session.add(membership)
 
-        # 4. Create Subscription
-        trial_days = data.get('trial_days', 14)
-        now = datetime.utcnow()
+            # 4. Create Subscription
+            trial_days = data.get('trial_days', 14)
+            now = datetime.utcnow()
 
-        subscription = Subscription(
-            organization_id=org.id,
-            plan_id=plan.id,
-            status='trialing' if trial_days > 0 else 'active',
-            billing_cycle=data.get('billing_cycle', 'monthly'),
-            current_period_start=now,
-            current_period_end=now + timedelta(days=30),
-            trial_start=now if trial_days > 0 else None,
-            trial_end=(now + timedelta(days=trial_days)) if trial_days > 0 else None,
-            stripe_customer_id=data.get('stripe_customer_id'),
-            stripe_subscription_id=data.get('stripe_subscription_id')
-        )
-        db.session.add(subscription)
+            subscription = Subscription(
+                organization_id=org.id,
+                plan_id=plan.id,
+                status='trialing' if trial_days > 0 else 'active',
+                billing_cycle=data.get('billing_cycle', 'monthly'),
+                current_period_start=now,
+                current_period_end=now + timedelta(days=30),
+                trial_start=now if trial_days > 0 else None,
+                trial_end=(now + timedelta(days=trial_days)) if trial_days > 0 else None,
+                stripe_customer_id=data.get('stripe_customer_id'),
+                stripe_subscription_id=data.get('stripe_subscription_id')
+            )
+            db.session.add(subscription)
+            db.session.flush()
 
-        db.session.commit()
-
-        logger.info(
-            f"Provisioned new tenant: org={org_slug} (id={org.id}), "
-            f"user={email} (id={user.id}), plan={plan.name}"
-        )
-
-        # Build login URL
+        # Build response payload
         base_url = os.environ.get('SENTRIKAT_BASE_URL', 'https://app.sentrikat.com')
-
-        return jsonify({
+        response_payload = {
             'success': True,
             'tenant': {
                 'organization_id': org.id,
@@ -237,7 +274,27 @@ def provision_tenant():
                 'subscription_status': subscription.status,
                 'trial_ends': subscription.trial_end.isoformat() if subscription.trial_end else None
             }
-        }), 201
+        }
+
+        # Persist idempotency cache entry (same transaction as the tenant
+        # writes so retries never see partial state).
+        if idem_setting_key:
+            db.session.add(SystemSettings(
+                key=idem_setting_key,
+                value=_json.dumps(response_payload),
+                category=_IDEMPOTENCY_CATEGORY,
+                description='Cached provisioning result for idempotency replay',
+                organization_id=None,
+            ))
+
+        db.session.commit()
+
+        logger.info(
+            f"Provisioned new tenant: org={org_slug} (id={org.id}), "
+            f"user={email} (id={user.id}), plan={plan.name}"
+        )
+
+        return jsonify(response_payload), 201
 
     except Exception as e:
         db.session.rollback()
