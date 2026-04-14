@@ -18,6 +18,7 @@ from app.models import (
 from app.saas import is_saas_mode
 from datetime import datetime, date
 from math import ceil
+from sqlalchemy import and_, or_
 import logging
 import re
 
@@ -79,6 +80,119 @@ def _paginate_args():
 def _org_id_or_400():
     """Return the current org_id from session, or None (caller should 400)."""
     return session.get('organization_id')
+
+
+# Assignment state machine (M3).
+#
+# Terminal states: 'resolved' and 'accepted_risk'. Once an assignment has
+# reached a terminal state, it CANNOT be reopened — the correct workflow is
+# to create a NEW assignment for the re-discovered risk. This prevents an
+# open→resolved→open ping-pong that would destroy the audit trail and the
+# SLA metric (resolved_at keeps moving around).
+#
+# Allowed transitions:
+#   open          -> in_progress
+#   open          -> resolved
+#   open          -> accepted_risk
+#   in_progress   -> resolved
+#   in_progress   -> accepted_risk
+#   in_progress   -> open            (e.g. unassigned / reopened before terminal)
+#   <same state>                     (no-op, always allowed)
+_ASSIGNMENT_TERMINAL_STATES = frozenset(('resolved', 'accepted_risk'))
+_ASSIGNMENT_ALLOWED_TRANSITIONS = {
+    'open': frozenset(('open', 'in_progress', 'resolved', 'accepted_risk')),
+    'in_progress': frozenset(('open', 'in_progress', 'resolved', 'accepted_risk')),
+    # Terminal states: only self-transition (idempotent) is allowed here.
+    'resolved': frozenset(('resolved',)),
+    'accepted_risk': frozenset(('accepted_risk',)),
+}
+
+
+def _validate_assignment_transition(old_status, new_status):
+    """Return (ok, error_message) for an assignment status transition.
+
+    Implements the state machine documented above.
+    """
+    if old_status == new_status:
+        return True, None
+    if old_status in _ASSIGNMENT_TERMINAL_STATES and new_status not in _ASSIGNMENT_TERMINAL_STATES:
+        return False, (
+            'Cannot reopen terminal assignment status. '
+            'Create new assignment instead.'
+        )
+    allowed = _ASSIGNMENT_ALLOWED_TRANSITIONS.get(old_status or 'open', frozenset())
+    if new_status not in allowed:
+        return False, f'Invalid status transition: {old_status} -> {new_status}'
+    return True, None
+
+
+def _can_view_assignment_notes():
+    """Return True if the current user is allowed to see assignment notes.
+
+    M15: Assignment notes often contain sensitive remediation context
+    (credentials, ticket numbers, internal rationale). They should not leak
+    to regular org members — only admins / org admins / super admins can
+    read them. Non-privileged viewers still see the assignment itself
+    (assignee, due date, status, CVE, product), just with notes redacted.
+    """
+    from app.models import User
+    user_id = session.get('user_id')
+    if not user_id:
+        return False
+    user = User.query.get(user_id)
+    if not user:
+        return False
+    role = (getattr(user, 'role', '') or '').lower()
+    return role in ('admin', 'org_admin', 'super_admin')
+
+
+def _redact_assignment_notes(d):
+    """Strip notes / resolution_notes from an assignment dict when the
+    current user is not privileged (M15). Mutates and returns the dict.
+    """
+    if not _can_view_assignment_notes():
+        if 'notes' in d:
+            d['notes'] = None
+        if 'resolution_notes' in d:
+            d['resolution_notes'] = None
+    return d
+
+
+def auto_expire_risk_exceptions(organization_id=None):
+    """Flip any active-but-expired RiskException to status='expired'.
+
+    Called JIT from the list endpoint so a user querying their exceptions
+    always sees a consistent view even if no nightly job has run yet.
+
+    Args:
+        organization_id: If provided, only that org's exceptions are
+            touched. Otherwise all orgs are scanned (safe, short query).
+
+    Returns the number of rows updated.
+
+    # TODO: schedule nightly cron auto_expire_risk_exceptions
+    """
+    try:
+        today = date.today()
+        query = RiskException.query.filter(
+            RiskException.status == 'active',
+            RiskException.expires_at.isnot(None),
+            RiskException.expires_at < today,
+        )
+        if organization_id is not None:
+            query = query.filter(RiskException.organization_id == organization_id)
+        rows = query.all()
+        count = 0
+        for exc in rows:
+            exc.status = 'expired'
+            count += 1
+        if count:
+            db.session.commit()
+        return count
+    except Exception:
+        db.session.rollback()
+        logger.exception("auto_expire_risk_exceptions failed")
+        return 0
 
 
 def _validate_product_ownership(org_id, product_id):
@@ -212,9 +326,14 @@ def list_assignments():
     overdue = overdue_query.count()
 
     # Build enriched response
+    # M15: notes may contain sensitive info — redact for non-admin viewers.
+    can_see_notes = _can_view_assignment_notes()
     results = []
     for a in assignments:
         d = a.to_dict()
+        if not can_see_notes:
+            d['notes'] = None
+            d['resolution_notes'] = None
         # Include product info if available
         if a.product:
             d['product_name'] = f"{a.product.vendor} {a.product.product_name}"
@@ -259,6 +378,8 @@ def get_assignment(assignment_id):
     ).filter_by(id=assignment_id, organization_id=org_id).first_or_404()
 
     d = assignment.to_dict()
+    # M15: redact notes for non-admin viewers.
+    _redact_assignment_notes(d)
 
     # Include product info
     if assignment.product:
@@ -530,10 +651,18 @@ def update_assignment(assignment_id):
     if not data:
         return jsonify({'error': 'No data provided'}), 400
 
+    # M3: enforce assignment state machine.
+    # Terminal states (resolved, accepted_risk) cannot transition back to
+    # open / in_progress — create a new assignment instead. See module-level
+    # docstring on _ASSIGNMENT_ALLOWED_TRANSITIONS.
     old_status = assignment.status
     if 'status' in data:
-        assignment.status = data['status']
-        if data['status'] in ('resolved', 'accepted_risk') and old_status not in ('resolved', 'accepted_risk'):
+        new_status = data['status']
+        ok, err = _validate_assignment_transition(old_status, new_status)
+        if not ok:
+            return jsonify({'error': err}), 400
+        assignment.status = new_status
+        if new_status in _ASSIGNMENT_TERMINAL_STATES and old_status not in _ASSIGNMENT_TERMINAL_STATES:
             assignment.resolved_at = datetime.utcnow()
 
     if 'assigned_to' in data:
@@ -773,6 +902,10 @@ def list_risk_exceptions():
     if not org_id:
         return jsonify({'error': 'Organization required'}), 400
 
+    # B6: auto-expire any active-but-past exceptions BEFORE the query, so the
+    # list reflects ground truth even if the nightly cron hasn't run yet.
+    auto_expire_risk_exceptions(organization_id=org_id)
+
     query = RiskException.query.filter_by(organization_id=org_id)
 
     # Filters
@@ -781,6 +914,19 @@ def list_risk_exceptions():
 
     if status_filter:
         query = query.filter_by(status=status_filter)
+        # When caller explicitly asks for 'active', also enforce the expiry
+        # guard at the query level — defence in depth if auto_expire above
+        # failed to commit.
+        if status_filter == 'active':
+            query = query.filter(
+                and_(
+                    RiskException.status == 'active',
+                    or_(
+                        RiskException.expires_at.is_(None),
+                        RiskException.expires_at >= date.today(),
+                    ),
+                )
+            )
     if cve_id_filter:
         query = query.filter_by(cve_id=cve_id_filter)
 
@@ -848,6 +994,13 @@ def create_risk_exception():
             expires_at = datetime.strptime(data['expires_at'], '%Y-%m-%d').date()
         except ValueError:
             return jsonify({'error': 'Invalid expires_at format (use YYYY-MM-DD)'}), 400
+        # B6: reject exceptions that are already expired at creation time —
+        # they would otherwise be flipped to status='expired' by the next
+        # auto_expire sweep, leaving the creator confused.
+        if expires_at < date.today():
+            return jsonify({
+                'error': 'expires_at cannot be in the past',
+            }), 400
 
     exception = RiskException(
         organization_id=org_id,
@@ -979,14 +1132,23 @@ def create_product_alias():
     if not _validate_product_ownership(org_id, data['product_id']):
         return jsonify({'error': 'Product not found in your organization'}), 403
 
-    # Check for duplicate alias
+    # M4: application-level duplicate check BEFORE insert. The table has a
+    # UniqueConstraint at the DB level too, but we check in Python first so
+    # the caller gets a clean 409 + actionable message instead of a generic
+    # IntegrityError. Note: we intentionally do NOT add any new DB constraint
+    # (no migration required for this fix).
     existing = ProductAlias.query.filter_by(
         organization_id=org_id,
         alias_vendor=data['alias_vendor'].strip(),
         alias_product=data['alias_product'].strip(),
     ).first()
     if existing:
-        return jsonify({'error': 'An alias with this vendor/product combination already exists'}), 409
+        return jsonify({
+            'error': (
+                'Alias already exists for this (vendor, product_name) '
+                'in your organization'
+            ),
+        }), 409
 
     alias = ProductAlias(
         organization_id=org_id,
