@@ -10,10 +10,13 @@ Security:
 - Never exposed to end users
 
 Endpoints:
-- POST /api/provision          — Create new tenant (org + user + subscription)
-- POST /api/provision/upgrade  — Change subscription plan
-- POST /api/provision/cancel   — Cancel subscription
-- GET  /api/provision/status   — Check tenant status
+- POST /api/provision             — Create new tenant (org + user + subscription)
+- POST /api/provision/upgrade     — Change subscription plan
+- POST /api/provision/cancel      — Cancel subscription
+- GET  /api/provision/status      — Check tenant status (single tenant)
+- POST /api/provision/reset-password — Reset tenant user password
+- GET  /api/provision/tenants     — List all tenants (for license-server admin UI)
+- GET  /api/provision/plans       — List all subscription plans
 """
 
 import hmac
@@ -540,3 +543,304 @@ def reset_tenant_password():
         db.session.rollback()
         logger.exception(f"Failed to reset password for {email}: {e}")
         return jsonify({'error': 'Failed to reset password'}), 500
+
+
+# =============================================================================
+# Admin listing endpoints
+#
+# These endpoints are consumed by the license-server admin UI (the "Live
+# SaaS Tenants" and "Plans" widgets at portal.sentrikat.com/admin). They
+# are read-only and return aggregated views across all tenants + the
+# plan catalogue. Auth uses the same X-Provision-Key header as the rest
+# of the provisioning blueprint.
+#
+# Design notes:
+#
+#  * No pagination yet — customer count is expected to stay under a few
+#    thousand for the foreseeable future and the query is cheap. When
+#    this stops being true, add ?page= + ?per_page= parameters and an
+#    index on subscriptions.status.
+#  * Filters are intentionally optional and compose with AND. Missing
+#    filters return everything.
+#  * Returned field names are deliberately descriptive
+#    (organization_name, plan_name, admin_email) rather than short
+#    aliases — the license-server portal frontend already accepts
+#    either spelling (see portal/src/pages/admin/saas-tenants.astro),
+#    so long names are the safer default.
+#  * Usage counters (agents N/M, users N/M) are computed server-side
+#    from the source of truth (assets table + users table) so the
+#    admin panel always reflects current reality, not cached numbers.
+# =============================================================================
+
+
+def _fmt_usage(current, limit):
+    """Render a usage counter as ``current/limit`` or ``current/unlimited``.
+
+    The license server's tenants widget shows these as strings verbatim,
+    so formatting on the server keeps the wire format stable.
+    """
+    if limit is None or limit < 0:
+        return f"{current}/unlimited"
+    return f"{current}/{limit}"
+
+
+def _tenant_summary(org, sub, plan):
+    """Build the tenant summary dict returned by GET /tenants.
+
+    Computes live agent + user counts from the assets / users tables so
+    the admin UI never renders stale metering data. Plan limits are
+    resolved from the linked plan with ``-1`` treated as "unlimited".
+    """
+    from app.models import Asset
+
+    # Primary admin email — the first org_admin in the org, falling back
+    # to any active user if no admin exists (shouldn't happen but keeps
+    # the response shape stable during EA edge cases).
+    admin_user = (
+        User.query.filter_by(organization_id=org.id, is_active=True)
+        .filter(User.role.in_(('org_admin', 'super_admin')))
+        .order_by(User.created_at.asc())
+        .first()
+    )
+    if not admin_user:
+        admin_user = (
+            User.query.filter_by(organization_id=org.id, is_active=True)
+            .order_by(User.created_at.asc())
+            .first()
+        )
+    admin_email = admin_user.email if admin_user else None
+
+    # Live counters — authoritative source-of-truth, not agent-reported.
+    agent_count = Asset.query.filter_by(organization_id=org.id).count()
+    user_count = User.query.filter_by(
+        organization_id=org.id, is_active=True
+    ).count()
+
+    plan_name = plan.name if plan else (sub.plan.name if sub and sub.plan else None)
+    plan_display = plan.display_name if plan else (
+        sub.plan.display_name if sub and sub.plan else None
+    )
+
+    max_agents = plan.max_agents if plan else None
+    max_users = plan.max_users if plan else None
+
+    return {
+        # Identity
+        'organization_id': org.id,
+        'organization_name': org.display_name or org.name,
+        'organization_slug': org.name,
+        'admin_email': admin_email,
+        # Plan + status
+        'plan_name': plan_name,
+        'plan_display_name': plan_display,
+        'status': (sub.status if sub else ('active' if org.active else 'suspended')),
+        'billing_cycle': sub.billing_cycle if sub else None,
+        'trial_end': (sub.trial_end.isoformat() if sub and sub.trial_end else None),
+        'current_period_end': (
+            sub.current_period_end.isoformat()
+            if sub and sub.current_period_end else None
+        ),
+        # Usage (strings for the widget, plus raw numbers for sorting)
+        'agents': _fmt_usage(agent_count, max_agents),
+        'users': _fmt_usage(user_count, max_users),
+        'agent_count': agent_count,
+        'user_count': user_count,
+        'agent_limit': max_agents,
+        'user_limit': max_users,
+        # Timestamps
+        'created_at': org.created_at.isoformat() if org.created_at else None,
+    }
+
+
+@provision_bp.route('/tenants', methods=['GET'])
+@limiter.limit("60/minute")
+@_require_provision_key
+def list_tenants():
+    """List all SaaS tenants.
+
+    Query params (all optional):
+        plan    — filter by plan name (free, starter, pro, business, enterprise)
+        status  — filter by subscription status (active, trialing, past_due,
+                  canceled, paused, expired)
+        search  — free-text search across organization name / display name
+                  / admin email
+        limit   — cap the number of results (default 500, max 5000)
+
+    Response (200):
+        {
+            "tenants": [<_tenant_summary>, ...],
+            "total": N,
+            "filters_applied": {...}
+        }
+    """
+    plan_filter = (request.args.get('plan') or '').strip().lower()
+    status_filter = (request.args.get('status') or '').strip().lower()
+    search = (request.args.get('search') or '').strip()
+    try:
+        limit = int(request.args.get('limit', 500))
+    except (TypeError, ValueError):
+        limit = 500
+    limit = max(1, min(5000, limit))
+
+    # Build base query. We LEFT JOIN the subscription because an
+    # organization may exist without a subscription during EA edge cases
+    # — we want those visible in the admin UI too, not hidden.
+    from sqlalchemy.orm import joinedload
+
+    query = Organization.query.options(
+        joinedload(Organization.subscription).joinedload(Subscription.plan),
+    )
+
+    # Plan / status filters are applied via a join so we don't accidentally
+    # drop orgs with no subscription unless the caller asks for a
+    # specific plan (in which case "no plan" obviously doesn't match).
+    if plan_filter:
+        query = query.join(Organization.subscription).join(Subscription.plan).filter(
+            db.func.lower(SubscriptionPlan.name) == plan_filter
+        )
+
+    if status_filter:
+        query = query.join(Organization.subscription).filter(
+            db.func.lower(Subscription.status) == status_filter
+        )
+
+    if search:
+        like_pattern = f"%{search}%"
+        # Search across org name, display_name, and admin user email.
+        query = query.outerjoin(
+            User,
+            db.and_(
+                User.organization_id == Organization.id,
+                User.is_active.is_(True),
+            ),
+        ).filter(
+            db.or_(
+                Organization.name.ilike(like_pattern),
+                Organization.display_name.ilike(like_pattern),
+                User.email.ilike(like_pattern),
+            )
+        ).distinct()
+
+    orgs = query.order_by(Organization.created_at.desc()).limit(limit).all()
+
+    tenants = []
+    for org in orgs:
+        sub = org.subscription if hasattr(org, 'subscription') else None
+        plan = sub.plan if sub else None
+        try:
+            tenants.append(_tenant_summary(org, sub, plan))
+        except Exception:
+            logger.exception(
+                "Failed to build tenant summary for org_id=%s", org.id
+            )
+            # Fall back to a minimal shape so a single broken row
+            # doesn't 500 the whole listing endpoint.
+            tenants.append({
+                'organization_id': org.id,
+                'organization_name': org.display_name or org.name,
+                'status': 'unknown',
+                'error': 'summary_failed',
+            })
+
+    return jsonify({
+        'tenants': tenants,
+        'total': len(tenants),
+        'filters_applied': {
+            'plan': plan_filter or None,
+            'status': status_filter or None,
+            'search': search or None,
+            'limit': limit,
+        },
+    })
+
+
+@provision_bp.route('/plans', methods=['GET'])
+@limiter.limit("60/minute")
+@_require_provision_key
+def list_plans():
+    """List all subscription plans defined in the catalogue.
+
+    Response (200):
+        {
+            "plans": [
+                {
+                    "id": "pro",
+                    "name": "Professional",
+                    "price_monthly_eur": 199,
+                    "price_annual_eur": 1990,
+                    "max_agents": 25,
+                    "max_users": 5,
+                    "max_organizations": 1,
+                    "max_products": -1,
+                    "max_api_keys": 5,
+                    "max_storage_mb": 2000,
+                    "features": [...enabled feature flag names...],
+                    "currency": "EUR",
+                    "is_active": true,
+                    "is_default": false,
+                    "stripe_price_id_monthly": "...",
+                    "stripe_price_id_annual": "..."
+                },
+                ...
+            ],
+            "total": N
+        }
+
+    Only ``is_active=True`` plans are returned by default. Pass
+    ``?include_inactive=true`` to include historical/archived plans
+    (useful for reconciliation reports on the license server side).
+    """
+    include_inactive = (request.args.get('include_inactive', '').lower() == 'true')
+
+    query = SubscriptionPlan.query
+    if not include_inactive:
+        query = query.filter_by(is_active=True)
+
+    plans_out = []
+    for plan in query.order_by(SubscriptionPlan.sort_order.asc()).all():
+        features_dict = plan.get_features()
+        enabled_features = sorted(
+            k for k, v in features_dict.items() if v
+        )
+        plans_out.append({
+            # Stable identifier used by the license server to cross-ref
+            # with its local plan catalogue. The slug name is the key,
+            # matching the existing provision/upgrade endpoint contract.
+            'id': plan.name,
+            'name': plan.display_name,
+            'slug': plan.name,
+            'description': plan.description,
+            # Pricing — the license server renders in EUR so we surface
+            # a pre-divided euro value AND the raw cents (for precision
+            # when the portal computes pro-rations).
+            'currency': plan.currency,
+            'price_monthly_cents': plan.price_monthly_cents,
+            'price_annual_cents': plan.price_annual_cents,
+            'price_monthly_eur': (plan.price_monthly_cents or 0) / 100.0,
+            'price_annual_eur': (plan.price_annual_cents or 0) / 100.0,
+            # Limits (-1 means unlimited)
+            'max_agents': plan.max_agents,
+            'max_users': plan.max_users,
+            'max_organizations': plan.max_organizations,
+            'max_products': plan.max_products,
+            'max_api_keys': plan.max_api_keys,
+            'max_storage_mb': plan.max_storage_mb,
+            # Features — enabled flag names as a list (widget renders
+            # them as bullets) AND the raw dict for clients that need
+            # the disabled ones too.
+            'features': enabled_features,
+            'features_map': features_dict,
+            # Stripe
+            'stripe_price_id_monthly': plan.stripe_price_id_monthly,
+            'stripe_price_id_annual': plan.stripe_price_id_annual,
+            'stripe_product_id': plan.stripe_product_id,
+            # Metadata
+            'is_active': plan.is_active,
+            'is_default': plan.is_default,
+            'sort_order': plan.sort_order,
+        })
+
+    return jsonify({
+        'plans': plans_out,
+        'total': len(plans_out),
+    })
