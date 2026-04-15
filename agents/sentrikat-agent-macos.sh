@@ -62,13 +62,20 @@ register_temp_file() {
 
 cleanup_on_exit() {
     local exit_code=$?
-    for f in "${_cleanup_temp_files[@]}"; do
-        rm -f "$f" 2>/dev/null
-    done
+    # macOS ships bash 3.2 where `"${arr[@]}"` on an empty array under
+    # `set -u` throws "unbound variable" and kills the cleanup handler
+    # before it can do anything useful. Guard the expansion with the
+    # bash "+alt" parameter form so an unset/empty array produces no
+    # tokens at all and the loop degenerates to a no-op.
+    if [[ ${#_cleanup_temp_files[@]} -gt 0 ]]; then
+        for f in "${_cleanup_temp_files[@]}"; do
+            rm -f "$f" 2>/dev/null
+        done
+    fi
     # Kill background jobs if any
     jobs -p 2>/dev/null | xargs -r kill 2>/dev/null || true
     # Release lock file
-    release_lock
+    release_lock 2>/dev/null || true
     exit $exit_code
 }
 trap cleanup_on_exit EXIT INT TERM
@@ -1817,8 +1824,25 @@ install_agent() {
         exit 1
     fi
 
-    # Detect and handle existing installation (upgrade path)
-    if launchctl list 2>/dev/null | grep -q com.sentrikat || [[ -f "$CONFIG_FILE" ]]; then
+    # Detect and handle existing installation (upgrade path).
+    # Distinguish three cases:
+    #   1. Full previous install (launchctl job + config) → upgrade
+    #   2. Config file left over from a partial/aborted install → cleanup + fresh
+    #   3. Nothing at all → fresh install
+    local has_launchd_job=false
+    local has_config_file=false
+    local has_script_binary=false
+    if launchctl list 2>/dev/null | grep -q com.sentrikat; then
+        has_launchd_job=true
+    fi
+    if [[ -f "$CONFIG_FILE" ]]; then
+        has_config_file=true
+    fi
+    if [[ -f "/usr/local/bin/sentrikat-agent" ]]; then
+        has_script_binary=true
+    fi
+
+    if $has_launchd_job || ($has_config_file && $has_script_binary); then
         echo ""
         echo "  Existing SentriKat Agent detected — upgrading automatically."
         log_info "Existing agent detected, performing upgrade..."
@@ -1828,7 +1852,7 @@ install_agent() {
         sudo launchctl unload "$HEARTBEAT_PLIST" 2>/dev/null || true
 
         # Preserve agent ID and revoke old key
-        if [[ -f "$CONFIG_FILE" ]]; then
+        if $has_config_file; then
             local old_agent_id old_api_key
             old_agent_id=$(grep '^AGENT_ID=' "$CONFIG_FILE" | cut -d'"' -f2)
             old_api_key=$(grep '^API_KEY=' "$CONFIG_FILE" | cut -d'"' -f2)
@@ -1851,13 +1875,42 @@ install_agent() {
         fi
 
         echo "  Old agent stopped. Installing new version..."
+    elif $has_config_file; then
+        # Partial / aborted previous attempt — clean the leftover config
+        # so we don't hit weird resume paths below. This is the "fresh
+        # machine looks existing because an install attempt was
+        # interrupted" scenario.
+        echo ""
+        log_warn "Found leftover config file at $CONFIG_FILE from a previous incomplete install; starting fresh."
+        rm -f "$CONFIG_FILE" 2>/dev/null || true
+        rm -f "${CONFIG_FILE}.bak" 2>/dev/null || true
     fi
+
+    # Ensure parent directories exist BEFORE save_config / cp.
+    # macOS doesn't ship with /usr/local/bin on a clean install
+    # (without Homebrew or Xcode CLT) — the classic symptom is
+    # `cp: /usr/local/bin/sentrikat-agent: No such file or directory`
+    # on an otherwise fresh Mac.
+    mkdir -p "$CONFIG_DIR" || {
+        log_error "Failed to create config directory $CONFIG_DIR"
+        exit 1
+    }
+    mkdir -p "/usr/local/bin" || {
+        log_error "Failed to create /usr/local/bin"
+        exit 1
+    }
+    mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
 
     save_config
 
     # Copy script to system location
     local script_dest="/usr/local/bin/sentrikat-agent"
-    cp "$0" "$script_dest"
+    if ! cp "$0" "$script_dest"; then
+        log_error "Failed to copy agent script from $0 to $script_dest"
+        log_error "Source exists? $([[ -f $0 ]] && echo yes || echo no)"
+        log_error "Destination dir writable? $([[ -w $(dirname "$script_dest") ]] && echo yes || echo no)"
+        exit 1
+    fi
     chmod 755 "$script_dest"
 
     # Calculate interval in seconds

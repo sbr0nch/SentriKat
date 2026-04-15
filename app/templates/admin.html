@@ -496,22 +496,22 @@
 
                     <div class="alert alert-info small mb-3">
                         <i class="bi bi-info-circle me-2"></i>
-                        Start typing a vendor or product name below. Suggestions
-                        come from the NVD CPE dictionary — picking one guarantees
-                        the exclusion will match real inventory. You can still
-                        enter a custom vendor/product if none of the suggestions
-                        fit.
+                        Start typing a vendor or product name below. Results
+                        come from <strong>both your current inventory and the
+                        NVD CPE dictionary</strong> — picking one guarantees
+                        the exclusion will match. You can still enter a custom
+                        vendor/product if none of the suggestions fit.
                     </div>
 
                     <div class="mb-3 position-relative">
-                        <label class="form-label">Search CPE dictionary</label>
+                        <label class="form-label">Search inventory &amp; CPE dictionary</label>
                         <input type="text" class="form-control" id="excCpeSearch"
-                               placeholder="Type at least 2 characters, e.g. microsoft edge, apache tomcat..."
+                               placeholder="Type at least 2 characters, e.g. apache tomcat, microsoft edge..."
                                autocomplete="off">
                         <div id="excCpeStatus" class="form-text small text-muted" style="min-height: 1.25em;"></div>
                         <div id="excCpeSuggestions"
                              class="list-group position-absolute shadow"
-                             style="z-index: 1070; max-height: 320px; overflow-y: auto; display: none; left: 0; right: 0;">
+                             style="z-index: 1070; max-height: 380px; overflow-y: auto; display: none; left: 0; right: 0;">
                         </div>
                     </div>
 
@@ -4584,62 +4584,142 @@
         }
         excSuggestionAbortCtrl = new AbortController();
 
-        statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Searching NVD CPE dictionary...';
+        statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Searching your inventory and the NVD CPE dictionary...';
         suggEl.style.display = 'block';
         suggEl.innerHTML = '<div class="list-group-item text-center text-muted small"><span class="spinner-border spinner-border-sm me-1"></span>Loading...</div>';
 
-        try {
-            const res = await fetch(
-                `/api/cpe/search?q=${encodeURIComponent(query.trim())}&grouped=true&limit=50`,
-                { signal: excSuggestionAbortCtrl.signal }
-            );
-            if (!res.ok) {
-                const j = await res.json().catch(() => ({}));
-                statusEl.textContent = j.error || `Search failed (HTTP ${res.status})`;
-                suggEl.innerHTML = '';
-                suggEl.style.display = 'none';
-                return;
-            }
-            const data = await res.json();
-            const vendors = data.vendors || {};
-            const items = [];
-            for (const [vendorKey, vendorData] of Object.entries(vendors)) {
-                const products = vendorData.products || {};
-                for (const [productKey, productMeta] of Object.entries(products)) {
-                    items.push({
-                        vendor: vendorKey,
-                        vendor_display: vendorData.display || vendorKey,
-                        product: productKey,
-                        product_display: (productMeta && productMeta.display) || productKey,
+        // Two sources in parallel:
+        //  1. /api/products?search=X     — the caller's own inventory (org-scoped by the backend)
+        //  2. /api/cpe/search?q=X&grouped=true — the NVD CPE dictionary
+        // We never let one source block the other — if inventory fails we
+        // still render CPE results and vice versa.
+        const q = encodeURIComponent(query.trim());
+        const [invRes, cpeRes] = await Promise.allSettled([
+            fetch(`/api/products?search=${q}&per_page=25`, { signal: excSuggestionAbortCtrl.signal }),
+            fetch(`/api/cpe/search?q=${q}&grouped=true&limit=50`, { signal: excSuggestionAbortCtrl.signal }),
+        ]);
+
+        if (excSuggestionAbortCtrl.signal.aborted) return;
+
+        // -- Parse inventory results --
+        let invItems = [];
+        if (invRes.status === 'fulfilled' && invRes.value.ok) {
+            try {
+                const invData = await invRes.value.json();
+                const products = Array.isArray(invData) ? invData : (invData.products || []);
+                // Dedupe by vendor+product_name so we don't render a row per version.
+                const seen = new Set();
+                for (const p of products) {
+                    // Prefer CPE-canonical vendor/product when available so the
+                    // resulting exclusion uses the same normalized values the
+                    // CPE dictionary would — that way it actually matches on
+                    // re-scan.
+                    const vendor = p.cpe_vendor || p.vendor || '';
+                    const product = p.cpe_product || p.product_name || '';
+                    const key = `${vendor.toLowerCase()}|${product.toLowerCase()}`;
+                    if (!vendor || !product || seen.has(key)) continue;
+                    seen.add(key);
+                    invItems.push({
+                        vendor,
+                        product,
+                        vendor_display: p.vendor || vendor,
+                        product_display: p.product_name || product,
+                        versions_hint: p.version || '',
+                        org_name: p.organization_name || '',
                     });
                 }
-            }
+            } catch (_) { /* ignore parse errors, fall through to CPE */ }
+        }
 
-            if (items.length === 0) {
-                statusEl.textContent = `No CPE matches for "${query}". You can still enter a custom vendor + product below.`;
-                suggEl.innerHTML = `
-                    <div class="list-group-item text-center text-muted small py-3">
-                        <i class="bi bi-search me-1"></i>No results in NVD dictionary.
-                    </div>
-                `;
-                return;
+        // -- Parse CPE dictionary results --
+        let cpeItems = [];
+        let cpeError = null;
+        if (cpeRes.status === 'fulfilled') {
+            if (cpeRes.value.ok) {
+                try {
+                    const data = await cpeRes.value.json();
+                    const vendors = data.vendors || {};
+                    for (const [vendorKey, vendorData] of Object.entries(vendors)) {
+                        const products = vendorData.products || {};
+                        for (const [productKey, productMeta] of Object.entries(products)) {
+                            cpeItems.push({
+                                vendor: vendorKey,
+                                vendor_display: vendorData.display || vendorKey,
+                                product: productKey,
+                                product_display: (productMeta && productMeta.display) || productKey,
+                            });
+                        }
+                    }
+                } catch (_) { cpeError = 'CPE response parse error'; }
+            } else {
+                cpeError = `CPE HTTP ${cpeRes.value.status}`;
             }
+        } else if (cpeRes.reason && cpeRes.reason.name !== 'AbortError') {
+            cpeError = cpeRes.reason.message || 'CPE fetch error';
+        }
 
-            statusEl.textContent = `${items.length} CPE match${items.length === 1 ? '' : 'es'} — click one to use it.`;
-            suggEl.innerHTML = items.slice(0, 50).map(it => `
+        // Drop CPE items that are already in the inventory section so the
+        // user sees each row exactly once. Inventory takes precedence
+        // because it reflects what the tenant actually has.
+        const invKeys = new Set(invItems.map(it => `${it.vendor.toLowerCase()}|${it.product.toLowerCase()}`));
+        cpeItems = cpeItems.filter(it => !invKeys.has(`${it.vendor.toLowerCase()}|${it.product.toLowerCase()}`));
+
+        if (invItems.length === 0 && cpeItems.length === 0) {
+            statusEl.textContent = `No results for "${query}". You can still enter a custom vendor + product below.`;
+            suggEl.innerHTML = `
+                <div class="list-group-item text-center text-muted small py-3">
+                    <i class="bi bi-search me-1"></i>No results in your inventory or in the NVD dictionary.
+                </div>
+            `;
+            return;
+        }
+
+        statusEl.textContent = `${invItems.length} in your inventory + ${cpeItems.length} in NVD — click one to use it.`
+            + (cpeError ? ` (CPE lookup: ${cpeError})` : '');
+
+        let html = '';
+
+        if (invItems.length > 0) {
+            html += `<div class="list-group-item list-group-item-light fw-semibold small text-uppercase text-muted py-1">
+                <i class="bi bi-box-seam me-1"></i>From your inventory (${invItems.length})
+            </div>`;
+            html += invItems.slice(0, 25).map(it => `
                 <button type="button"
                         class="list-group-item list-group-item-action py-2"
                         onclick="selectExcCpe('${escapeHtml(it.vendor)}', '${escapeHtml(it.product)}')">
-                    <div class="fw-semibold">${escapeHtml(it.vendor_display)} <span class="text-muted">/</span> ${escapeHtml(it.product_display)}</div>
-                    <small class="text-muted">cpe:2.3:*:${escapeHtml(it.vendor)}:${escapeHtml(it.product)}:*</small>
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="fw-semibold">${escapeHtml(it.vendor_display)} <span class="text-muted">/</span> ${escapeHtml(it.product_display)}</div>
+                            <small class="text-muted">
+                                ${it.versions_hint ? 'v' + escapeHtml(it.versions_hint) + ' · ' : ''}${escapeHtml(it.org_name || '')}
+                            </small>
+                        </div>
+                        <span class="badge bg-success-subtle text-success-emphasis border border-success-subtle">Inventory</span>
+                    </div>
                 </button>
             `).join('');
-        } catch (err) {
-            if (err.name === 'AbortError') return;
-            statusEl.textContent = `Search error: ${err.message}`;
-            suggEl.innerHTML = '';
-            suggEl.style.display = 'none';
         }
+
+        if (cpeItems.length > 0) {
+            html += `<div class="list-group-item list-group-item-light fw-semibold small text-uppercase text-muted py-1 mt-1">
+                <i class="bi bi-database me-1"></i>From NVD CPE dictionary (${cpeItems.length})
+            </div>`;
+            html += cpeItems.slice(0, 50).map(it => `
+                <button type="button"
+                        class="list-group-item list-group-item-action py-2"
+                        onclick="selectExcCpe('${escapeHtml(it.vendor)}', '${escapeHtml(it.product)}')">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="fw-semibold">${escapeHtml(it.vendor_display)} <span class="text-muted">/</span> ${escapeHtml(it.product_display)}</div>
+                            <small class="text-muted">cpe:2.3:*:${escapeHtml(it.vendor)}:${escapeHtml(it.product)}:*</small>
+                        </div>
+                        <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">NVD</span>
+                    </div>
+                </button>
+            `).join('');
+        }
+
+        suggEl.innerHTML = html;
     }
 
     function selectExcCpe(vendor, product) {

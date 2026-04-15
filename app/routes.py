@@ -130,6 +130,78 @@ def _super_admin_unrestricted(user=None):
     return user.is_super_admin() and not is_saas_mode()
 
 
+def _wipe_product_children(pid: int) -> None:
+    """Delete every child row that references ``products.id == pid``.
+
+    Called right before ``db.session.delete(product)`` so the parent
+    delete cannot fail on a dangling FK.
+
+    Why this is explicit rather than relying on ondelete='CASCADE' in
+    the model definitions:
+
+    * The cascade flag is set in the Python model but the actual DB
+      constraint may pre-date the current model (older installations
+      built tables incrementally and may not have the cascade at the
+      physical constraint level).
+
+    * SQLAlchemy's unit-of-work will try to flush the parent before
+      issuing the DELETE, and if any related row is loaded in the
+      session with no cascade rule on the relationship it fails.
+
+    * Product has seven FK children in the schema
+      (product_installations, vulnerability_matches,
+      product_version_history, remediation_assignments, risk_exceptions,
+      product_aliases, product_organizations). Missing even one causes
+      a constraint violation that looks random to the user because it
+      depends on whether that product happens to have rows in the table
+      with the weak cascade. That's the classic "delete fails for
+      Apache Tomcat but not for random test products" signal — Tomcat
+      has lots of remediation assignments and risk exceptions, test
+      products don't.
+
+    Deletes are issued in FK-dependency order inside the same
+    transaction as the caller, using ``synchronize_session=False`` so
+    they run as a single bulk DELETE each without trying to fetch rows
+    into the identity map first.
+    """
+    from app.models import (
+        product_organizations, ProductInstallation, VulnerabilityMatch,
+        ProductVersionHistory, RemediationAssignment, RiskException,
+        ProductAlias,
+    )
+    # Tables that reference sibling tables first
+    ProductVersionHistory.query.filter_by(product_id=pid).delete(
+        synchronize_session=False,
+    )
+    # Remediation assignments and risk exceptions reference BOTH
+    # product_id directly AND (optionally) match_id. Deleting by
+    # product_id covers the direct path; the match_id path is covered
+    # when we delete the matches below (ondelete=CASCADE on match_id is
+    # solid because we control the match row lifecycle ourselves).
+    RemediationAssignment.query.filter_by(product_id=pid).delete(
+        synchronize_session=False,
+    )
+    RiskException.query.filter_by(product_id=pid).delete(
+        synchronize_session=False,
+    )
+    ProductAlias.query.filter_by(product_id=pid).delete(
+        synchronize_session=False,
+    )
+    ProductInstallation.query.filter_by(product_id=pid).delete(
+        synchronize_session=False,
+    )
+    VulnerabilityMatch.query.filter_by(product_id=pid).delete(
+        synchronize_session=False,
+    )
+    # M2M association table — explicit DELETE on the join table so
+    # neither side's cascade needs to be correct for this to succeed.
+    db.session.execute(
+        product_organizations.delete().where(
+            product_organizations.c.product_id == pid
+        )
+    )
+
+
 # =============================================================================
 # Static File Serving (Persistent uploads from data volume)
 # =============================================================================
@@ -1629,9 +1701,31 @@ def create_product():
         default_org = Organization.query.filter_by(name='default').first()
         org_id = default_org.id if default_org else None
 
-    # Check for duplicate product (case-insensitive)
-    # For multi-org support, check if product exists globally (regardless of org)
-    # since products can now be assigned to multiple organizations
+    # Check for duplicate product (case-insensitive).
+    #
+    # Multi-tenancy rules:
+    #
+    # * On-prem: one installation = one paying customer, but that customer
+    #   can partition its inventory into multiple internal orgs. The
+    #   historical design lets a Product row be shared across those orgs
+    #   via the product_organizations M2M table — makes sense because
+    #   it's the same customer tracking the same software in several
+    #   departments.
+    #
+    # * SaaS: many paying customers, each with 1 org on Pro or up to N
+    #   orgs on Business+/Enterprise. Sharing a Product across orgs that
+    #   belong to the SAME customer is fine; sharing across DIFFERENT
+    #   customers is not — it leaks tenant presence and blocks legitimate
+    #   duplicate creation.
+    #
+    # Both modes are solved by the same rule: scope the duplicate check
+    # to the orgs the current user actually has access to
+    # (get_all_organizations). That's exactly the customer boundary in
+    # SaaS, and a subset of the single customer in on-prem.
+    #
+    # Super-admins on on-prem still get the global view (legacy behaviour
+    # preserved via _super_admin_unrestricted).
+    from app.saas import is_saas_mode
     version = data.get('version', '').strip() or None  # Treat empty string as None
     vendor_lower = data['vendor'].lower().strip()
     product_name_lower = data['product_name'].lower().strip()
@@ -1651,11 +1745,53 @@ def create_product():
             db.or_(Product.version.is_(None), Product.version == '')
         )
 
+    # Scope the duplicate check in SaaS mode (and for any non-super-admin
+    # in on-prem mode as a defence in depth).
+    if is_saas_mode() or not _super_admin_unrestricted():
+        user_org_ids = set()
+        if current_user and current_user.organization_id:
+            user_org_ids.add(current_user.organization_id)
+        try:
+            if current_user:
+                for m in current_user.org_memberships.all():
+                    user_org_ids.add(m.organization_id)
+        except Exception:
+            pass
+        if user_org_ids:
+            from app.models import product_organizations as _po
+            duplicate_query = duplicate_query.filter(
+                db.or_(
+                    Product.organization_id.in_(user_org_ids),
+                    Product.id.in_(
+                        db.session.query(_po.c.product_id).filter(
+                            _po.c.organization_id.in_(user_org_ids)
+                        )
+                    ),
+                )
+            )
+
     existing_product = duplicate_query.first()
 
     if existing_product:
+        # The product is already in one of the caller's orgs — surface a
+        # clear, actionable message with the existing product's id so the
+        # frontend can deep-link to its detail / edit modal instead of
+        # asking the user to hunt for it in the list.
         return jsonify({
-            'error': 'A product with the same vendor, name, and version already exists. You can assign it to additional organizations from the product list.'
+            'error': (
+                'This product is already in your inventory '
+                f'({existing_product.vendor} {existing_product.product_name} '
+                f'{existing_product.version or ""}). '
+                'Open it from the product list to edit or assign it to '
+                'additional organizations.'
+            ),
+            'existing_product_id': existing_product.id,
+            'existing_product': {
+                'id': existing_product.id,
+                'vendor': existing_product.vendor,
+                'product_name': existing_product.product_name,
+                'version': existing_product.version,
+            },
         }), 409
 
     # Auto-match CPE if not provided
@@ -1968,16 +2104,9 @@ def delete_product(product_id):
             remaining_org_ids = [oid for oid in product_org_ids if oid not in target_org_ids]
 
             if not remaining_org_ids:
-                # Removing from ALL orgs = full delete
-                ProductInstallation.query.filter_by(product_id=product_id).delete()
-                VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
-                ProductVersionHistory.query.filter_by(product_id=product_id).delete()
-                # Clean up many-to-many org links before deleting product
-                db.session.execute(
-                    product_organizations.delete().where(
-                        product_organizations.c.product_id == product_id
-                    )
-                )
+                # Removing from ALL orgs = full delete.
+                # Explicit child wipe — see _wipe_product_children above.
+                _wipe_product_children(product_id)
                 db.session.delete(product)
                 db.session.commit()
 
@@ -2057,15 +2186,9 @@ def delete_product(product_id):
                     'message': f'Product removed from {user_org.display_name} (still exists in other organizations)' + exclude_msg
                 })
             else:
-                # Product only in this org - delete it globally
-                ProductInstallation.query.filter_by(product_id=product_id).delete()
-                VulnerabilityMatch.query.filter_by(product_id=product_id).delete()
-                ProductVersionHistory.query.filter_by(product_id=product_id).delete()
-                db.session.execute(
-                    product_organizations.delete().where(
-                        product_organizations.c.product_id == product_id
-                    )
-                )
+                # Product only in this org - delete it globally.
+                # Explicit child wipe — see _wipe_product_children above.
+                _wipe_product_children(product_id)
                 db.session.delete(product)
                 db.session.commit()
 
@@ -2187,15 +2310,9 @@ def batch_delete_products():
                     remaining = [oid for oid in product_org_ids if oid not in target_org_ids]
 
                     if not remaining:
-                        # Full delete
-                        ProductInstallation.query.filter_by(product_id=pid).delete()
-                        VulnerabilityMatch.query.filter_by(product_id=pid).delete()
-                        ProductVersionHistory.query.filter_by(product_id=pid).delete()
-                        db.session.execute(
-                            product_organizations.delete().where(
-                                product_organizations.c.product_id == pid
-                            )
-                        )
+                        # Full delete — explicit child wipe, see
+                        # _wipe_product_children docstring.
+                        _wipe_product_children(pid)
                         db.session.delete(product)
                         deleted += 1
                     else:
@@ -2219,14 +2336,9 @@ def batch_delete_products():
                             product.organization_id = None
                         removed += 1
                     else:
-                        ProductInstallation.query.filter_by(product_id=pid).delete()
-                        VulnerabilityMatch.query.filter_by(product_id=pid).delete()
-                        ProductVersionHistory.query.filter_by(product_id=pid).delete()
-                        db.session.execute(
-                            product_organizations.delete().where(
-                                product_organizations.c.product_id == pid
-                            )
-                        )
+                        # Product only in this org — delete globally.
+                        # See _wipe_product_children docstring.
+                        _wipe_product_children(pid)
                         db.session.delete(product)
                         deleted += 1
 

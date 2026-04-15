@@ -59,13 +59,18 @@ register_temp_file() {
 
 cleanup_on_exit() {
     local exit_code=$?
-    for f in "${_cleanup_temp_files[@]}"; do
-        rm -f "$f" 2>/dev/null
-    done
+    # Guard empty-array expansion under `set -u` — older bash (3.2) and
+    # some restricted environments throw "unbound variable" when
+    # `"${arr[@]}"` is evaluated on an empty array. Check length first.
+    if [[ ${#_cleanup_temp_files[@]} -gt 0 ]]; then
+        for f in "${_cleanup_temp_files[@]}"; do
+            rm -f "$f" 2>/dev/null
+        done
+    fi
     # Kill background jobs if any
     jobs -p 2>/dev/null | xargs -r kill 2>/dev/null || true
     # Release lock file
-    release_lock
+    release_lock 2>/dev/null || true
     exit $exit_code
 }
 trap cleanup_on_exit EXIT INT TERM
