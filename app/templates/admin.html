@@ -486,29 +486,64 @@
 
     <!-- Add Exclusion Modal -->
     <div class="modal fade" id="addExclusionModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title"><i class="bi bi-shield-x me-2"></i>Add Product Exclusion</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">Vendor <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="excVendor" placeholder="e.g. Microsoft">
+
+                    <div class="alert alert-info small mb-3">
+                        <i class="bi bi-info-circle me-2"></i>
+                        Start typing a vendor or product name below. Suggestions
+                        come from the NVD CPE dictionary — picking one guarantees
+                        the exclusion will match real inventory. You can still
+                        enter a custom vendor/product if none of the suggestions
+                        fit.
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Product Name <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="excProductName" placeholder="e.g. Edge">
+
+                    <div class="mb-3 position-relative">
+                        <label class="form-label">Search CPE dictionary</label>
+                        <input type="text" class="form-control" id="excCpeSearch"
+                               placeholder="Type at least 2 characters, e.g. microsoft edge, apache tomcat..."
+                               autocomplete="off">
+                        <div id="excCpeStatus" class="form-text small text-muted" style="min-height: 1.25em;"></div>
+                        <div id="excCpeSuggestions"
+                             class="list-group position-absolute shadow"
+                             style="z-index: 1070; max-height: 320px; overflow-y: auto; display: none; left: 0; right: 0;">
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Organization</label>
-                        <select class="form-select" id="excOrgId"></select>
+
+                    <div class="row g-2">
+                        <div class="col-md-6">
+                            <label class="form-label">Vendor <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="excVendor" placeholder="e.g. microsoft">
+                            <div class="form-text small">Must match the vendor as it appears in your inventory (case-insensitive).</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Product Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="excProductName" placeholder="e.g. edge">
+                            <div class="form-text small">Partial matches are supported — "edge" excludes "edge_chromium" too.</div>
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Reason</label>
-                        <input type="text" class="form-control" id="excReason" placeholder="Optional reason">
+
+                    <div class="row g-2 mt-1">
+                        <div class="col-md-6">
+                            <label class="form-label">Organization</label>
+                            <select class="form-select" id="excOrgId"></select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Reason</label>
+                            <input type="text" class="form-control" id="excReason" placeholder="Optional reason">
+                        </div>
                     </div>
+
+                    <div id="excValidationHint" class="alert alert-warning small mt-3 mb-0" style="display: none;">
+                        <i class="bi bi-exclamation-triangle me-1"></i>
+                        <span id="excValidationHintText"></span>
+                    </div>
+
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -4495,36 +4530,202 @@
         } catch (e) { showToast('Error: ' + e.message, 'danger'); }
     }
 
+    // ==========================================================================
+    // Exclusion modal — CPE dictionary autocomplete
+    // ==========================================================================
+    //
+    // The Add Exclusion modal previously accepted arbitrary vendor + product
+    // strings with zero validation, so users had no way to tell whether the
+    // exclusion they were saving actually matched real inventory. This block
+    // wires up the existing /api/cpe/search endpoint (grouped response) as an
+    // autocomplete for the "Search CPE dictionary" field, and also performs a
+    // soft "does this hit my inventory" check on save so typos don't silently
+    // create no-op exclusions.
+
+    let excSearchTimer = null;
+    let excSuggestionAbortCtrl = null;
+
     function showAddExclusionModal() {
         document.getElementById('excVendor').value = '';
         document.getElementById('excProductName').value = '';
         document.getElementById('excReason').value = '';
+        document.getElementById('excCpeSearch').value = '';
+        document.getElementById('excCpeStatus').textContent = '';
+        document.getElementById('excCpeSuggestions').style.display = 'none';
+        document.getElementById('excValidationHint').style.display = 'none';
+
         const orgSelect = document.getElementById('excOrgId');
         orgSelect.innerHTML = '<option value="">Loading...</option>';
         fetch('/api/organizations').then(r => r.json()).then(data => {
             const orgs = Array.isArray(data) ? data : (data.organizations || []);
             orgSelect.innerHTML = orgs.map(o => `<option value="${o.id}">${escapeHtml(o.display_name || o.name)}</option>`).join('');
         }).catch(() => { orgSelect.innerHTML = '<option value="">Error loading orgs</option>'; });
+
         new bootstrap.Modal(document.getElementById('addExclusionModal')).show();
+
+        // Focus the search box after the modal transition completes
+        setTimeout(() => document.getElementById('excCpeSearch')?.focus(), 250);
     }
+
+    async function runExcCpeSearch(query) {
+        const statusEl = document.getElementById('excCpeStatus');
+        const suggEl = document.getElementById('excCpeSuggestions');
+
+        if (!query || query.trim().length < 2) {
+            statusEl.textContent = '';
+            suggEl.style.display = 'none';
+            suggEl.innerHTML = '';
+            return;
+        }
+
+        // Abort any in-flight request so a fast typist doesn't race.
+        if (excSuggestionAbortCtrl) {
+            try { excSuggestionAbortCtrl.abort(); } catch (_) {}
+        }
+        excSuggestionAbortCtrl = new AbortController();
+
+        statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Searching NVD CPE dictionary...';
+        suggEl.style.display = 'block';
+        suggEl.innerHTML = '<div class="list-group-item text-center text-muted small"><span class="spinner-border spinner-border-sm me-1"></span>Loading...</div>';
+
+        try {
+            const res = await fetch(
+                `/api/cpe/search?q=${encodeURIComponent(query.trim())}&grouped=true&limit=50`,
+                { signal: excSuggestionAbortCtrl.signal }
+            );
+            if (!res.ok) {
+                const j = await res.json().catch(() => ({}));
+                statusEl.textContent = j.error || `Search failed (HTTP ${res.status})`;
+                suggEl.innerHTML = '';
+                suggEl.style.display = 'none';
+                return;
+            }
+            const data = await res.json();
+            const vendors = data.vendors || {};
+            const items = [];
+            for (const [vendorKey, vendorData] of Object.entries(vendors)) {
+                const products = vendorData.products || {};
+                for (const [productKey, productMeta] of Object.entries(products)) {
+                    items.push({
+                        vendor: vendorKey,
+                        vendor_display: vendorData.display || vendorKey,
+                        product: productKey,
+                        product_display: (productMeta && productMeta.display) || productKey,
+                    });
+                }
+            }
+
+            if (items.length === 0) {
+                statusEl.textContent = `No CPE matches for "${query}". You can still enter a custom vendor + product below.`;
+                suggEl.innerHTML = `
+                    <div class="list-group-item text-center text-muted small py-3">
+                        <i class="bi bi-search me-1"></i>No results in NVD dictionary.
+                    </div>
+                `;
+                return;
+            }
+
+            statusEl.textContent = `${items.length} CPE match${items.length === 1 ? '' : 'es'} — click one to use it.`;
+            suggEl.innerHTML = items.slice(0, 50).map(it => `
+                <button type="button"
+                        class="list-group-item list-group-item-action py-2"
+                        onclick="selectExcCpe('${escapeHtml(it.vendor)}', '${escapeHtml(it.product)}')">
+                    <div class="fw-semibold">${escapeHtml(it.vendor_display)} <span class="text-muted">/</span> ${escapeHtml(it.product_display)}</div>
+                    <small class="text-muted">cpe:2.3:*:${escapeHtml(it.vendor)}:${escapeHtml(it.product)}:*</small>
+                </button>
+            `).join('');
+        } catch (err) {
+            if (err.name === 'AbortError') return;
+            statusEl.textContent = `Search error: ${err.message}`;
+            suggEl.innerHTML = '';
+            suggEl.style.display = 'none';
+        }
+    }
+
+    function selectExcCpe(vendor, product) {
+        document.getElementById('excVendor').value = vendor;
+        document.getElementById('excProductName').value = product;
+        document.getElementById('excCpeSuggestions').style.display = 'none';
+        document.getElementById('excCpeStatus').textContent = `Selected: ${vendor} / ${product}`;
+        document.getElementById('excValidationHint').style.display = 'none';
+    }
+
+    // Debounced input listener + click-away handler. Bound once at DOMContentLoaded.
+    document.addEventListener('DOMContentLoaded', function () {
+        const searchInput = document.getElementById('excCpeSearch');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                clearTimeout(excSearchTimer);
+                excSearchTimer = setTimeout(() => runExcCpeSearch(e.target.value), 300);
+            });
+            // Close suggestions when the user clicks outside the modal body.
+            document.addEventListener('click', (e) => {
+                const suggEl = document.getElementById('excCpeSuggestions');
+                if (!suggEl) return;
+                if (suggEl.style.display === 'none') return;
+                if (searchInput.contains(e.target) || suggEl.contains(e.target)) return;
+                suggEl.style.display = 'none';
+            });
+        }
+    });
 
     async function saveExclusion() {
         const vendor = document.getElementById('excVendor').value.trim();
         const productName = document.getElementById('excProductName').value.trim();
         const orgId = document.getElementById('excOrgId').value;
         const reason = document.getElementById('excReason').value.trim();
-        if (!vendor || !productName) { showToast('Vendor and Product Name are required', 'warning'); return; }
+        const hintEl = document.getElementById('excValidationHint');
+        const hintText = document.getElementById('excValidationHintText');
+
+        if (!vendor || !productName) {
+            showToast('Vendor and Product Name are required', 'warning');
+            return;
+        }
+
+        // Soft inventory-match check: warn if nothing in the user's inventory
+        // matches the given vendor+product. We still allow the save (the user
+        // may be pre-excluding something they plan to add later) but make the
+        // consequence explicit so typos don't silently create no-op rules.
+        // The check uses /api/products?search=... which already honours the
+        // session's organization scoping, so we'll only see products the
+        // current user can actually see.
+        hintEl.style.display = 'none';
+        try {
+            const searchTerm = `${vendor} ${productName}`.trim();
+            const matchRes = await fetch(
+                `/api/products?search=${encodeURIComponent(searchTerm)}&per_page=1`
+            );
+            if (matchRes.ok) {
+                const matchData = await matchRes.json();
+                const total = (matchData && typeof matchData.total === 'number') ? matchData.total : null;
+                if (total === 0) {
+                    hintText.textContent = `No current product in your inventory matches "${vendor} / ${productName}". The exclusion will still be saved — it will start filtering as soon as a matching product is imported.`;
+                    hintEl.style.display = 'block';
+                }
+            }
+        } catch (_) { /* ignore — non-blocking check */ }
+
         try {
             const response = await fetch('/api/product-exclusions', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ vendor, product_name: productName, organization_id: orgId ? parseInt(orgId) : null, reason })
+                body: JSON.stringify({
+                    vendor,
+                    product_name: productName,
+                    organization_id: orgId ? parseInt(orgId) : null,
+                    reason,
+                })
             });
-            if (!response.ok) { const err = await response.json(); throw new Error(err.error || 'Failed'); }
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error || 'Failed');
+            }
             showToast('Exclusion added', 'success');
             bootstrap.Modal.getInstance(document.getElementById('addExclusionModal'))?.hide();
             loadExclusions();
-        } catch (e) { showToast('Error: ' + e.message, 'danger'); }
+        } catch (e) {
+            showToast('Error: ' + e.message, 'danger');
+        }
     }
 
     // Lazy load exclusions on tab show

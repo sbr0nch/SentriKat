@@ -108,17 +108,37 @@ reale fara' nei primi 30 minuti. Se non funziona, niente lancio.
 
 ## B.6 SBOM export — 3 formati (3 min)
 
-> 💡 L'export SBOM e' esposto **solo via API** (non c'e' un bottone
-> "Export" in dashboard). Testa direttamente con curl — questo e' anche
-> piu' rappresentativo dei clienti che lo consumano da pipeline CI.
+> 💡 **Tre entry-point per la stessa feature**:
+> 1. **Dashboard** → card Vulnerabilities → dropdown "Export" → sezione
+>    "SBOM Export" → CycloneDX / SPDX / STIX 2.1 (download diretto)
+> 2. **Sidebar → Inventory → SBOM Export** (`/exports/sbom`) — pagina
+>    dedicata con explainer + tre bottoni di download + snippet
+>    `curl` copia-incolla per il consumo da CI
+> 3. **API diretta**: `/api/sbom/export/cyclonedx`,
+>    `/api/sbom/export/spdx`, `/api/sbom/export/stix21` (⚠️ la route
+>    STIX e' `stix21`, NON `stix` — ci eravamo sbagliati)
+>
+> Testare almeno il path UI e un curl per validare i clienti che
+> consumano da pipeline CI.
 
-- [ ] `curl -sk -H "Cookie: $COOKIE_A" "$BASE/api/sbom/export/cyclonedx"` →
-      JSON con `bomFormat: "CycloneDX"`, `specVersion: "1.5"`,
+- [ ] Dashboard → "Export" dropdown → click **CycloneDX 1.5** → file JSON
+      scaricato con `bomFormat: "CycloneDX"`, `specVersion: "1.5"`,
       `components` non vuoto
-- [ ] `curl -sk -H "Cookie: $COOKIE_A" "$BASE/api/sbom/export/spdx"` →
-      JSON con `spdxVersion: "SPDX-2.3"`, `packages` non vuoto
-- [ ] `curl -sk -H "Cookie: $COOKIE_A" "$BASE/api/sbom/export/stix"` →
-      JSON con `type: "bundle"`, `objects` non vuoto
+- [ ] Dashboard → "Export" dropdown → click **SPDX 2.3** → file JSON con
+      `spdxVersion: "SPDX-2.3"`, `packages` non vuoto
+- [ ] Dashboard → "Export" dropdown → click **STIX 2.1** → file JSON con
+      `type: "bundle"`, `objects` non vuoto
+- [ ] Sidebar → Inventory → **SBOM Export** (`/exports/sbom`) → pagina
+      carica → click ciascuno dei tre bottoni di download → file salvato
+      senza errori nella console
+- [ ] Via curl (smoke test backend):
+      ```bash
+      curl -sk -H "Cookie: $COOKIE_A" "$BASE/api/sbom/export/cyclonedx" -o /tmp/sbom-cdx.json
+      curl -sk -H "Cookie: $COOKIE_A" "$BASE/api/sbom/export/spdx"      -o /tmp/sbom-spdx.json
+      curl -sk -H "Cookie: $COOKIE_A" "$BASE/api/sbom/export/stix21"    -o /tmp/sbom-stix.json
+      ls -lh /tmp/sbom-*.json
+      ```
+      Atteso: 3 file con dimensione > 0
 
 Sanity check rapido:
 ```bash

@@ -3017,7 +3017,10 @@
                                         {% if current_user.role == 'super_admin' %}Super Admin
                                         {% elif current_user.role == 'org_admin' %}Org Admin
                                         {% elif current_user.role == 'manager' %}Manager
-                                        {% else %}User{% endif %}
+                                        {% elif current_user.role == 'user' %}User
+                                        {% else %}{{ current_user.role|default('User', true)|replace('_', ' ')|title }}
+                                            <span class="badge bg-warning text-dark ms-1" title="This role is not in the canonical role set (super_admin, org_admin, manager, user). It may behave as 'user' in many gates.">legacy</span>
+                                        {% endif %}
                                     </small>
                                 </span>
                             </li>
@@ -3068,6 +3071,10 @@
                         <i class="bi bi-grid-1x2-fill" aria-hidden="true"></i>
                         <span class="link-text">Dashboard</span>
                     </a>
+                    <a href="/assignments" class="sidebar-link {{ 'active' if request.endpoint == 'main.assignments_page' else '' }}" data-tooltip="Remediation Assignments">
+                        <i class="bi bi-clipboard-check" aria-hidden="true"></i>
+                        <span class="link-text">Assignments</span>
+                    </a>
                 </div>
 
                 <!-- Assets & Inventory Section -->
@@ -3098,6 +3105,10 @@
                         <a href="/admin#import-queue" class="sidebar-sublink" onclick="navigateInventoryTab('import-queue', event)" data-tooltip="Import Queue">
                             <i class="bi bi-inbox"></i>
                             Import Queue
+                        </a>
+                        <a href="/exports/sbom" class="sidebar-sublink {{ 'active' if request.endpoint == 'main.exports_sbom' else '' }}" data-tooltip="SBOM Export">
+                            <i class="bi bi-file-earmark-code"></i>
+                            SBOM Export
                         </a>
                         <a href="/admin#exclusions" class="sidebar-sublink" onclick="navigateInventoryTab('exclusions', event)" data-tooltip="Exclusions">
                             <i class="bi bi-shield-x"></i>

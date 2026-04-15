@@ -1,0 +1,183 @@
+{% extends 'base.html' %}
+
+{% block title %}SBOM Export - SentriKat{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/"><i class="bi bi-house-door"></i></a></li>
+<li class="breadcrumb-item"><i class="bi bi-boxes me-1"></i>Inventory</li>
+<li class="breadcrumb-item active" aria-current="page">SBOM Export</li>
+{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="mb-0"><i class="bi bi-file-earmark-code me-2"></i>SBOM Export</h2>
+    </div>
+
+    <div class="alert alert-info mb-4">
+        <i class="bi bi-info-circle me-2"></i>
+        <strong>Software Bill of Materials.</strong> Export your full inventory as an
+        industry-standard SBOM. Each format serves a different ecosystem:
+        <strong>CycloneDX</strong> is the OWASP standard (widely adopted in
+        AppSec/DevSecOps tooling), <strong>SPDX</strong> is the Linux Foundation /
+        ISO 5962 standard (preferred for license compliance), <strong>STIX 2.1</strong>
+        is the OASIS standard for threat-intel sharing (ISACs, MISP, CISA).
+        All three export the same underlying data for your organization only.
+    </div>
+
+    <div class="row g-4">
+
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">
+                        <i class="bi bi-file-earmark-code me-2 text-primary"></i>CycloneDX 1.5
+                    </h5>
+                    <p class="card-text text-muted small flex-grow-1">
+                        JSON bundle with <code>bomFormat: CycloneDX</code>,
+                        <code>specVersion: 1.5</code>. Includes <code>components[]</code>
+                        with PURL and vendor, and <code>vulnerabilities[]</code>
+                        with CVSS ratings and affected refs. Compatible with
+                        Dependency-Track, Sonatype, GitHub Dependabot, Snyk, and any
+                        CycloneDX-aware SAST/DAST pipeline.
+                    </p>
+                    <div class="mt-auto">
+                        <button type="button" class="btn btn-primary w-100" onclick="downloadSbom('cyclonedx', this)">
+                            <i class="bi bi-download me-1"></i>Download JSON
+                        </button>
+                        <small class="text-muted d-block text-center mt-2">
+                            <code>/api/sbom/export/cyclonedx</code>
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">
+                        <i class="bi bi-file-earmark-code me-2 text-success"></i>SPDX 2.3
+                    </h5>
+                    <p class="card-text text-muted small flex-grow-1">
+                        JSON bundle with <code>spdxVersion: SPDX-2.3</code> and a
+                        <code>packages[]</code> array containing SPDXID, name,
+                        versionInfo, and <code>externalRefs</code> (CPE23Type)
+                        where available. Preferred by legal / procurement teams
+                        for software license compliance (ISO/IEC 5962).
+                    </p>
+                    <div class="mt-auto">
+                        <button type="button" class="btn btn-success w-100" onclick="downloadSbom('spdx', this)">
+                            <i class="bi bi-download me-1"></i>Download JSON
+                        </button>
+                        <small class="text-muted d-block text-center mt-2">
+                            <code>/api/sbom/export/spdx</code>
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body d-flex flex-column">
+                    <h5 class="card-title">
+                        <i class="bi bi-file-earmark-code me-2 text-dark"></i>STIX 2.1
+                    </h5>
+                    <p class="card-text text-muted small flex-grow-1">
+                        JSON bundle with <code>type: bundle</code> and an
+                        <code>objects[]</code> array of <code>vulnerability</code>
+                        SDOs, <code>software</code> SCOs, and <code>relationship</code>
+                        SROs (<code>affects</code>). Consumed by ISACs, MISP, CISA
+                        AIS, and other threat-intel platforms.
+                    </p>
+                    <div class="mt-auto">
+                        <button type="button" class="btn btn-dark w-100" onclick="downloadSbom('stix21', this)">
+                            <i class="bi bi-download me-1"></i>Download JSON
+                        </button>
+                        <small class="text-muted d-block text-center mt-2">
+                            <code>/api/sbom/export/stix21</code>
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="card mt-4">
+        <div class="card-body">
+            <h6 class="mb-3"><i class="bi bi-terminal me-2"></i>CLI / CI pipeline usage</h6>
+            <p class="small text-muted mb-2">
+                The same endpoints are callable via <code>curl</code> with your
+                session cookie or an API key. This is the recommended path for
+                CI/CD, dependency-track ingestion, and scheduled nightly exports.
+            </p>
+            <pre class="bg-light p-3 rounded small mb-0"><code># Session cookie (interactive shells)
+curl -sk -H "Cookie: session=$SESSION" \
+  https://app.sentrikat.com/api/sbom/export/cyclonedx -o sbom-cdx.json
+
+# API key (recommended for CI)
+curl -sk -H "X-API-Key: $SENTRIKAT_API_KEY" \
+  https://app.sentrikat.com/api/sbom/export/spdx -o sbom-spdx.json</code></pre>
+        </div>
+    </div>
+
+    <div class="alert alert-warning mt-4 mb-0">
+        <i class="bi bi-shield-exclamation me-2"></i>
+        <strong>Rate limit:</strong> 10 exports per hour per user. Exports larger
+        than the per-bundle cap return HTTP 413 — filter with
+        <code>?product_ids=1,2,3</code> or contact support for streaming exports.
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    /**
+     * Trigger an SBOM download. We use a hidden anchor so the browser treats
+     * it as a file save rather than a navigation — this avoids clobbering the
+     * current page on rate-limit or 4xx responses.
+     *
+     * On non-success the API returns JSON — we fetch first, check the
+     * Content-Type, and either save the blob or show a toast with the error.
+     */
+    async function downloadSbom(format, btn) {
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Generating...';
+        try {
+            const res = await fetch(`/api/sbom/export/${format}`, {
+                method: 'GET',
+                credentials: 'same-origin',
+                headers: { 'Accept': 'application/json' },
+            });
+            if (!res.ok) {
+                let msg = `HTTP ${res.status}`;
+                try {
+                    const j = await res.json();
+                    msg = j.message || j.error || msg;
+                } catch (_) { /* non-JSON body — keep status code */ }
+                showToast(`SBOM export failed: ${msg}`, 'danger');
+                return;
+            }
+            const blob = await res.blob();
+            const filename = `sentrikat-sbom-${format}-${new Date().toISOString().slice(0, 10)}.json`;
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showToast(`Downloaded ${filename}`, 'success');
+        } catch (err) {
+            showToast(`Network error: ${err.message}`, 'danger');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    }
+</script>
+{% endblock %}

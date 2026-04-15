@@ -258,24 +258,51 @@ nc -l -p 5514
 
 ## C.15 Exclusions (inventory noise reduction)
 
-> ⚠️ **Limite noto**: il form "Add Exclusion" (Inventory → Exclusions)
-> e' puramente testuale — vendor + product_name + reason, **zero
-> validazione** lato UI/backend. Non controlla che il prodotto esista
-> nel tuo inventario, non lookup su CPE dictionary, non suggerisce
-> vendor noti. Un refactor e' tracciato come follow-up (vedi TODO).
-> Per ora testa solo il "happy path".
+> 💡 Il modal "Add Exclusion" ha **CPE autocomplete**: digiti 2+
+> caratteri nel campo "Search CPE dictionary" e appare un dropdown
+> con i match dal NVD CPE dictionary (endpoint `/api/cpe/search`).
+> Cliccando una suggestion i campi vendor + product_name vengono
+> auto-compilati con i valori canonici. I campi restano editabili
+> per casi edge (prodotti non ancora nel CPE dictionary, vendor
+> custom).
+>
+> Al save viene fatto un **soft-check** contro l'inventario
+> dell'utente (`/api/products?search=...`): se nessun prodotto
+> corrente matcha, un banner warning lo segnala, ma il save procede
+> comunque (utile per pre-escludere roba che sta per essere
+> importata).
+
+### Autocomplete + happy path
 
 - [ ] Sidebar → Inventory → Exclusions → "Add Exclusion"
-- [ ] Compila vendor (es. "Microsoft") + product_name (es. "Edge") +
-      reason
+- [ ] Digita "microsoft" nel campo "Search CPE dictionary" → dropdown
+      con suggerimenti (loading spinner per < 1s)
+- [ ] Click su un suggerimento (es. "Microsoft / Edge") → i campi
+      Vendor e Product Name si auto-compilano
 - [ ] Save → l'entry compare nella tabella
 - [ ] Trigger un sync / match refresh → i match per
       Microsoft/Edge non compaiono piu' nei risultati
 - [ ] Delete esclusione → i match tornano visibili al sync successivo
+
+### Soft inventory-match warning
+
+- [ ] Crea un'esclusione per un vendor+product che **non esiste**
+      nel tuo inventario (es. "acme / frobnicator")
+- [ ] Al click su "Add Exclusion" deve apparire un banner warning:
+      *"No current product in your inventory matches ..."*
+- [ ] Dopo conferma, l'esclusione viene comunque salvata
+
+### Errori & edge cases
+
+- [ ] Modal aperto con 0 risultati: dropdown mostra
+      "No results in NVD dictionary" senza errori
 - [ ] Prova a creare un'esclusione con vendor vuoto → errore 400
       `vendor and product_name required`
+- [ ] Digita velocemente piu' query di seguito → solo l'ultima
+      richiesta deve popolare il dropdown (AbortController)
 - [ ] Edge case: vendor con case diverso ("microsoft" vs "Microsoft")
-      → documenta il comportamento reale (case-sensitive? trim?)
+      → documenta il comportamento reale (il backend confronta case
+      insensitive, ma auto-completing dal dropdown evita il problema)
 
 ---
 
