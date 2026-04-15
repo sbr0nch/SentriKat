@@ -1039,3 +1039,39 @@ class TestFooterVersionString:
             with patch.dict(os.environ, {'SENTRIKAT_BUILD_SHA': 'abcdef1234567'}):
                 rendered = self._render_footer(app)
                 assert rendered == 'SentriKat Cloud'
+
+
+class TestAlertsSettingsSmtpBanner:
+    """
+    Bug fix: the Alerts Settings page (/alerts/settings) rendered an SMTP
+    channel-status card in both SaaS and on-premise mode. In SaaS mode
+    tenants cannot configure SMTP (the platform operator runs a central
+    provider) so the card is meaningless and misleading. It must be
+    hidden in SaaS and the Webhooks card should expand to full width.
+    """
+
+    def test_onpremise_shows_smtp_card(self, admin_client, setup_complete):
+        """On-premise: SMTP card is rendered on the alerts settings page."""
+        with patch('app.saas._SENTRIKAT_MODE', 'onpremise'):
+            response = admin_client.get('/alerts/settings')
+            assert response.status_code == 200
+            body = response.get_data(as_text=True)
+            assert 'id="smtpStatus"' in body
+            assert 'id="smtpDetail"' in body
+            assert 'id="webhookStatus"' in body
+            assert 'Configure SMTP' in body
+
+    def test_saas_hides_smtp_card(self, admin_client, setup_complete):
+        """SaaS: SMTP card is hidden; webhook card is still rendered."""
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            response = admin_client.get('/alerts/settings')
+            assert response.status_code == 200
+            body = response.get_data(as_text=True)
+            # SMTP channel-card markers must not be present
+            assert 'id="smtpStatus"' not in body
+            assert 'id="smtpDetail"' not in body
+            # The "Configure SMTP" link from the SMTP card is gone too
+            assert 'Configure SMTP' not in body
+            # Webhook card is still there and functional
+            assert 'id="webhookStatus"' in body
+            assert 'Configure Webhooks' in body
