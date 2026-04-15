@@ -77,11 +77,9 @@
             <div class="col-6">
                 <label class="form-label">Report Type</label>
                 <select class="form-select form-select-sm" id="reportType">
-                    <option value="summary">Summary</option>
-                    <option value="detailed">Detailed</option>
-                    <option value="compliance">Compliance (CISA BOD 22-01)</option>
-                    <option value="nis2">Compliance (EU NIS2)</option>
-                    <option value="executive">Executive Summary</option>
+                    <option value="summary">Summary (monthly overview)</option>
+                    <option value="full">Full (30-day detailed)</option>
+                    <option value="critical_only">Critical only</option>
                 </select>
             </div>
             <div class="col-6">
@@ -301,14 +299,36 @@ async function toggleReport(id, enable) {
 }
 
 async function sendNow(id) {
-    if (!confirm('Send this report now?')) return;
-    const res = await fetch(`/api/reports/scheduled/${id}/send-now`, { method: 'POST' });
-    const data = await res.json();
-    showToast(data.message || (res.ok ? 'Report sent!' : 'Failed'), res.ok ? 'success' : 'danger');
+    const ok = await showConfirm(
+        'Generate and email this report to all configured recipients right now?',
+        'Send Report Now',
+        'Send Now',
+        'btn-primary'
+    );
+    if (!ok) return;
+    showToast('Generating report…', 'info');
+    try {
+        const res = await fetch(`/api/reports/scheduled/${id}/send-now`, { method: 'POST' });
+        let data = {};
+        try { data = await res.json(); } catch (_) {}
+        if (res.ok && data.success !== false) {
+            showToast(data.message || 'Report sent', 'success');
+        } else {
+            showToast(data.message || data.error || `Failed (HTTP ${res.status})`, 'danger');
+        }
+    } catch (err) {
+        showToast('Network error: ' + err.message, 'danger');
+    }
 }
 
 async function deleteReport(id) {
-    if (!confirm('Delete this scheduled report?')) return;
+    const ok = await showConfirm(
+        'Delete this scheduled report? This cannot be undone.',
+        'Delete Scheduled Report',
+        'Delete',
+        'btn-danger'
+    );
+    if (!ok) return;
     await fetch(`/api/reports/scheduled/${id}`, { method: 'DELETE' });
     loadReports();
 }

@@ -215,7 +215,7 @@ docker compose exec sentrikat grep -cn "except: pass\|except Exception: pass" ap
 ## E.14 Licensing gate su SBOM e Compliance
 
 ```bash
-# Login come user Free (Demo plan)
+# Login come user sul plan `free` (niente SBOM / API / compliance)
 curl -sk -H "Cookie: $COOKIE_FREE" \
   "$BASE/api/sbom/export/cyclonedx" -w "\nHTTP %{http_code}\n"
 ```

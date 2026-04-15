@@ -330,28 +330,39 @@ def list_assignments():
     can_see_notes = _can_view_assignment_notes()
     results = []
     for a in assignments:
-        d = a.to_dict()
-        if not can_see_notes:
-            d['notes'] = None
-            d['resolution_notes'] = None
-        # Include product info if available
-        if a.product:
-            d['product_name'] = f"{a.product.vendor} {a.product.product_name}"
-            d['product_version'] = a.product.version
-        else:
-            d['product_name'] = None
-            d['product_version'] = None
-        # Include CVE info from match if available
-        if a.match and hasattr(a.match, 'vulnerability') and a.match.vulnerability:
-            vuln = a.match.vulnerability
-            d['cve_info'] = {
-                'cve_id': vuln.cve_id,
-                'severity': vuln.severity,
-                'cvss_score': vuln.cvss_score,
-            }
-        else:
-            d['cve_info'] = None
-        results.append(d)
+        # Per-row try/except so a single broken row (missing product FK,
+        # orphan match, etc.) no longer turns the whole list endpoint
+        # into a 500 for the calling user. We skip the row and log the
+        # failing assignment id so the issue is visible in the logs.
+        try:
+            d = a.to_dict()
+            if not can_see_notes:
+                d['notes'] = None
+                d['resolution_notes'] = None
+            # Include product info if available
+            if a.product:
+                d['product_name'] = f"{a.product.vendor} {a.product.product_name}"
+                d['product_version'] = a.product.version
+            else:
+                d['product_name'] = None
+                d['product_version'] = None
+            # Include CVE info from match if available
+            if a.match and hasattr(a.match, 'vulnerability') and a.match.vulnerability:
+                vuln = a.match.vulnerability
+                d['cve_info'] = {
+                    'cve_id': vuln.cve_id,
+                    'severity': vuln.severity,
+                    'cvss_score': vuln.cvss_score,
+                }
+            else:
+                d['cve_info'] = None
+            results.append(d)
+        except Exception:
+            logger.exception(
+                "Failed to serialize assignment id=%s (org=%s) — skipping",
+                getattr(a, 'id', '?'), org_id,
+            )
+            continue
 
     return jsonify({
         'assignments': results,

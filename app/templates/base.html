@@ -3155,8 +3155,11 @@
                 {% endif %}
 
                 <!-- Integrations Section: Agent Keys/Activity visible to ALL plans with agents; others PRO only -->
+                {# Managers need Integrations (Agent Keys, Agent Activity, Scheduled
+                   Reports, Issue Trackers) because that's the surface area of the
+                   product-management workflow. Users & Access stays org_admin only. #}
                 {% if has_agents or has_pro_features %}
-                {% if not auth_enabled or (current_user and (current_user.is_super_admin() or current_user.is_org_admin() or current_user.is_admin)) %}
+                {% if not auth_enabled or (current_user and (current_user.is_super_admin() or current_user.is_org_admin() or current_user.is_admin or current_user.role == 'manager' or current_user.can_manage_products)) %}
                 <div class="sidebar-nav-section">
                     <div class="sidebar-nav-title">Integrations</div>
                     <a href="#" class="sidebar-link" onclick="toggleSubmenu(this, event)" data-tooltip="Integrations" data-admin-panel-hashes="integrations">

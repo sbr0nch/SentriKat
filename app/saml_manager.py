@@ -367,7 +367,7 @@ def get_or_create_saml_user(user_data: Dict) -> Tuple[Optional[Any], bool]:
         email=email,
         full_name=full_name,
         auth_type='saml',
-        role='viewer',  # Default role for SAML users
+        role='user',  # Default role for SAML users (no 'viewer' role exists — see User valid_roles in routes.py)
         is_active=True,
         organization_id=org.id
     )

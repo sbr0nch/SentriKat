@@ -64,12 +64,22 @@ resto della Part F.
 crea l'organizzazione sul SaaS, invia credenziali email.
 
 ### F.1.1 Self-service signup
+
+> 💡 I nomi dei piani canonici lato SaaS sono (vedi `models.py::SubscriptionPlan.DEFAULT_PLANS`):
+> `free`, `starter`, `pro`, `business`, `enterprise`. Non esiste un
+> plan chiamato "Free Trial" — "trial" e' uno *stato* della
+> Subscription (subscription_status='trial'), non un plan. Durante
+> il trial il plan di riferimento e' `free` (o il plan scelto, con
+> status=trial e trial_ends_at = +14gg).
+
 - [ ] Apri `https://sentrikat.com/signup` (marketing site) in incognito
-- [ ] Compila form: company name, email admin, password, plan=**Free Trial**
+- [ ] Compila form: company name, email admin, password, plan=`free`
+      (subscription_status diventera' automaticamente `trial` se il
+      portale implementa il flusso 14gg)
 - [ ] Check email verification: arriva email con link
 - [ ] Click verify → redirect a portal customer dashboard
 - [ ] **Portal admin panel** (`/admin/customers`): nuova row "AcmeCorp"
-      status=`active`, plan=`trial`, trial_ends_at = +14 giorni
+      status=`active`, subscription_status=`trial`, trial_ends_at = +14 giorni
 - [ ] **SaaS admin** (`/super-admin/organizations`): appare "AcmeCorp"
       org con status `active`, slot = piano trial
 - [ ] Org nel SaaS ha `license_key` valorizzato e matching con il portal
@@ -81,10 +91,12 @@ crea l'organizzazione sul SaaS, invia credenziali email.
 
 ### F.1.2 Admin-created customer (manual)
 - [ ] Portal admin → `/admin/customers/new`
-- [ ] Compila: company, admin email, plan=**Professional**, seats=50
+- [ ] Compila: company, admin email, plan=`business`, seats=50
+      (il Pro plan ha max_users=5 / max_agents=25, quindi per "seats=50"
+      il plan corretto e' `business` che ha max_agents=50, max_users=10)
 - [ ] Submit → portal crea org sul SaaS via API `/api/provision`
 - [ ] **Verifica portal**: customer status=`active`
-- [ ] **Verifica SaaS**: org appare con plan=professional, seat_limit=50
+- [ ] **Verifica SaaS**: org appare con plan=`business`, seat_limit=50
 - [ ] Logs SaaS mostrano `POST /api/provision` con 200 OK
 - [ ] Logs portal mostrano risposta OK dal SaaS
 - [ ] Email inviata a customer admin
@@ -104,13 +116,14 @@ crea l'organizzazione sul SaaS, invia credenziali email.
 ## F.2 Plan Change (Portal → SaaS sync)
 
 ### F.2.1 Upgrade plan
-- [ ] Scegli customer "AcmeCorp" (trial)
+- [ ] Scegli customer "AcmeCorp" (subscription_status=`trial`, plan=`free`)
 - [ ] Portal `/admin/customers/acmecorp/edit` → cambia plan da
-      `trial` a `professional`, seats da 5 a 50
+      `free` a `pro`, seats da 1 a 5 (limite Pro)
 - [ ] Salva → portal chiama SaaS `PATCH /api/license/<license_key>`
 - [ ] **Verifica SaaS**: `/super-admin/organizations/acmecorp`
-      mostra plan=professional, seat_limit=50, expires_at rinnovato
-- [ ] Login come user AcmeCorp sul SaaS → banner "You are on Professional"
+      mostra plan=`pro`, max_users=5, max_agents=25, expires_at rinnovato
+- [ ] Login come user AcmeCorp sul SaaS → Subscription page mostra
+      "Professional — Active"
 - [ ] Feature limits aggiornate: puoi aggiungere più asset (fino al nuovo
       limite), vedi feature prima gated
 - [ ] Audit log sul SaaS ha entry `plan_changed`
@@ -118,8 +131,8 @@ crea l'organizzazione sul SaaS, invia credenziali email.
 - [ ] Timestamps corrispondono (±1 sec)
 
 ### F.2.2 Downgrade plan
-- [ ] Customer "AcmeCorp" ora su Professional con 45/50 asset usati
-- [ ] Portal: downgrade a `Starter` (limite 20 asset)
+- [ ] Customer "AcmeCorp" ora su plan=`business` con 45/50 asset usati
+- [ ] Portal: downgrade a plan=`starter` (limite 10 agents, NOT 20)
 - [ ] **Verifica comportamento**: che succede ai 45 asset esistenti?
       - opzione A: grace period 30gg, readonly sopra 20
       - opzione B: blocco immediato nuove creazioni, lettura ok
@@ -181,7 +194,7 @@ crea l'organizzazione sul SaaS, invia credenziali email.
 - [ ] Se portal down, SaaS bufferizza e retry
 
 ### F.4.2 Overage handling
-- [ ] Customer su Starter (20 asset) supera a 22 asset
+- [ ] Customer su plan=`starter` (max_agents=10) supera a 12 asset
 - [ ] Portal riceve usage e calcola overage = 2 × overage_price
 - [ ] Portal mostra warning "overage" nel dashboard customer
 - [ ] Email al customer admin avvisa dell'overage
@@ -204,7 +217,7 @@ crea l'organizzazione sul SaaS, invia credenziali email.
 - [ ] Inserisce carta (Stripe test card `4242 4242 4242 4242`)
 - [ ] Subscription attivata sul portal
 - [ ] Webhook Stripe → portal → SaaS: plan updated
-- [ ] **Verifica SaaS**: user vede "You are on Professional"
+- [ ] **Verifica SaaS**: Subscription page mostra "Professional — Active"
 - [ ] Invoice #1 generata sul portal, PDF scaricabile
 - [ ] Invoice email inviata
 

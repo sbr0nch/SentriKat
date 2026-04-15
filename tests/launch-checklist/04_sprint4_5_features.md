@@ -5,25 +5,45 @@
 
 ---
 
-## D.1 Assignments Management page (Sprint 4 #29)
+## D.1 Assignments — workflow embedded nei match (Sprint 4 #29)
+
+> ⚠️ **Non esiste** una pagina standalone "Assignments" con voce in
+> sidebar — gli assignment vivono dentro il dettaglio del singolo
+> match sulla Dashboard. La feature backend e' completa (vedi
+> `/api/remediation/assignments`), ma la UI e' solo quella embedded.
+> Follow-up tracciato: pagina Assignments standalone con tabella
+> + filtri + bulk actions.
 
 **Setup**: avere almeno 1 prodotto con vulnerabilita'. Login come `org_admin`.
 
-- [ ] Naviga a **Assignments** (menu) → pagina con tabella
-- [ ] Click "+ Create Assignment" → modal si apre
-- [ ] Compila: assignee, CVE, priority, due_date, notes
-- [ ] Salva → appare in lista
-- [ ] Filter per status (open / in_progress / resolved / accepted_risk)
-      → lista si aggiorna
-- [ ] Filter per assignee → si aggiorna
-- [ ] Filter per overdue=true → mostra solo scaduti
-- [ ] Paginazione funziona (se hai ≥ 50 assignments)
-- [ ] Inline status change (dropdown nella row) → persiste
-- [ ] Click su una row → modal dettaglio / edit
-- [ ] Modifica notes, resolution_notes → salva → persiste
-- [ ] Delete assignment → rimossa dalla lista
-- [ ] **Non-admin**: user normale non vede il bottone Create
-      (o vede solo le assignments a lui)
+- [ ] Dashboard → click su un match → dettaglio CVE → tab/sezione
+      "Remediation" / "Assignments"
+- [ ] Click "+ Create Assignment" (nel dettaglio match) → modal si apre
+- [ ] Compila: assignee, priority, due_date, notes
+- [ ] Salva → appare nella sezione remediation del match
+- [ ] **API smoke** (per verificare filtri/paginazione che la UI non
+      espone):
+      ```bash
+      curl -sk -H "Cookie: $COOKIE_A" \
+        "$BASE/api/remediation/assignments?status=open&per_page=25" \
+        | python3 -m json.tool
+      ```
+      Atteso: HTTP 200, JSON con `assignments`, `total`, `pages`,
+      `overdue`. **Mai 500** — se vedi un 500 grep dei log per
+      `Failed to serialize assignment id=` (il fix di hardening logga
+      la riga incriminata e prosegue).
+- [ ] Filtri via API: `?status=open`, `?priority=high`, `?assigned_to=...`
+- [ ] Inline status change dal match → persiste dopo reload (verifica
+      via API con `GET /api/remediation/assignments/<id>`)
+- [ ] Modifica notes / resolution_notes → salva → persiste
+- [ ] Delete assignment via API:
+      `curl -sk -X DELETE -H "Cookie: $COOKIE_A" "$BASE/api/remediation/assignments/<id>"`
+      → rimossa
+- [ ] **M15 note redaction**: login come `role='user'` (non admin):
+      GET `/api/remediation/assignments/<id>` → i campi `notes` e
+      `resolution_notes` devono essere `null` (redatti). Questo e'
+      by design — solo `admin / org_admin / super_admin` vedono le
+      note, il resto dell'assignment e' visibile.
 
 ## D.2 Issue Tracker Integration (Sprint 4 #30)
 
@@ -62,20 +82,32 @@ YouTrack / Webhook).
 
 ## D.4 SBOM Export — CycloneDX / SPDX / STIX 2.1 (Sprint 4 #32 + Sprint 5)
 
-- [ ] Dashboard → Export → "SBOM" section visibile
-- [ ] **CycloneDX 1.5 JSON** → download
+> ⚠️ L'export SBOM e' esposto **solo via API**, non c'e' un bottone
+> "Export" in Dashboard. Se il cliente si aspetta un download in
+> browser e' un gap noto da colmare.
+
+- [ ] **CycloneDX 1.5 JSON** via curl:
+      ```bash
+      curl -sk -H "Cookie: $COOKIE_A" "$BASE/api/sbom/export/cyclonedx" -o sbom-cdx.json
+      ```
       - `bomFormat: "CycloneDX"`, `specVersion: "1.5"`
       - `components` array: ogni component ha `type`, `name`, `version`,
         `purl` (es. `pkg:apt/openssl/openssl@1.1.1k`), `supplier` (vendor)
       - `vulnerabilities` array: ogni vuln ha `id`, `source`, `ratings`,
         `affects` refs
-- [ ] **Validazione online**: upload su
+- [ ] **Validazione online**: upload `sbom-cdx.json` su
       https://cyclonedx.github.io/cyclonedx.org/tool-center/ → no errors
-- [ ] **SPDX 2.3 JSON** → download
+- [ ] **SPDX 2.3 JSON** via curl:
+      ```bash
+      curl -sk -H "Cookie: $COOKIE_A" "$BASE/api/sbom/export/spdx" -o sbom-spdx.json
+      ```
       - `spdxVersion: "SPDX-2.3"`
       - `packages` array con SPDXID, name, versionInfo, externalRefs
         (cpe23Type se disponibile)
-- [ ] **STIX 2.1 JSON** → download
+- [ ] **STIX 2.1 JSON** via curl:
+      ```bash
+      curl -sk -H "Cookie: $COOKIE_A" "$BASE/api/sbom/export/stix" -o sbom-stix.json
+      ```
       - `type: "bundle"`, `id` starts with `bundle--`
       - `objects` array:
         - Almeno 1 `vulnerability` SDO (external_references[0].source_name = "cve")
@@ -242,31 +274,42 @@ Gia' coperto in D.4 sopra. Verifica addizionale:
 
 ## D.13 Compliance Gap Analysis Reports (Sprint 5 — PCI / ISO / SOC 2)
 
+> 💡 Questi tre framework sono gated dietro il **Compliance Pack**
+> add-on (€199/mo). Un piano Pro o Business senza l'add-on riceve
+> 403. Il blocco `document_integrity` e' aggiunto da
+> `reports_api.py::_add_report_integrity` e contiene `algorithm`,
+> `content_hash` (SHA-256), `hmac_sha256` (HMAC con app `SECRET_KEY`),
+> `report_id`, `attestation`, `audit_trail`, `verification_note`.
+
 ### PCI-DSS v4.0
 - [ ] `GET /api/reports/compliance/pci-dss` → HTTP 200, JSON
 - [ ] Top-level keys: `framework`, `version`, `generated_at`,
-      `organization`, `requirements`, `integrity`
+      `organization`, `requirements`, `document_integrity`
 - [ ] `requirements` contiene entries per Req 6.3 e Req 11.3
 - [ ] Ogni requirement ha `id`, `title`, `status`
       (`PASS|PARTIAL|FAIL|NOT_APPLICABLE`), `evidence`, `gaps`, `recommendations`
-- [ ] `integrity.algorithm = "HMAC-SHA256"`, `hash`, `signed_at`
-- [ ] `?format=pdf` → download PDF, cover page con nome org + data
-- [ ] **License gate**: Free user → HTTP 403
+- [ ] `document_integrity.algorithm = "SHA-256"`, `content_hash` non
+      vuoto, `hmac_sha256` non vuoto, `verification_note` presente
+- [ ] `?format=pdf` → download PDF, cover page con nome org + data,
+      footer con hash SHA-256 visibile
+- [ ] **License gate**: Free / Starter / Pro senza add-on → HTTP 403
 - [ ] Cross-tenant: Org A user → only Org A data
-- [ ] Verifica integrity: ricalcola HMAC-SHA256 sul JSON canonicale
-      con `SECRET_KEY` → deve matchare `integrity.hash`
+- [ ] **Tamper test**: modifica un campo a caso nel JSON, ricalcola
+      SHA-256 sulla rappresentazione canonicale (escluso
+      `document_integrity`) → deve differire da `content_hash`
+      originale
 
 ### ISO/IEC 27001:2022
 - [ ] `GET /api/reports/compliance/iso-27001` → 200
 - [ ] Requirements: A.8.8, A.8.16, A.5.24
 - [ ] PDF variant funziona
-- [ ] Integrity verifies
+- [ ] `document_integrity` presente e verificabile
 
 ### SOC 2
 - [ ] `GET /api/reports/compliance/soc2` → 200
 - [ ] Requirements: CC7.1, CC7.2, CC7.4, CC6.6
 - [ ] PDF variant funziona
-- [ ] Integrity verifies
+- [ ] `document_integrity` presente e verificabile
 
 ### Cross-cutting
 - [ ] Rate limit: 11+ req in 1h → 429
