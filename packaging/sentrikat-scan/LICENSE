@@ -1,0 +1,33 @@
+MIT License
+
+Copyright (c) 2024-2026 Denis Sota
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+NOTE: this MIT license covers ONLY the sentrikat-scan client CLI published
+on PyPI as the `sentrikat-scan` package. The SentriKat server-side platform
+(this repository's main codebase) is licensed under a separate commercial
+license — see LICENSE.md at the repository root.
+
+The client CLI is released under a permissive open-source license so that
+customers can install it freely on CI runners and developer workstations
+without legal friction. It is a connector: it talks to a SentriKat server
+instance and requires a valid tenant API key to be useful.

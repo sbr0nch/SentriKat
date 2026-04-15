@@ -1,0 +1,12 @@
+# The scanner source is copied in from scripts/sentrikat-scan.py at build
+# time (see build.sh). Never check in the copy — the repo has exactly one
+# source of truth.
+sentrikat_scan.py
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+*.egg
+__pycache__/
+*.pyc

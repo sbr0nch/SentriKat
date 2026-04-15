@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sentrikat-scan"
+version = "1.0.0"
+description = "Dependency lockfile scanner and CI/CD connector for the SentriKat vulnerability management platform"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Denis Sota", email = "support@sentrikat.com" },
+]
+maintainers = [
+    { name = "Denis Sota", email = "support@sentrikat.com" },
+]
+requires-python = ">=3.7"
+keywords = [
+    "security",
+    "vulnerability-management",
+    "sca",
+    "software-composition-analysis",
+    "dependency-scanner",
+    "lockfile",
+    "ci-cd",
+    "devsecops",
+    "cve",
+    "sbom",
+    "sentrikat",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: System :: Monitoring",
+]
+# Zero runtime dependencies — the script uses only Python stdlib so it
+# drops into any CI image (alpine, distroless, scratch + python) without
+# dragging wheels along for the ride.
+dependencies = []
+
+[project.scripts]
+sentrikat-scan = "sentrikat_scan:main"
+
+[project.urls]
+Homepage = "https://sentrikat.com"
+Documentation = "https://sentrikat.com/docs/connectors/sentrikat-scan"
+Repository = "https://github.com/sbr0nch/SentriKat"
+Issues = "https://github.com/sbr0nch/SentriKat/issues"
+Changelog = "https://github.com/sbr0nch/SentriKat/releases"
+
+[tool.setuptools]
+# Flat single-file module — the source of truth is scripts/sentrikat-scan.py
+# in the main SentriKat repo. packaging/sentrikat-scan/build.sh copies that
+# file here as sentrikat_scan.py (Python module names cannot contain dashes)
+# before the build. The copied file is gitignored so the repo never holds
+# two divergent copies.
+py-modules = ["sentrikat_scan"]
+
+[tool.setuptools.package-data]
+"*" = ["README.md", "LICENSE"]
