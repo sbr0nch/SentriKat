@@ -84,7 +84,15 @@
 </div>
 
 <!-- Delivery Channels Overview -->
+{#
+  SMTP card is on-premise only: in SaaS mode the platform operator runs a
+  centralized email provider (Resend) and tenants cannot configure their own
+  SMTP, so the "SMTP not configured / active" status widget is meaningless
+  and misleading. The Webhooks card stays in both modes because webhooks are
+  still per-tenant configuration in SaaS.
+#}
 <div class="row g-3 mb-4">
+    {% if not saas_mode %}
     <div class="col-md-6">
         <div class="channel-card">
             <div class="d-flex justify-content-between align-items-start mb-2">
@@ -100,7 +108,8 @@
             <a href="/admin-panel#settings:email" class="small text-decoration-none d-block mt-2"><i class="bi bi-gear me-1"></i>Configure SMTP</a>
         </div>
     </div>
-    <div class="col-md-6">
+    {% endif %}
+    <div class="{{ 'col-md-6' if not saas_mode else 'col-md-12' }}">
         <div class="channel-card">
             <div class="d-flex justify-content-between align-items-start mb-2">
                 <div>
@@ -360,26 +369,29 @@ async function loadChannelStatus() {
     try {
         const settings = await apiFetch('/api/settings/notifications');
 
-        // SMTP status - check both global and org-level SMTP
-        const smtpHost = settings.smtp_host;
-        const smtpConfigured = settings.smtp_configured;
-        const orgSmtpCount = settings.org_smtp_count || 0;
+        // SMTP status - only present on on-premise; the template hides the
+        // entire card in SaaS mode because tenants cannot configure SMTP.
         const smtpEl = document.getElementById('smtpStatus');
         const smtpDetail = document.getElementById('smtpDetail');
-        if (smtpConfigured) {
-            smtpEl.className = 'channel-status active';
-            smtpEl.innerHTML = '<i class="bi bi-check-circle-fill"></i> Active';
-            let detail = `Global: ${smtpHost}`;
-            if (orgSmtpCount > 0) detail += ` + ${orgSmtpCount} org SMTP`;
-            smtpDetail.textContent = detail;
-        } else if (orgSmtpCount > 0) {
-            smtpEl.className = 'channel-status active';
-            smtpEl.innerHTML = '<i class="bi bi-check-circle-fill"></i> Active';
-            smtpDetail.textContent = `${orgSmtpCount} organization(s) with own SMTP`;
-        } else {
-            smtpEl.className = 'channel-status inactive';
-            smtpEl.innerHTML = '<i class="bi bi-dash-circle"></i> Not configured';
-            smtpDetail.textContent = 'No global or org-level SMTP configured';
+        if (smtpEl && smtpDetail) {
+            const smtpHost = settings.smtp_host;
+            const smtpConfigured = settings.smtp_configured;
+            const orgSmtpCount = settings.org_smtp_count || 0;
+            if (smtpConfigured) {
+                smtpEl.className = 'channel-status active';
+                smtpEl.innerHTML = '<i class="bi bi-check-circle-fill"></i> Active';
+                let detail = `Global: ${smtpHost}`;
+                if (orgSmtpCount > 0) detail += ` + ${orgSmtpCount} org SMTP`;
+                smtpDetail.textContent = detail;
+            } else if (orgSmtpCount > 0) {
+                smtpEl.className = 'channel-status active';
+                smtpEl.innerHTML = '<i class="bi bi-check-circle-fill"></i> Active';
+                smtpDetail.textContent = `${orgSmtpCount} organization(s) with own SMTP`;
+            } else {
+                smtpEl.className = 'channel-status inactive';
+                smtpEl.innerHTML = '<i class="bi bi-dash-circle"></i> Not configured';
+                smtpDetail.textContent = 'No global or org-level SMTP configured';
+            }
         }
 
         // Unified Webhook status (Slack + Teams + Generic + per-org)
