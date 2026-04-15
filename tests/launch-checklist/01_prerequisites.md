@@ -10,7 +10,11 @@
 - [ ] L'istanza SentriKat e' raggiungibile su HTTPS, es.
       `https://app.sentrikat.com` o `https://staging.sentrikat.com`
 - [ ] `curl -sk $BASE/api/health` ritorna `{"status":"healthy",...}` con HTTP 200
-- [ ] La dashboard apre nel browser senza errori nella console JavaScript
+- [ ] La dashboard apre nel browser senza errori nella console JavaScript.
+      💡 In modalita' SaaS (org_admin non super_admin) il box "Last Sync" non
+      viene renderizzato: il codice gia' salta la chiamata se l'elemento non
+      esiste, quindi la console deve essere pulita. Un errore
+      `loadLastSync ... innerHTML null` indica una regressione — fixala.
 - [ ] Il container `sentrikat` e' in stato `healthy`:
       ```bash
       docker compose ps sentrikat

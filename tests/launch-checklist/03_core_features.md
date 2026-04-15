@@ -120,33 +120,63 @@ Config (Settings > Authentication > SAML):
 
 ## C.8 Scheduled Reports
 
-- [ ] Settings > Compliance > Scheduled Reports
-- [ ] Crea: daily, 09:00, summary type, recipient email
-- [ ] Toggle "send to managers"
-- [ ] Save → appare in lista
-- [ ] Click "Send Now" → report spedito (check email o logs)
-- [ ] `last_sent` aggiornato
-- [ ] Crea weekly report con NIS2 type
-- [ ] Toggle off → `enabled: false`
-- [ ] Delete → rimosso
-- [ ] Scheduler logs: `process_scheduled_reports` ogni 10 min
+> 💡 Accesso: sidebar → **Integrations → Scheduled Reports**
+> (`/reports/scheduled`). *Non* e' sotto Settings/Compliance.
+>
+> I `report_type` attualmente validi lato backend sono esclusivamente
+> `summary`, `full`, `critical_only` (vedi
+> `app/models.py::ScheduledReport.REPORT_TYPE_CHOICES`). Se la UI
+> mostra opzioni tipo "Compliance (CISA BOD 22-01)" o "NIS2" e le
+> sottomette letteralmente, la chiamata fallisce con
+> `Invalid report_type`.
+
+- [ ] Integrations → Scheduled Reports → "New Report"
+- [ ] Crea: name="Daily Summary", frequency=daily, time=09:00,
+      report_type=**Summary**, recipient=`you@example.com`
+- [ ] Save → appare in lista con `enabled: true`, `last_sent: null`
+- [ ] Click "Send Now" → si apre **modal di conferma stilizzato
+      Bootstrap** (non browser confirm nativo), dopo conferma appare
+      toast "Generating report…" poi success/fail
+- [ ] Verifica email ricevuta (o `docker compose logs sentrikat | grep scheduled_report`)
+- [ ] `last_sent` aggiornato nella lista dopo reload
+- [ ] Crea un secondo report weekly con `report_type=critical_only`
+- [ ] Toggle pause → `enabled: false`, il record rimane in lista
+- [ ] Delete → modal di conferma `btn-danger`, dopo conferma record
+      rimosso **hard delete** (non soft-delete)
+- [ ] Scheduler logs: `process_scheduled_reports` registrato ogni 10 min
 
 ## C.9 Notifications
 
+> 💡 **Alert Management** e' una pagina a se' (`/alerts/settings`),
+> raggiungibile dalla sidebar **Settings → Alert Management**. NON e'
+> una tab del pannello `/admin-panel#settings` — non cercarla li' se
+> non la trovi. In SaaS mode la configurazione SMTP e' disabilitata (le
+> email passano dal provider gestito Resend su `noreply@alerts.sentrikat.com`).
+
 ### Email Alerts
-- [ ] Configure SMTP (Settings > Email & Alerts)
-- [ ] Test email → delivered
-- [ ] Sync → se nuovi CVE critici, alert spedito
+- [ ] Sidebar → Settings → Alert Management (`/alerts/settings`)
+- [ ] Configura alert mode per l'org (critical_only / high_and_above / all)
+- [ ] Configura email recipients per l'org
+- [ ] In SaaS mode: Settings → Email & Notifications mostra quota
+      residua (es. `0 / 500 emails used this month`). Il counter e'
+      reale — viene popolato da `EmailMonthlyUsage` ogni invio
+      (vedi `app/settings_api.py::get_email_quota`).
+- [ ] On-premise: configura SMTP (Settings → Email & Notifications)
+      e verifica test email
+- [ ] Trigger sync → se nuovi CVE critici, alert spedito
 - [ ] AlertLog table contiene record sent
 
 ### Slack / Teams / Webhook
-- [ ] Settings > Integrations > Slack: webhook URL, test → delivered
-- [ ] Settings > Integrations > Teams: webhook URL, test → delivered
+- [ ] Alert Management → Delivery Channels → Webhooks → add Slack
+      webhook URL, test → delivered
+- [ ] Aggiungi Teams webhook URL, test → delivered
 - [ ] Generic Webhook: URL + format + test → delivered
 
 ### Issue Trackers
-- [ ] Settings > Integrations > Jira: configure, test connection
-- [ ] Crea issue da vulnerability → verifica in Jira
+- [ ] Sidebar → Integrations → Issue Trackers
+      (`/admin-panel#integrations:jiraIntegration`)
+- [ ] Configura Jira/GitHub/GitLab/YouTrack, test connection
+- [ ] Crea issue da vulnerability → verifica nel tracker esterno
 
 ## C.10 License Activation
 
@@ -225,6 +255,27 @@ nc -l -p 5514
 - [ ] Switch UDP → TCP → funziona over TCP
 - [ ] Disable → no piu' eventi forward
 - [ ] Reload page → settings persisted
+
+## C.15 Exclusions (inventory noise reduction)
+
+> ⚠️ **Limite noto**: il form "Add Exclusion" (Inventory → Exclusions)
+> e' puramente testuale — vendor + product_name + reason, **zero
+> validazione** lato UI/backend. Non controlla che il prodotto esista
+> nel tuo inventario, non lookup su CPE dictionary, non suggerisce
+> vendor noti. Un refactor e' tracciato come follow-up (vedi TODO).
+> Per ora testa solo il "happy path".
+
+- [ ] Sidebar → Inventory → Exclusions → "Add Exclusion"
+- [ ] Compila vendor (es. "Microsoft") + product_name (es. "Edge") +
+      reason
+- [ ] Save → l'entry compare nella tabella
+- [ ] Trigger un sync / match refresh → i match per
+      Microsoft/Edge non compaiono piu' nei risultati
+- [ ] Delete esclusione → i match tornano visibili al sync successivo
+- [ ] Prova a creare un'esclusione con vendor vuoto → errore 400
+      `vendor and product_name required`
+- [ ] Edge case: vendor con case diverso ("microsoft" vs "Microsoft")
+      → documenta il comportamento reale (case-sensitive? trim?)
 
 ---
 

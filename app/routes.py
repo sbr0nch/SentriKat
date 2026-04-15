@@ -2517,9 +2517,21 @@ def assign_product_organizations(product_id):
     if not org_ids:
         return jsonify({'error': 'No organizations specified'}), 400
 
+    # Tenant isolation: user can only assign products to organizations they
+    # belong to. Without this check, an org_admin could pass an arbitrary
+    # organization_id and leak their product to another customer's tenant.
+    allowed_target_org_ids = None
+    if current_user and not _super_admin_unrestricted():
+        allowed_target_org_ids = {org['id'] for org in current_user.get_all_organizations()}
+
     try:
         added_orgs = []
         for org_id in org_ids:
+            if allowed_target_org_ids is not None and org_id not in allowed_target_org_ids:
+                return jsonify({
+                    'error': 'You can only assign products to organizations you belong to'
+                }), 403
+
             org = Organization.query.get(org_id)
             if not org:
                 continue
