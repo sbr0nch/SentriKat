@@ -2464,26 +2464,43 @@ def purge_products():
 @bp.route('/api/products/<int:product_id>/organizations', methods=['GET'])
 @login_required
 def get_product_organizations(product_id):
-    """Get organizations assigned to a product (organization-scoped)"""
+    """Get organizations assigned to a product (organization-scoped).
+
+    Tenant isolation: even if the user has access to the product through
+    one of the assigned orgs, the response MUST only include the orgs the
+    user belongs to. Returning the full org list leaks metadata about
+    other customers' tenants (org ids + display names) to any
+    authenticated user who happens to touch a shared product.
+    """
     product = Product.query.get_or_404(product_id)
 
     # Organization isolation: verify user has access to this product
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
+    user_org_ids = None
     if current_user and not _super_admin_unrestricted():
-        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
+        user_org_ids = {org['id'] for org in current_user.get_all_organizations()}
         product_org_ids = [org.id for org in product.organizations.all()]
         if product.organization_id:
             product_org_ids.append(product.organization_id)
         if not any(oid in user_org_ids for oid in product_org_ids):
             return jsonify({'error': 'Product not found'}), 404
 
-    # Get assigned organizations from many-to-many relationship
-    assigned_orgs = [{'id': org.id, 'name': org.name, 'display_name': org.display_name}
-                     for org in product.organizations.all()]
+    def _visible(org_id):
+        # Super admin in on-prem mode sees everything; everyone else
+        # sees only orgs they are a member of.
+        return user_org_ids is None or org_id in user_org_ids
+
+    # Get assigned organizations from many-to-many relationship, filtered
+    # to only orgs the caller is allowed to see.
+    assigned_orgs = [
+        {'id': org.id, 'name': org.name, 'display_name': org.display_name}
+        for org in product.organizations.all()
+        if _visible(org.id)
+    ]
 
     # Also include legacy organization_id (may be in addition to many-to-many)
-    if product.organization_id and product.organization:
+    if product.organization_id and product.organization and _visible(product.organization_id):
         legacy_org = {'id': product.organization.id, 'name': product.organization.name,
                       'display_name': product.organization.display_name}
         # Add if not already in list

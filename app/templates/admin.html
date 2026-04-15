@@ -323,6 +323,10 @@
         <!-- Bulk Actions -->
         <div class="mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
             <div class="d-flex gap-2 flex-wrap">
+                {# Approve/Reject are mutating actions — hide from viewer / user roles.
+                   The backend still enforces @manager_required on the corresponding
+                   endpoints; this is purely the UI half of the gate. #}
+                {% if current_user and (current_user.role in ['manager', 'org_admin', 'super_admin'] or current_user.is_admin or current_user.can_manage_products) %}
                 <div class="btn-group">
                     <button class="btn btn-success btn-sm" onclick="bulkApproveQueue()" id="bulkApproveBtn" disabled>
                         <i class="bi bi-check-all me-1"></i>Approve Selected
@@ -339,6 +343,7 @@
                         <i class="bi bi-x-circle me-1"></i>Reject All
                     </button>
                 </div>
+                {% endif %}
             </div>
             <div class="d-flex gap-2 align-items-center flex-wrap">
                 <div class="input-group" style="max-width: 280px;">
@@ -441,9 +446,13 @@
                     </button>
                 </div>
             </div>
+            {# Adding exclusions is a mutating action — hide from viewer / user roles.
+               Backend still enforces the role on POST /api/product-exclusions. #}
+            {% if current_user and (current_user.role in ['manager', 'org_admin', 'super_admin'] or current_user.is_admin or current_user.can_manage_products) %}
             <button class="btn btn-primary btn-sm" onclick="showAddExclusionModal()">
                 <i class="bi bi-plus-lg me-1"></i>Add Exclusion
             </button>
+            {% endif %}
         </div>
 
         <div class="card">
@@ -2194,8 +2203,13 @@
 
     function updateBulkToolbar() {
         const toolbar = document.getElementById('bulkActionsToolbar');
+        // The bulk toolbar is Jinja-gated to manager / org_admin / super_admin.
+        // For viewer / user roles the element is absent — skip silently
+        // instead of crashing with "can't access property ... is null".
+        if (!toolbar) return;
         const count = selectedProducts.size;
-        document.getElementById('selectedCount').textContent = count;
+        const selectedCountEl = document.getElementById('selectedCount');
+        if (selectedCountEl) selectedCountEl.textContent = count;
 
         if (count > 0) {
             toolbar.style.display = 'block';
@@ -2311,7 +2325,10 @@
     function clearSelection() {
         selectedProducts.clear();
         document.querySelectorAll('.product-checkbox').forEach(cb => cb.checked = false);
-        document.getElementById('selectAllCheckbox').checked = false;
+        // selectAllCheckbox is also in the manager-gated header — null-guard
+        // for viewer / user roles where the bulk UI is not rendered.
+        const selectAllCb = document.getElementById('selectAllCheckbox');
+        if (selectAllCb) selectAllCb.checked = false;
         updateBulkToolbar();
     }
 
@@ -3905,12 +3922,12 @@
                                 <button class="btn btn-outline-primary btn-sm" onclick="showEndpointDetail(${parseInt(asset.id)}, '${escapeHtml(String(asset.hostname || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')" title="View details & installed software">
                                     <i class="bi bi-info-circle"></i>
                                 </button>
-                                ${agentVer && latestVer && agentVer !== latestVer && compareVersions(agentVer, latestVer) < 0 && !asset.pending_update ? `<button class="btn btn-outline-warning btn-sm" onclick="pushUpdateToAgent(${parseInt(asset.id)}, '${escapeHtml(String(asset.hostname || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')" title="Push agent update">
+                                ${userPermissions.canManageProducts && agentVer && latestVer && agentVer !== latestVer && compareVersions(agentVer, latestVer) < 0 && !asset.pending_update ? `<button class="btn btn-outline-warning btn-sm" onclick="pushUpdateToAgent(${parseInt(asset.id)}, '${escapeHtml(String(asset.hostname || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')" title="Push agent update">
                                     <i class="bi bi-cloud-arrow-up"></i>
                                 </button>` : ''}
-                                <button class="btn btn-outline-danger btn-sm" onclick="deleteEndpoint(${parseInt(asset.id)}, '${escapeHtml(String(asset.hostname || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')" title="Delete endpoint">
+                                ${userPermissions.canManageProducts ? `<button class="btn btn-outline-danger btn-sm" onclick="deleteEndpoint(${parseInt(asset.id)}, '${escapeHtml(String(asset.hostname || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"))}')" title="Delete endpoint">
                                     <i class="bi bi-trash"></i>
-                                </button>
+                                </button>` : ''}
                             </div>
                         </td>
                     </tr>`;

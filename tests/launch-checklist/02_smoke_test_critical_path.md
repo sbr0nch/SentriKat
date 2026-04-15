@@ -176,6 +176,114 @@ curl -sk -H "Cookie: $COOKIE_A" "$BASE/api/sbom/export/cyclonedx" \
 - [ ] Response JSON mostra `dry_run: true`, `organization`, `digest` con
       contatori CVE
 
+## B.10 RBAC smoke — 4 ruoli, 3 account (5 min)
+
+> 💡 Gli account di test devono avere `role` esattamente come di seguito
+> — verifica nel DB prima di partire, altrimenti il comportamento e'
+> falsato (es. un "viewer" con `role='manager'` vede i bottoni di
+> scrittura, non e' un bug).
+
+### B.10.a Viewer (`role='user'`) — lettura pura
+
+Login come `viewer@orgA.test`, poi:
+
+- [ ] Sidebar: **solo** Dashboard + Inventory (Products List, Endpoints,
+      Containers, Dependencies, Import Queue, Exclusions). Niente
+      Management, niente Integrations, niente Settings.
+- [ ] Products List carica senza errori console. **Atteso**: zero
+      crash `updateBulkToolbar null`. Se lo vedi, e' una regressione
+      del fix in `admin.html::updateBulkToolbar` (deve essere un
+      no-op quando `#bulkActionsToolbar` non esiste).
+- [ ] Products List: **nessun** bottone "Add Product", "Edit", "Delete"
+      accanto alle righe (il flag `userPermissions.canManageProducts`
+      deve essere `false`)
+- [ ] Endpoints: **nessun** bottone "Delete endpoint" nelle azioni
+      asset
+- [ ] Import Queue: **nessun** bottone "Approve Selected / Reject
+      Selected / Approve All / Reject All"
+- [ ] Exclusions: **nessun** bottone "Add Exclusion"
+- [ ] Dashboard: puo' comunque vedere match, CVE detail, priority
+      matrix (lettura ok)
+- [ ] Top-right profile badge: mostra "User"
+
+### B.10.b Manager (`role='manager'`) — gestione prodotti
+
+Login come `manager@orgA.test`, poi:
+
+- [ ] Sidebar: vede tutto quello che vede il viewer PIU' la sezione
+      **Integrations** (Agent Keys, Agent Activity, Scheduled Reports
+      se compliance_reports nel piano, Issue Trackers se
+      jira_integration nel piano)
+- [ ] Sidebar: **NON** deve vedere Users & Access ne' Settings
+- [ ] Products List: vede bottoni Add / Edit / Delete / Bulk actions
+- [ ] Endpoints: vede "Delete endpoint"
+- [ ] Import Queue: vede Approve/Reject
+- [ ] Exclusions: vede "Add Exclusion"
+- [ ] Top-right profile badge: mostra "Manager"
+- [ ] **NON** puo' aprire `/admin-panel#settings:*` (403 o redirect)
+
+### B.10.c Org admin (`role='org_admin'`) — sidebar completa per il piano
+
+Login come `testA@example.com`, poi:
+
+- [ ] Sidebar completa: Dashboard + Inventory + Management + Integrations
+      + Settings. Tutte le voci gated dal piano (vedi A.2 plan table).
+- [ ] Top-right profile badge: mostra "Org Admin"
+- [ ] `/api/remediation/assignments?per_page=100` → HTTP 200, NON 500.
+      💡 Se ottieni 500, guarda i log: il fix in `remediation_api.py`
+      logga ogni riga che fallisce la serializzazione con
+      `assignment id=..., org=...` e il resto della lista continua
+      comunque. Segnala i row id incriminati.
+
+## B.11 Cross-tenant regression (3 min)
+
+> ⚠️ Dopo il leak critico fixato nel PR "cross-tenant + RBAC" (commit
+> di riferimento nel changelog), questo test deve **sempre** passare.
+
+Prepara due cookie: `COOKIE_A` (org_admin di Org A) e `COOKIE_B`
+(org_admin di Org B). Prendi l'`id` di un prodotto di Org A
+(`PROD_A`) e l'`id` dell'organizzazione di Org B (`ORG_B`).
+
+- [ ] **Assign cross-tenant forzato** — deve essere **bloccato con 403**:
+      ```bash
+      curl -sk -X POST -H "Cookie: $COOKIE_A" \
+        -H "Content-Type: application/json" \
+        -d "{\"organization_ids\": [$ORG_B]}" \
+        "$BASE/api/products/$PROD_A/organizations"
+      ```
+      **Atteso**: `{"error": "You can only assign products to organizations you belong to"}`
+      con HTTP **403**. Se ottieni 200, STOP: leak cross-tenant
+      rientrato.
+
+- [ ] **GET org list filtrata** — non deve leakkare org altrui:
+      Prendi un `PROD_AB` assegnato a entrambe Org A e Org B (solo
+      possibile se super_admin l'ha fatto, o per test fixture). Fai:
+      ```bash
+      curl -sk -H "Cookie: $COOKIE_A" \
+        "$BASE/api/products/$PROD_AB/organizations" | python3 -m json.tool
+      ```
+      **Atteso**: `organizations` contiene **solo Org A**, non Org B.
+      Se vedi Org B, il leak metadata su `get_product_organizations`
+      e' rientrato.
+
+- [ ] **User edit cross-tenant** — deve essere bloccato con 403:
+      ```bash
+      curl -sk -X POST -H "Cookie: $COOKIE_A" \
+        -H "Content-Type: application/json" \
+        -d "{\"organization_id\": $ORG_B, \"role\": \"org_admin\"}" \
+        "$BASE/api/users/<user_id_in_Org_B>/organizations"
+      ```
+      **Atteso**: 403.
+
+- [ ] **Integration PATCH cross-tenant** — deve essere bloccato con
+      404 o 403:
+      ```bash
+      curl -sk -X PUT -H "Cookie: $COOKIE_A" \
+        -H "Content-Type: application/json" \
+        -d "{\"organization_id\": $ORG_B}" \
+        "$BASE/api/integrations/<id_of_integration_in_Org_B>"
+      ```
+
 ---
 
 ## ✅ Gate B — Verdict
