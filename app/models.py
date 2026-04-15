@@ -3733,6 +3733,9 @@ class SubscriptionPlan(db.Model):
                 'siem_integration': False,
                 'push_agents': True, 'backup_restore': False,
                 'audit_export': False, 'multi_org': False,
+                # compliance_pack is sold as a paid add-on on top of any
+                # plan; it is never part of a plan's base feature set.
+                'compliance_pack': False,
             }),
             'is_default': True, 'sort_order': 0,
         },
@@ -3754,6 +3757,7 @@ class SubscriptionPlan(db.Model):
                 'siem_integration': False,
                 'push_agents': True, 'backup_restore': False,
                 'audit_export': False, 'multi_org': False,
+                'compliance_pack': False,
             }),
             'is_default': False, 'sort_order': 1,
         },
@@ -3775,6 +3779,10 @@ class SubscriptionPlan(db.Model):
                 'siem_integration': True,
                 'push_agents': True, 'backup_restore': False,
                 'audit_export': True, 'multi_org': False,
+                # Pro does NOT include compliance_pack (PCI-DSS / ISO 27001 /
+                # SOC 2 gap analysis). That is sold as a separate add-on
+                # priced at €199/mo; see Subscription.addons.
+                'compliance_pack': False,
             }),
             'is_default': False, 'sort_order': 2,
         },
@@ -3796,6 +3804,8 @@ class SubscriptionPlan(db.Model):
                 'siem_integration': True,
                 'push_agents': True, 'backup_restore': True,
                 'audit_export': True, 'multi_org': True,
+                # Compliance Pack is add-on on Business too — not bundled.
+                'compliance_pack': False,
             }),
             'is_default': False, 'sort_order': 3,
         },
@@ -3816,6 +3826,11 @@ class SubscriptionPlan(db.Model):
                 'siem_integration': True,
                 'push_agents': True, 'backup_restore': True,
                 'audit_export': True, 'multi_org': True,
+                # Compliance Pack is a paid add-on even for Enterprise —
+                # per marketing copy "on top of any Pro, Business or
+                # Enterprise plan". A concierge/sales flow can toggle the
+                # add-on on the Subscription.addons JSON if negotiated.
+                'compliance_pack': False,
             }),
             'is_default': False, 'sort_order': 4,
         },
@@ -3886,6 +3901,18 @@ class Subscription(db.Model):
     canceled_at = db.Column(db.DateTime, nullable=True)
     cancel_at_period_end = db.Column(db.Boolean, default=False)
 
+    # Add-ons — JSON dict of addon_name: bool. Add-ons unlock features that
+    # are NOT part of the base plan's feature set. Example: the Compliance
+    # Pack (``compliance_pack``) unlocks PCI-DSS, ISO 27001 and SOC 2 gap
+    # analysis reports on top of any plan, and is billed separately from
+    # the plan price.
+    #
+    # Design note: we deliberately store addons on Subscription (not on
+    # SubscriptionPlan) because add-ons are per-tenant purchases, not plan
+    # definitions. A tenant on the Pro plan may or may not have the
+    # Compliance Pack depending on what they bought.
+    addons = db.Column(db.Text, nullable=True)
+
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -3902,11 +3929,41 @@ class Subscription(db.Model):
         """Check if subscription is in trial period."""
         return self.status == 'trialing'
 
+    def get_addons(self):
+        """Parse ``addons`` JSON into a dict. Returns {} on any error."""
+        if not self.addons:
+            return {}
+        try:
+            parsed = json.loads(self.addons)
+            return parsed if isinstance(parsed, dict) else {}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return {}
+
+    def set_addons(self, addons_dict):
+        """Store ``addons`` as JSON. Pass None/empty dict to clear."""
+        if not addons_dict:
+            self.addons = None
+        else:
+            self.addons = json.dumps(addons_dict)
+
+    def has_addon(self, addon_name):
+        """Check whether a specific add-on is enabled on this subscription."""
+        return bool(self.get_addons().get(addon_name, False))
+
     def has_feature(self, feature_name):
-        """Check if current plan includes a feature."""
-        if not self.plan:
-            return False
-        return self.plan.has_feature(feature_name)
+        """Check if the plan OR an active add-on provides this feature.
+
+        Add-ons are checked after the base plan so a plan already shipping
+        the feature doesn't regress when the add-on is absent.
+        """
+        if self.plan and self.plan.has_feature(feature_name):
+            return True
+        # Add-on → feature mapping. Keep narrow: each add-on maps to exactly
+        # the feature flags it is sold to unlock.
+        addons = self.get_addons()
+        if addons.get('compliance_pack') and feature_name == 'compliance_pack':
+            return True
+        return False
 
     def get_limit(self, resource):
         """Get a resource limit from the plan. -1 means unlimited."""
@@ -3926,6 +3983,7 @@ class Subscription(db.Model):
             'trial_start': self.trial_start.isoformat() if self.trial_start else None,
             'trial_end': self.trial_end.isoformat() if self.trial_end else None,
             'cancel_at_period_end': self.cancel_at_period_end,
+            'addons': self.get_addons(),
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 

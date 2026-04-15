@@ -127,6 +127,10 @@ def _apply_schema_migrations(logger, db_uri):
         ('vulnerabilities', 'exploit_public', 'BOOLEAN DEFAULT 0', 'BOOLEAN DEFAULT FALSE'),
         ('vulnerabilities', 'exploit_source', 'VARCHAR(100)', 'VARCHAR(100)'),
         ('vulnerabilities', 'exploit_url', 'VARCHAR(500)', 'VARCHAR(500)'),
+        # Subscription add-ons (JSON dict of addon_name: bool). Used by the
+        # Compliance Pack add-on to unlock PCI-DSS / ISO 27001 / SOC 2 gap
+        # analysis reports independently of the base plan feature set.
+        ('subscriptions', 'addons', 'TEXT', 'TEXT'),
     ]
 
     # Create new tables (remediation_assignments, sla_policies) if they don't exist
@@ -287,6 +291,73 @@ def _apply_data_migrations(logger, db_uri):
                 engine.dispose()
             except Exception:
                 pass
+
+
+def _ea_backfill_compliance_pack(logger):
+    """During Early Access every tenant gets the Compliance Pack for free.
+
+    The landing page promises:
+
+        Compliance Pack Add-on €199/mo — Free during Early Access
+
+    The add-on is modelled as a flag on ``Subscription.addons`` (not on the
+    plan) so that post-EA we can start billing for it without touching plan
+    definitions. This function is the mechanism that keeps the "free
+    during EA" promise: on every boot, for every active/trialing
+    subscription that is missing ``compliance_pack`` in its addons dict,
+    we set it to True.
+
+    It is idempotent — running it twice is a no-op for tenants who already
+    have the flag — and gated on the ``SENTRIKAT_EA_MODE`` environment
+    variable (default ``true`` during pre-launch). When EA ends you flip
+    ``SENTRIKAT_EA_MODE=false`` in the container env; existing tenants
+    keep the flag they already got (we do NOT revoke it here), and new
+    signups land without it until sales/billing activates the add-on.
+    """
+    ea_mode = os.environ.get('SENTRIKAT_EA_MODE', 'true').strip().lower()
+    if ea_mode not in ('true', '1', 'yes'):
+        logger.info("EA backfill skipped (SENTRIKAT_EA_MODE is not true)")
+        return
+
+    try:
+        from app.models import Subscription
+    except Exception as e:
+        logger.debug(f"EA backfill: cannot import Subscription model: {e}")
+        return
+
+    try:
+        subs = Subscription.query.filter(
+            Subscription.status.in_(['active', 'trialing'])
+        ).all()
+    except Exception as e:
+        # Table may not exist yet on very first boot — the caller catches
+        # the outer exception, just bail out quietly.
+        logger.debug(f"EA backfill: could not query subscriptions: {e}")
+        return
+
+    flipped = 0
+    for sub in subs:
+        try:
+            addons = sub.get_addons()
+            if addons.get('compliance_pack'):
+                continue
+            addons['compliance_pack'] = True
+            sub.set_addons(addons)
+            flipped += 1
+        except Exception:
+            # One bad row shouldn't block the whole backfill
+            continue
+
+    if flipped:
+        try:
+            db.session.commit()
+            logger.info(
+                f"EA backfill: enabled compliance_pack on {flipped} "
+                f"subscription(s) (SENTRIKAT_EA_MODE=true)"
+            )
+        except Exception as e:
+            db.session.rollback()
+            logger.warning(f"EA backfill commit failed: {e}")
 
 
 def create_app(config_class=Config):
@@ -743,6 +814,12 @@ def create_app(config_class=Config):
                 SubscriptionPlan.seed_default_plans()
             except Exception:
                 pass
+
+            # Early Access backfill: see docstring of _ea_backfill_compliance_pack
+            try:
+                _ea_backfill_compliance_pack(logging.getLogger(__name__))
+            except Exception:
+                pass
         else:
             # Non-SQLite database (PostgreSQL, etc.)
             import logging
@@ -763,6 +840,14 @@ def create_app(config_class=Config):
                 logger.info("Subscription plans synced with defaults")
             except Exception as e:
                 logger.warning(f"Could not sync subscription plans: {e}")
+
+            # Early Access: every tenant gets the Compliance Pack add-on for
+            # free while SENTRIKAT_EA_MODE=true. Post-EA flip the env var to
+            # stop the backfill; existing tenants keep their addon state.
+            try:
+                _ea_backfill_compliance_pack(logger)
+            except Exception as e:
+                logger.warning(f"EA compliance_pack backfill failed: {e}")
 
             # Migrate existing orgs with custom SMTP to use_managed_email=False
             try:

@@ -1153,3 +1153,369 @@ class TestScheduledReportsPage:
             assert response.status_code == 200
             data = response.get_json()
             assert data == []
+
+
+class TestComplianceAddonModel:
+    """
+    Unit tests for the Subscription.addons field and its interaction with
+    the SubscriptionPlan feature flags. The Compliance Pack is modelled as
+    an add-on on Subscription rather than a plan feature so it can be billed
+    independently while still unlocking the same feature flag downstream.
+    """
+
+    def test_addons_roundtrip(self, db_session, test_org):
+        """set_addons() / get_addons() roundtrip through the TEXT column."""
+        from app.models import Subscription, SubscriptionPlan
+        plan = SubscriptionPlan.query.filter_by(name='pro').first() or \
+            SubscriptionPlan.query.first()
+        assert plan is not None
+        sub = Subscription(
+            organization_id=test_org.id, plan_id=plan.id, status='active',
+        )
+        db_session.add(sub)
+        db_session.flush()
+
+        assert sub.get_addons() == {}
+        assert not sub.has_addon('compliance_pack')
+
+        sub.set_addons({'compliance_pack': True})
+        db_session.commit()
+
+        # Reload to verify JSON survived the column
+        db_session.expire(sub)
+        assert sub.get_addons() == {'compliance_pack': True}
+        assert sub.has_addon('compliance_pack')
+
+        sub.set_addons(None)
+        assert sub.get_addons() == {}
+        assert not sub.has_addon('compliance_pack')
+
+    def test_has_feature_prefers_plan(self, db_session, test_org):
+        """If the plan already grants a feature, has_feature is True even without addon."""
+        from app.models import Subscription, SubscriptionPlan
+        pro = SubscriptionPlan.query.filter_by(name='pro').first()
+        assert pro is not None
+        sub = Subscription(
+            organization_id=test_org.id, plan_id=pro.id, status='active',
+        )
+        db_session.add(sub)
+        db_session.commit()
+        # Pro ships compliance_reports (NIS2/BOD 22-01) but NOT compliance_pack
+        assert sub.has_feature('compliance_reports') is True
+        assert sub.has_feature('compliance_pack') is False
+
+    def test_has_feature_addon_unlocks_compliance_pack(self, db_session, test_org):
+        """Setting the compliance_pack addon flips has_feature('compliance_pack') to True."""
+        from app.models import Subscription, SubscriptionPlan
+        pro = SubscriptionPlan.query.filter_by(name='pro').first()
+        sub = Subscription(
+            organization_id=test_org.id, plan_id=pro.id, status='active',
+        )
+        sub.set_addons({'compliance_pack': True})
+        db_session.add(sub)
+        db_session.commit()
+        assert sub.has_feature('compliance_pack') is True
+        # And the base plan features are still granted
+        assert sub.has_feature('compliance_reports') is True
+
+
+class TestComplianceAddonEffectiveFeatures:
+    """
+    _get_saas_features must merge plan features + subscription addons. The
+    Compliance Pack add-on unlocks only its own feature flag; it must not
+    leak other flags or regress existing ones.
+    """
+
+    def test_free_plan_no_compliance_pack(self, db_session, test_org, app):
+        """Free tenant without addon: compliance_pack is False."""
+        from app.saas import _get_saas_features
+        from app.models import Subscription, SubscriptionPlan
+        free = SubscriptionPlan.query.filter_by(name='free').first()
+        sub = Subscription(
+            organization_id=test_org.id, plan_id=free.id, status='active',
+        )
+        db_session.add(sub)
+        db_session.commit()
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            features = _get_saas_features(test_org.id)
+        assert features.get('compliance_pack') is False
+        assert features.get('compliance_reports') is False
+
+    def test_pro_without_addon_has_reports_but_not_pack(self, db_session, test_org, app):
+        """Pro plan WITHOUT addon: has compliance_reports, NOT compliance_pack."""
+        from app.saas import _get_saas_features
+        from app.models import Subscription, SubscriptionPlan
+        pro = SubscriptionPlan.query.filter_by(name='pro').first()
+        sub = Subscription(
+            organization_id=test_org.id, plan_id=pro.id, status='active',
+        )
+        db_session.add(sub)
+        db_session.commit()
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            features = _get_saas_features(test_org.id)
+        assert features.get('compliance_reports') is True  # NIS2/BOD 22-01 bundled
+        assert features.get('compliance_pack') is False    # PCI/ISO/SOC2 NOT bundled
+
+    def test_pro_with_addon_unlocks_compliance_pack(self, db_session, test_org, app):
+        """Pro + compliance_pack addon: both flags True."""
+        from app.saas import _get_saas_features
+        from app.models import Subscription, SubscriptionPlan
+        pro = SubscriptionPlan.query.filter_by(name='pro').first()
+        sub = Subscription(
+            organization_id=test_org.id, plan_id=pro.id, status='active',
+        )
+        sub.set_addons({'compliance_pack': True})
+        db_session.add(sub)
+        db_session.commit()
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            features = _get_saas_features(test_org.id)
+        assert features.get('compliance_reports') is True
+        assert features.get('compliance_pack') is True
+
+    def test_addon_does_not_leak_between_tenants(self, db_session, test_org, app):
+        """Addon on one org does NOT grant the feature to a different org."""
+        from app.saas import _get_saas_features
+        from app.models import Organization, Subscription, SubscriptionPlan
+
+        other_org = Organization(name='Other Org', display_name='Other Org', active=True)
+        db_session.add(other_org)
+        db_session.flush()
+
+        pro = SubscriptionPlan.query.filter_by(name='pro').first()
+
+        sub_with_addon = Subscription(
+            organization_id=test_org.id, plan_id=pro.id, status='active',
+        )
+        sub_with_addon.set_addons({'compliance_pack': True})
+
+        sub_without_addon = Subscription(
+            organization_id=other_org.id, plan_id=pro.id, status='active',
+        )
+        db_session.add_all([sub_with_addon, sub_without_addon])
+        db_session.commit()
+
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            features_with = _get_saas_features(test_org.id)
+            features_without = _get_saas_features(other_org.id)
+
+        assert features_with.get('compliance_pack') is True
+        assert features_without.get('compliance_pack') is False
+
+    def test_onpremise_professional_grants_compliance_pack(self, app):
+        """On-premise Professional license grants compliance_pack (no addon billing on-prem)."""
+        from app.saas import _get_license_features
+        with patch('app.saas._SENTRIKAT_MODE', 'onpremise'):
+            with app.app_context():
+                mock_license = MagicMock()
+                mock_license.is_professional.return_value = True
+                with patch('app.licensing.get_license', return_value=mock_license):
+                    features = _get_license_features()
+        assert features.get('compliance_pack') is True
+        assert features.get('compliance_reports') is True
+
+
+class TestComplianceAddonGating:
+    """
+    The /api/reports/compliance/{pci-dss,iso-27001,soc2} endpoints must be
+    gated on the compliance_pack add-on feature, not the compliance_reports
+    plan feature. Regression: BOD 22-01 and NIS2 must still only require
+    compliance_reports so that Pro customers without the add-on keep their
+    in-house compliance reports.
+    """
+
+    def test_pci_dss_denied_without_addon(
+        self, client, db_session, test_org, admin_user
+    ):
+        """Pro plan without Compliance Pack: 403 with addon_required hint."""
+        from app.models import Subscription, SubscriptionPlan
+        pro = SubscriptionPlan.query.filter_by(name='pro').first()
+        sub = Subscription(
+            organization_id=test_org.id, plan_id=pro.id, status='active',
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        with client.session_transaction() as sess:
+            sess['user_id'] = admin_user.id
+            sess['organization_id'] = test_org.id
+            sess['_fresh'] = True
+
+        # The admin_user fixture has role='super_admin' which bypasses a
+        # lot of checks; but compliance_reports.py does feature-gate on
+        # the effective features rather than the user role, so the
+        # feature flag still controls access here.
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            response = client.get('/api/reports/compliance/pci-dss?format=json')
+        assert response.status_code == 403
+        data = response.get_json()
+        assert data.get('feature') == 'compliance_pack'
+        assert data.get('addon_required') == 'compliance_pack'
+        assert 'Compliance Pack' in data.get('error', '')
+
+    def test_pci_dss_allowed_with_addon(
+        self, client, db_session, test_org, admin_user
+    ):
+        """Pro plan + Compliance Pack addon: 200 JSON report."""
+        from app.models import Subscription, SubscriptionPlan
+        pro = SubscriptionPlan.query.filter_by(name='pro').first()
+        sub = Subscription(
+            organization_id=test_org.id, plan_id=pro.id, status='active',
+        )
+        sub.set_addons({'compliance_pack': True})
+        db_session.add(sub)
+        db_session.commit()
+
+        with client.session_transaction() as sess:
+            sess['user_id'] = admin_user.id
+            sess['organization_id'] = test_org.id
+            sess['_fresh'] = True
+
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            response = client.get('/api/reports/compliance/pci-dss?format=json')
+        # 200 with a JSON body containing the framework name. The actual
+        # report content is covered by other tests; we only care that the
+        # gate allowed the request through.
+        assert response.status_code == 200
+        data = response.get_json()
+        assert 'framework' in data or 'requirements' in data or 'report_id' in data
+
+    def test_iso_27001_denied_without_addon(
+        self, client, db_session, test_org, admin_user
+    ):
+        """ISO 27001 also gated on compliance_pack addon."""
+        from app.models import Subscription, SubscriptionPlan
+        pro = SubscriptionPlan.query.filter_by(name='pro').first()
+        sub = Subscription(
+            organization_id=test_org.id, plan_id=pro.id, status='active',
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        with client.session_transaction() as sess:
+            sess['user_id'] = admin_user.id
+            sess['organization_id'] = test_org.id
+            sess['_fresh'] = True
+
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            response = client.get('/api/reports/compliance/iso-27001?format=json')
+        assert response.status_code == 403
+        assert response.get_json().get('addon_required') == 'compliance_pack'
+
+    def test_soc2_denied_without_addon(
+        self, client, db_session, test_org, admin_user
+    ):
+        """SOC 2 also gated on compliance_pack addon."""
+        from app.models import Subscription, SubscriptionPlan
+        pro = SubscriptionPlan.query.filter_by(name='pro').first()
+        sub = Subscription(
+            organization_id=test_org.id, plan_id=pro.id, status='active',
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        with client.session_transaction() as sess:
+            sess['user_id'] = admin_user.id
+            sess['organization_id'] = test_org.id
+            sess['_fresh'] = True
+
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            response = client.get('/api/reports/compliance/soc2?format=json')
+        assert response.status_code == 403
+        assert response.get_json().get('addon_required') == 'compliance_pack'
+
+
+class TestEarlyAccessComplianceBackfill:
+    """
+    During Early Access the landing page promises "Compliance Pack: Free
+    during Early Access". _ea_backfill_compliance_pack() is the mechanism
+    that keeps the promise: on every boot, flip compliance_pack=True on any
+    active/trialing subscription that doesn't already have it.
+    """
+
+    def test_backfill_enables_addon_on_active_subs(
+        self, app, db_session, test_org
+    ):
+        """Active subscription without addon → addon gets enabled."""
+        from app import _ea_backfill_compliance_pack
+        from app.models import Subscription, SubscriptionPlan
+        import logging
+
+        pro = SubscriptionPlan.query.filter_by(name='pro').first()
+        sub = Subscription(
+            organization_id=test_org.id, plan_id=pro.id, status='active',
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        # Sanity: addon absent before backfill
+        assert sub.get_addons() == {}
+
+        with patch.dict(os.environ, {'SENTRIKAT_EA_MODE': 'true'}):
+            _ea_backfill_compliance_pack(logging.getLogger('test'))
+
+        db_session.expire(sub)
+        assert sub.get_addons().get('compliance_pack') is True
+
+    def test_backfill_is_idempotent(self, app, db_session, test_org):
+        """Running the backfill twice does not duplicate or corrupt state."""
+        from app import _ea_backfill_compliance_pack
+        from app.models import Subscription, SubscriptionPlan
+        import logging
+
+        pro = SubscriptionPlan.query.filter_by(name='pro').first()
+        sub = Subscription(
+            organization_id=test_org.id, plan_id=pro.id, status='active',
+        )
+        sub.set_addons({'compliance_pack': True, 'other_addon': False})
+        db_session.add(sub)
+        db_session.commit()
+
+        with patch.dict(os.environ, {'SENTRIKAT_EA_MODE': 'true'}):
+            _ea_backfill_compliance_pack(logging.getLogger('test'))
+            _ea_backfill_compliance_pack(logging.getLogger('test'))
+
+        db_session.expire(sub)
+        addons = sub.get_addons()
+        assert addons.get('compliance_pack') is True
+        # Other pre-existing addon state is preserved
+        assert addons.get('other_addon') is False
+
+    def test_backfill_skipped_post_ea(self, app, db_session, test_org):
+        """SENTRIKAT_EA_MODE=false → no backfill, new subscriptions stay without addon."""
+        from app import _ea_backfill_compliance_pack
+        from app.models import Subscription, SubscriptionPlan
+        import logging
+
+        pro = SubscriptionPlan.query.filter_by(name='pro').first()
+        sub = Subscription(
+            organization_id=test_org.id, plan_id=pro.id, status='active',
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        with patch.dict(os.environ, {'SENTRIKAT_EA_MODE': 'false'}):
+            _ea_backfill_compliance_pack(logging.getLogger('test'))
+
+        db_session.expire(sub)
+        assert sub.get_addons() == {}
+
+    def test_backfill_ignores_inactive_subs(
+        self, app, db_session, test_org
+    ):
+        """Canceled / expired subscriptions are not touched by the backfill."""
+        from app import _ea_backfill_compliance_pack
+        from app.models import Subscription, SubscriptionPlan
+        import logging
+
+        pro = SubscriptionPlan.query.filter_by(name='pro').first()
+        sub = Subscription(
+            organization_id=test_org.id, plan_id=pro.id, status='canceled',
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        with patch.dict(os.environ, {'SENTRIKAT_EA_MODE': 'true'}):
+            _ea_backfill_compliance_pack(logging.getLogger('test'))
+
+        db_session.expire(sub)
+        assert sub.get_addons() == {}

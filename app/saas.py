@@ -258,7 +258,17 @@ def get_effective_features(org_id):
 
 
 def _get_saas_features(org_id):
-    """Get features from the org's active subscription plan."""
+    """Get the effective feature set for a SaaS org.
+
+    Effective features = plan base features + anything the tenant's active
+    add-ons unlock on top. Add-ons are per-subscription (not per-plan), so
+    two tenants on the same Pro plan can have different effective feature
+    sets depending on which add-ons they purchased.
+
+    Currently the only add-on is ``compliance_pack``, which unlocks the
+    ``compliance_pack`` feature flag independently of the base plan. Other
+    add-ons can be wired in the same way without touching callers.
+    """
     try:
         from app.models import Subscription, SubscriptionPlan
         sub = Subscription.query.filter_by(
@@ -274,7 +284,16 @@ def _get_saas_features(org_id):
             ).first()
 
         if sub and sub.plan:
-            return sub.plan.get_features()
+            features = dict(sub.plan.get_features())
+            # Layer add-ons on top. We never *remove* a feature the plan
+            # already provides — add-ons are additive.
+            try:
+                addons = sub.get_addons()
+            except Exception:
+                addons = {}
+            if addons.get('compliance_pack'):
+                features['compliance_pack'] = True
+            return features
 
         # No subscription = free plan features
         free_plan = SubscriptionPlan.query.filter_by(name='free').first()
@@ -288,7 +307,8 @@ def _get_saas_features(org_id):
             'compliance_reports': False, 'jira_integration': False,
             'siem_integration': False,
             'push_agents': True, 'backup_restore': False,
-            'audit_export': False, 'multi_org': False
+            'audit_export': False, 'multi_org': False,
+            'compliance_pack': False,
         }
     except Exception as e:
         logger.error(f"Error getting SaaS features for org {org_id}: {e}")
@@ -296,7 +316,12 @@ def _get_saas_features(org_id):
 
 
 def _get_license_features():
-    """Get features from the on-premise license."""
+    """Get features from the on-premise license.
+
+    On-premise has no concept of paid add-ons: a Professional license
+    unlocks the full feature set, including ``compliance_pack``. The
+    Compliance Pack pricing is SaaS-only.
+    """
     try:
         from app.licensing import get_license
         license_info = get_license()
@@ -307,7 +332,8 @@ def _get_license_features():
                 'compliance_reports': True, 'jira_integration': True,
                 'siem_integration': True,
                 'push_agents': True, 'backup_restore': True,
-                'audit_export': True, 'multi_org': True
+                'audit_export': True, 'multi_org': True,
+                'compliance_pack': True,
             }
         else:
             # Demo/Community edition
@@ -317,7 +343,8 @@ def _get_license_features():
                 'compliance_reports': False, 'jira_integration': False,
                 'siem_integration': False,
                 'push_agents': False, 'backup_restore': False,
-                'audit_export': False, 'multi_org': False
+                'audit_export': False, 'multi_org': False,
+                'compliance_pack': False,
             }
     except Exception as e:
         logger.error(f"Error getting license features: {e}")

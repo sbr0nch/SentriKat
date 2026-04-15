@@ -844,13 +844,26 @@ def _generate_report(framework, framework_name, evaluator):
     if not user:
         return jsonify({'error': 'Authentication required'}), 401
 
-    # License gate — compliance_reports feature (Professional+)
+    # Feature gate — the auditor-grade frameworks (PCI-DSS v4.0,
+    # ISO/IEC 27001:2022, SOC 2 Trust Services Criteria) are sold as a
+    # paid add-on ("Compliance Pack", €199/mo) on top of any plan.
+    # This is distinct from the ``compliance_reports`` flag, which gates
+    # the in-house frameworks (CISA BOD 22-01, EU NIS2) and the scheduled
+    # reports feature — those remain bundled in Pro/Business/Enterprise.
+    #
+    # On-premise: a Professional license unlocks everything, including
+    # ``compliance_pack`` — there is no add-on billing concept on-prem.
     if is_saas_mode():
         org_features = get_effective_features(get_scoped_org_id(user))
-        if not org_features.get('compliance_reports', False):
+        if not org_features.get('compliance_pack', False):
             return jsonify({
-                'error': f'{framework} gap analysis reports are not available on your plan. Upgrade to Pro or higher.',
-                'feature': 'compliance_reports',
+                'error': (
+                    f'{framework} gap analysis reports require the '
+                    f'Compliance Pack add-on (€199/mo). They are not '
+                    f'included in the base plan.'
+                ),
+                'feature': 'compliance_pack',
+                'addon_required': 'compliance_pack',
                 'upgrade_required': True,
             }), 403
     else:
@@ -859,7 +872,7 @@ def _generate_report(framework, framework_name, evaluator):
         if not license_info or not license_info.is_professional():
             return jsonify({
                 'error': f'{framework} gap analysis reports require a Professional license',
-                'feature': 'compliance_reports',
+                'feature': 'compliance_pack',
             }), 403
 
     # Resolve org scope
