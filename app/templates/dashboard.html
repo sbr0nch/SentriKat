@@ -2781,6 +2781,20 @@
         loadGroupedVulnerabilities();
     }
 
+    // Only smooth-scroll to the vulnerability list if it's actually below
+    // the current viewport. If the user is already looking at it we'd
+    // otherwise jump the page around for no reason, which feels like a
+    // reload. See QA round 3 feedback.
+    function scrollToVulnerabilityListIfOffscreen() {
+        const el = document.getElementById('vulnerabilitiesContainer');
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const fullyVisible = rect.top >= 0 && rect.top < window.innerHeight * 0.75;
+        if (!fullyVisible) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }
+
     // Filter by effective priority when clicking priority alert cards
     function filterBySeverity(severity) {
         const priorityFilter = document.getElementById('filterPriority');
@@ -2801,8 +2815,7 @@
             const activeCard = document.querySelector('.' + cardClass);
             if (activeCard) activeCard.classList.add('active-filter');
         }
-        // Scroll to vulnerability list
-        document.getElementById('vulnerabilitiesContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        scrollToVulnerabilityListIfOffscreen();
         resetAndLoadVulnerabilities();
     }
 
@@ -2818,8 +2831,7 @@
             const zdCard = document.querySelector('.alert-card-zeroday');
             if (zdCard) zdCard.classList.add('active-filter');
         }
-        // Scroll to vulnerability list
-        document.getElementById('vulnerabilitiesContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        scrollToVulnerabilityListIfOffscreen();
         resetAndLoadVulnerabilities();
     }
 

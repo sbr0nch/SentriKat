@@ -2270,27 +2270,126 @@ def report_inventory():
                 installation.last_seen_at = datetime.utcnow()
                 installations_updated += 1
 
-        # Remove installations NOT seen in this scan (software was uninstalled)
+        # Remove installations NOT seen in this scan (software was uninstalled).
+        #
+        # SECURITY ANOMALY THRESHOLD (QA round 3): an attacker with a valid
+        # agent key used to be able to POST {products: []} and, since the
+        # loop above would end with seen_installation_ids empty, the block
+        # below would hard-delete every ProductInstallation for the asset.
+        # After the commit the asset appears to have zero software and
+        # all its vulnerability matches stop showing up in dashboards —
+        # a clean bill of health for a machine that was never scanned.
+        #
+        # Defence:
+        #   * If the report would remove > AGENT_MAX_REMOVAL_PCT percent
+        #     of existing installations (default 50), we skip the
+        #     removal phase entirely, log the anomaly to AgentEvent +
+        #     application logs, and still commit the new + updated
+        #     installations. The old records stay on the asset so any
+        #     pre-existing vulnerability coverage survives. The agent
+        #     owner sees a warning in the response.
+        #   * Below the threshold we fall through to the normal path —
+        #     this covers the legitimate "user uninstalled 1-2 apps"
+        #     case that should not be flagged.
+        #   * The threshold is a drop-in config knob
+        #     (AGENT_MAX_REMOVAL_PCT env var), operators can tighten it
+        #     to e.g. 20% for high-security tenants or relax it for
+        #     customers with very volatile inventories.
+        anomaly_warning = None
         if not is_new_agent and existing_installations:
             removed_ids = set(existing_installations.keys()) - seen_installation_ids
-            for removed_id in removed_ids:
-                removed_inst = existing_installations[removed_id]
-                # Record uninstall in version history
+            existing_count = len(existing_installations)
+            removal_pct = (
+                (len(removed_ids) / existing_count * 100.0) if existing_count > 0 else 0.0
+            )
+            try:
+                max_removal_pct = float(os.environ.get('AGENT_MAX_REMOVAL_PCT', '50'))
+            except (TypeError, ValueError):
+                max_removal_pct = 50.0
+            try:
+                min_baseline = int(os.environ.get('AGENT_ANOMALY_MIN_BASELINE', '5'))
+            except (TypeError, ValueError):
+                min_baseline = 5
+
+            # Sanity clamp — a 0% threshold would freeze all legitimate
+            # uninstalls; 100% is "no protection". Clamp to [5, 100].
+            max_removal_pct = max(5.0, min(100.0, max_removal_pct))
+            # Min baseline lower-bound at 2 — below that a "percentage"
+            # threshold is meaningless (1 installation → 100% is fine).
+            min_baseline = max(2, min_baseline)
+
+            # Only apply the threshold when there's enough baseline for
+            # the percentage to carry meaning. A host with 1-4 installs
+            # uninstalling them all is indistinguishable from normal
+            # churn; a host with 5+ installs suddenly dropping to 0 is
+            # the tamper signal we care about.
+            if (
+                removed_ids
+                and existing_count >= min_baseline
+                and removal_pct > max_removal_pct
+            ):
+                anomaly_warning = (
+                    f'Inventory report would remove {len(removed_ids)} of '
+                    f'{existing_count} installations ({removal_pct:.0f}%) — '
+                    f'above the AGENT_MAX_REMOVAL_PCT threshold '
+                    f'({max_removal_pct:.0f}%). The removals were rejected '
+                    f'to protect existing vulnerability data; new and '
+                    f'updated products were still accepted. If this is '
+                    f'legitimate (mass uninstall, disk wipe), re-install '
+                    f'the agent or contact an administrator.'
+                )
+                logger.warning(
+                    "AGENT ANOMALY REJECTED removal: hostname=%s asset_id=%s org_id=%s "
+                    "removed_candidates=%d existing=%d pct=%.1f threshold=%.1f "
+                    "agent_key_id=%s source_ip=%s",
+                    hostname, asset.id, organization.id,
+                    len(removed_ids), existing_count, removal_pct,
+                    max_removal_pct,
+                    agent_key.id if agent_key else None,
+                    source_ip,
+                )
+                # Record the anomaly in the agent activity stream so
+                # customers can see it in the UI + super-admins can grep
+                # the platform-wide log.
                 try:
-                    ProductVersionHistory.record_change(
-                        installation_id=removed_inst.id,
+                    AgentEvent.log_event(
+                        organization_id=organization.id,
+                        event_type='anomaly_rejected',
                         asset_id=asset.id,
-                        product_id=removed_inst.product_id,
-                        old_version=removed_inst.version,
-                        new_version='(uninstalled)',
-                        detected_by='agent'
+                        api_key_id=agent_key.id if agent_key else None,
+                        details={
+                            'hostname': hostname,
+                            'reason': 'mass_removal_threshold',
+                            'removed_candidates': len(removed_ids),
+                            'existing_count': existing_count,
+                            'removal_pct': round(removal_pct, 1),
+                            'threshold_pct': round(max_removal_pct, 1),
+                        },
+                        source_ip=source_ip,
+                        user_agent=user_agent,
                     )
                 except Exception:
-                    pass
-                db.session.delete(removed_inst)
-                installations_removed += 1
-            if removed_ids:
-                logger.info(f"Removed {len(removed_ids)} uninstalled products from {hostname}")
+                    logger.exception("Failed to log anomaly_rejected AgentEvent")
+                # DO NOT delete anything. Move on to the response phase.
+            else:
+                for removed_id in removed_ids:
+                    removed_inst = existing_installations[removed_id]
+                    # Record uninstall in version history
+                    try:
+                        ProductVersionHistory.record_change(
+                            installation_id=removed_inst.id,
+                            asset_id=asset.id,
+                            product_id=removed_inst.product_id,
+                            old_version=removed_inst.version,
+                            new_version='(uninstalled)',
+                            detected_by='agent'
+                        )
+                    except Exception:
+                        pass
+                    db.session.delete(removed_inst)
+                    installations_removed += 1
+                if removed_ids:
+                    logger.info(f"Removed {len(removed_ids)} uninstalled products from {hostname}")
 
         # Log inventory event
         AgentEvent.log_event(
@@ -2429,6 +2528,17 @@ def report_inventory():
         if license_message:
             response['license_warning'] = license_message
             response['license'] = license_info
+
+        # Surface the mass-removal anomaly rejection (if any) so the
+        # agent (and the "Agent Activity" UI row for this report) can
+        # show it in plain English instead of silently dropping the
+        # removal step.
+        if anomaly_warning:
+            response['warning'] = anomaly_warning
+            response['anomaly'] = {
+                'type': 'mass_removal_threshold',
+                'removals_rejected': True,
+            }
 
         return jsonify(response)
 
