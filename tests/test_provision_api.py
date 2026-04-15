@@ -311,3 +311,263 @@ class TestProvisionB8Regressions:
                         Organization.display_name == 'Idem Corp'
                     ).all()
                     assert len(orgs) == 1
+
+
+# =============================================================================
+# Admin listing endpoints: GET /api/provision/tenants and /api/provision/plans
+#
+# These are the two endpoints the license-server admin portal uses to
+# populate the "Live SaaS Tenants" and "Plans" widgets. They're
+# read-only, protected by the same X-Provision-Key header, and cover
+# the cross-tenant admin view from the license-server's perspective.
+# =============================================================================
+
+
+def _seed_plans_and_tenants(client, app, count=3):
+    """Provision ``count`` test tenants so the listing endpoints have
+    something to return. Returns a list of created tenant dicts.
+    """
+    with app.app_context():
+        from app.models import SubscriptionPlan
+        if SubscriptionPlan.query.count() == 0:
+            SubscriptionPlan.seed_default_plans()
+
+    created = []
+    plans_cycle = ['free', 'starter', 'pro']
+    for i in range(count):
+        plan = plans_cycle[i % len(plans_cycle)]
+        r = client.post('/api/provision', json={
+            'email': f'admin{i}@tenant{i}.test',
+            'full_name': f'Admin {i}',
+            'company_name': f'Tenant {i}',
+            'plan_name': plan,
+        }, headers={'X-Provision-Key': 'test-key'})
+        assert r.status_code == 201, (
+            f"Seeding tenant {i} failed: {r.status_code} {r.get_data(as_text=True)[:200]}"
+        )
+        created.append(r.get_json()['tenant'])
+    return created
+
+
+class TestListTenants:
+    """GET /api/provision/tenants — license-server admin UI data source."""
+
+    def test_returns_all_tenants_with_shape(self, client, app):
+        with patch('app.provision_api._PROVISION_KEY', 'test-key'):
+            with patch('app.provision_api.is_saas_mode', return_value=True):
+                _seed_plans_and_tenants(client, app, count=3)
+
+                resp = client.get(
+                    '/api/provision/tenants',
+                    headers={'X-Provision-Key': 'test-key'},
+                )
+                assert resp.status_code == 200, resp.get_data(as_text=True)
+                data = resp.get_json()
+
+                assert 'tenants' in data
+                assert 'total' in data
+                assert 'filters_applied' in data
+                assert data['total'] == len(data['tenants'])
+                assert data['total'] >= 3  # baseline + any setup fixtures
+
+                # Shape check on the first tenant
+                t = data['tenants'][0]
+                for key in (
+                    'organization_id', 'organization_name', 'admin_email',
+                    'plan_name', 'status', 'agents', 'users',
+                    'agent_count', 'user_count', 'created_at',
+                ):
+                    assert key in t, f"Missing key {key!r} in tenant summary"
+
+                # Usage counters are formatted as "N/M" or "N/unlimited"
+                assert '/' in t['agents']
+                assert '/' in t['users']
+
+    def test_filter_by_plan(self, client, app):
+        with patch('app.provision_api._PROVISION_KEY', 'test-key'):
+            with patch('app.provision_api.is_saas_mode', return_value=True):
+                _seed_plans_and_tenants(client, app, count=3)
+
+                resp = client.get(
+                    '/api/provision/tenants?plan=pro',
+                    headers={'X-Provision-Key': 'test-key'},
+                )
+                assert resp.status_code == 200
+                data = resp.get_json()
+                # Every row must be on the pro plan (case-insensitive on
+                # the filter side but stored lowercased).
+                for t in data['tenants']:
+                    assert (t.get('plan_name') or '').lower() == 'pro', (
+                        f"filter leaked non-pro tenant: {t}"
+                    )
+                assert data['filters_applied']['plan'] == 'pro'
+
+    def test_filter_by_status(self, client, app):
+        with patch('app.provision_api._PROVISION_KEY', 'test-key'):
+            with patch('app.provision_api.is_saas_mode', return_value=True):
+                _seed_plans_and_tenants(client, app, count=3)
+
+                # New tenants land in trialing by default (14-day default).
+                resp = client.get(
+                    '/api/provision/tenants?status=trialing',
+                    headers={'X-Provision-Key': 'test-key'},
+                )
+                assert resp.status_code == 200
+                data = resp.get_json()
+                for t in data['tenants']:
+                    assert (t.get('status') or '').lower() == 'trialing'
+
+    def test_search_matches_email_or_org_name(self, client, app):
+        with patch('app.provision_api._PROVISION_KEY', 'test-key'):
+            with patch('app.provision_api.is_saas_mode', return_value=True):
+                _seed_plans_and_tenants(client, app, count=3)
+
+                # Search by org display name prefix
+                resp = client.get(
+                    '/api/provision/tenants?search=Tenant 1',
+                    headers={'X-Provision-Key': 'test-key'},
+                )
+                assert resp.status_code == 200
+                data = resp.get_json()
+                names = [(t.get('organization_name') or '') for t in data['tenants']]
+                assert any('Tenant 1' in n for n in names)
+
+                # Search by admin email fragment
+                resp = client.get(
+                    '/api/provision/tenants?search=admin2@',
+                    headers={'X-Provision-Key': 'test-key'},
+                )
+                assert resp.status_code == 200
+                data = resp.get_json()
+                assert any(
+                    (t.get('admin_email') or '').startswith('admin2@')
+                    for t in data['tenants']
+                )
+
+    def test_auth_required(self, client, app):
+        with patch('app.provision_api._PROVISION_KEY', 'test-key'):
+            with patch('app.provision_api.is_saas_mode', return_value=True):
+                # No header at all
+                r1 = client.get('/api/provision/tenants')
+                assert r1.status_code == 401
+                # Wrong key
+                r2 = client.get(
+                    '/api/provision/tenants',
+                    headers={'X-Provision-Key': 'wrong-key'},
+                )
+                assert r2.status_code == 401
+
+    def test_saas_mode_only(self, client, app):
+        with patch('app.provision_api._PROVISION_KEY', 'test-key'):
+            with patch('app.provision_api.is_saas_mode', return_value=False):
+                resp = client.get(
+                    '/api/provision/tenants',
+                    headers={'X-Provision-Key': 'test-key'},
+                )
+                assert resp.status_code == 403
+
+
+class TestListPlans:
+    """GET /api/provision/plans — plan catalogue for the license-server."""
+
+    def test_returns_active_plans_with_full_shape(self, client, app):
+        with patch('app.provision_api._PROVISION_KEY', 'test-key'):
+            with patch('app.provision_api.is_saas_mode', return_value=True):
+                with app.app_context():
+                    from app.models import SubscriptionPlan
+                    if SubscriptionPlan.query.count() == 0:
+                        SubscriptionPlan.seed_default_plans()
+
+                resp = client.get(
+                    '/api/provision/plans',
+                    headers={'X-Provision-Key': 'test-key'},
+                )
+                assert resp.status_code == 200, resp.get_data(as_text=True)
+                data = resp.get_json()
+
+                assert 'plans' in data
+                assert 'total' in data
+                assert data['total'] == len(data['plans'])
+                # Five default plans ship with the app — this catches a
+                # silent regression where one gets dropped from seeding.
+                assert data['total'] >= 5
+
+                # Every entry has the documented shape.
+                for p in data['plans']:
+                    for k in (
+                        'id', 'name', 'slug', 'currency',
+                        'price_monthly_cents', 'price_annual_cents',
+                        'price_monthly_eur', 'price_annual_eur',
+                        'max_agents', 'max_users', 'max_organizations',
+                        'max_products', 'max_api_keys', 'max_storage_mb',
+                        'features', 'features_map',
+                        'is_active', 'is_default', 'sort_order',
+                    ):
+                        assert k in p, (
+                            f"plan {p.get('id')!r} missing key {k!r}: {p}"
+                        )
+                    # Features list contains only enabled features
+                    assert isinstance(p['features'], list)
+                    for feat in p['features']:
+                        assert p['features_map'].get(feat) is True
+                    # Euro values are pre-divided from cents
+                    assert p['price_monthly_eur'] == p['price_monthly_cents'] / 100.0
+
+    def test_sort_order_is_preserved(self, client, app):
+        """Plans must come back in sort_order order so the admin UI
+        doesn't render them randomly."""
+        with patch('app.provision_api._PROVISION_KEY', 'test-key'):
+            with patch('app.provision_api.is_saas_mode', return_value=True):
+                with app.app_context():
+                    from app.models import SubscriptionPlan
+                    if SubscriptionPlan.query.count() == 0:
+                        SubscriptionPlan.seed_default_plans()
+
+                resp = client.get(
+                    '/api/provision/plans',
+                    headers={'X-Provision-Key': 'test-key'},
+                )
+                data = resp.get_json()
+                sort_orders = [p['sort_order'] for p in data['plans']]
+                assert sort_orders == sorted(sort_orders), (
+                    f"Plans out of sort_order: {sort_orders}"
+                )
+
+    def test_include_inactive_query_param(self, client, app):
+        with patch('app.provision_api._PROVISION_KEY', 'test-key'):
+            with patch('app.provision_api.is_saas_mode', return_value=True):
+                with app.app_context():
+                    from app import db as _db
+                    from app.models import SubscriptionPlan
+                    if SubscriptionPlan.query.count() == 0:
+                        SubscriptionPlan.seed_default_plans()
+                    # Disable one plan and check include_inactive behaviour
+                    archived = SubscriptionPlan.query.filter_by(name='free').first()
+                    if archived:
+                        archived.is_active = False
+                        _db.session.commit()
+
+                r1 = client.get(
+                    '/api/provision/plans',
+                    headers={'X-Provision-Key': 'test-key'},
+                )
+                active_plan_ids = {p['id'] for p in r1.get_json()['plans']}
+                assert 'free' not in active_plan_ids
+
+                r2 = client.get(
+                    '/api/provision/plans?include_inactive=true',
+                    headers={'X-Provision-Key': 'test-key'},
+                )
+                all_plan_ids = {p['id'] for p in r2.get_json()['plans']}
+                assert 'free' in all_plan_ids
+
+    def test_auth_required(self, client, app):
+        with patch('app.provision_api._PROVISION_KEY', 'test-key'):
+            with patch('app.provision_api.is_saas_mode', return_value=True):
+                r1 = client.get('/api/provision/plans')
+                assert r1.status_code == 401
+                r2 = client.get(
+                    '/api/provision/plans',
+                    headers={'X-Provision-Key': 'wrong-key'},
+                )
+                assert r2.status_code == 401
