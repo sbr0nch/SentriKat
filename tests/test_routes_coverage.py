@@ -968,3 +968,74 @@ class TestProductCPEEndpoints:
         if response.status_code == 200:
             data = response.get_json()
             assert isinstance(data, dict)
+
+
+class TestFooterVersionString:
+    """
+    Bug fix: footer version string must differ between SaaS and on-premise.
+
+    - on-premise: shows "v{APP_VERSION}" (binary version — customers upgrade)
+    - SaaS, normal user: shows "SentriKat Cloud" (product name, no binary version)
+    - SaaS, super_admin (not impersonating), with SENTRIKAT_BUILD_SHA set:
+        shows "SentriKat Cloud · build <sha7>" (ops/debug aid)
+    - SaaS, super_admin impersonating a tenant: shows "SentriKat Cloud"
+        (matches what the impersonated user sees)
+    """
+
+    def _render_footer(self, app, **session_overrides):
+        """Render a minimal template that uses the app_version_string global."""
+        from flask import render_template_string
+        with app.test_request_context('/'):
+            from flask import session as flask_session
+            flask_session.clear()
+            for key, val in session_overrides.items():
+                flask_session[key] = val
+            return render_template_string('{{ app_version_string }}')
+
+    def test_onpremise_shows_binary_version(self, app):
+        """On-premise mode shows v{APP_VERSION}."""
+        from app import APP_VERSION
+        with patch('app.saas._SENTRIKAT_MODE', 'onpremise'):
+            rendered = self._render_footer(app)
+            assert rendered == f'v{APP_VERSION}'
+
+    def test_saas_normal_user_shows_cloud(self, app, test_user):
+        """SaaS mode, normal user: shows 'SentriKat Cloud' (no build sha)."""
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            with patch.dict(os.environ, {'SENTRIKAT_BUILD_SHA': 'abcdef1234567'}):
+                rendered = self._render_footer(app, user_id=test_user.id)
+                assert rendered == 'SentriKat Cloud'
+
+    def test_saas_super_admin_with_build_sha(self, app, admin_user):
+        """SaaS super_admin (not impersonating) + build sha: shows build info."""
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            with patch.dict(os.environ, {'SENTRIKAT_BUILD_SHA': 'abcdef1234567'}):
+                rendered = self._render_footer(app, user_id=admin_user.id)
+                assert rendered == 'SentriKat Cloud · build abcdef1'
+
+    def test_saas_super_admin_without_build_sha(self, app, admin_user):
+        """SaaS super_admin without build sha env var: shows plain name."""
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            env = {k: v for k, v in os.environ.items() if k != 'SENTRIKAT_BUILD_SHA'}
+            with patch.dict(os.environ, env, clear=True):
+                rendered = self._render_footer(app, user_id=admin_user.id)
+                assert rendered == 'SentriKat Cloud'
+
+    def test_saas_super_admin_impersonating_hides_build_sha(self, app, admin_user):
+        """SaaS super_admin while impersonating a tenant: treated as tenant user."""
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            with patch.dict(os.environ, {'SENTRIKAT_BUILD_SHA': 'abcdef1234567'}):
+                rendered = self._render_footer(
+                    app,
+                    user_id=admin_user.id,
+                    impersonated=True,
+                    impersonated_by='portal-admin',
+                )
+                assert rendered == 'SentriKat Cloud'
+
+    def test_saas_no_user_shows_cloud(self, app):
+        """SaaS mode with no logged-in user: shows plain 'SentriKat Cloud'."""
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            with patch.dict(os.environ, {'SENTRIKAT_BUILD_SHA': 'abcdef1234567'}):
+                rendered = self._render_footer(app)
+                assert rendered == 'SentriKat Cloud'
