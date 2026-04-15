@@ -93,7 +93,7 @@ Per testare davvero ci serve una matrice di account.
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Free | 3 | 1 | 25 | 1 | 100 MB | 1 | €0 |
 | Starter | 10 | 3 | ∞ | 2 | 500 MB | 1 | €59 |
-| Pro | 25 | 5 | ∞ | 5 | 2 GB | 3 | €199 |
+| Pro | 25 | 5 | ∞ | 5 | 2 GB | 1 | €199 |
 | Business | 50 | 10 | ∞ | 25 | 10 GB | 10 | €499 |
 | Enterprise | ∞ | ∞ | ∞ | ∞ | ∞ | ∞ | €999 |
 

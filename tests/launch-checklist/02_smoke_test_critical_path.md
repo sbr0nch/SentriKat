@@ -131,28 +131,47 @@ curl -sk -H "Cookie: $COOKIE_A" "$BASE/api/sbom/export/cyclonedx" \
 
 > 💡 I report di compliance sono accessibili da **Settings → Compliance**
 > (nella sidebar, sezione "System"). I framework supportati dalla
-> pipeline di generazione sono **CISA BOD 22-01** e **NIS2 Directive**
-> (niente PCI-DSS / ISO 27001 / SOC 2 — se li vedi e' una regressione).
+> pipeline di generazione sono: **CISA BOD 22-01**, **NIS2 Directive**,
+> **PCI-DSS v4.0**, **ISO/IEC 27001:2022**, **SOC 2** (i tre ultimi
+> sono gated dal Compliance Pack add-on — vedi `compliance_reports.py`
+> e `reports_api.py::_add_report_integrity`).
 >
-> ⚠️ **Disclaimer legale**: questi sono *assessment report interni*,
-> **non certificati ufficiali firmati**. Non c'e' firma digitale ne'
-> HMAC di integrita'. Non sono utilizzabili direttamente come submission
-> regolatoria: un compliance officer deve rivederli e firmarli a parte.
+> ℹ️ **Integrità**: i report generati includono un blocco
+> `document_integrity` con `algorithm: "SHA-256"`, `content_hash` e
+> `hmac_sha256` calcolato sulla rappresentazione canonica del JSON
+> (escluso il blocco `document_integrity` stesso). L'HMAC usa il
+> `SECRET_KEY` dell'istanza, quindi prova che il report **non è stato
+> manomesso dopo la generazione**, ma può essere verificato solo
+> dall'istanza che l'ha prodotto — **non è una firma digitale PKI**
+> e non sostituisce una firma di un compliance officer per
+> submission regolatorie. Va presentata come "tamper-evident audit
+> trail", non come "certificato ufficiale".
 
 - [ ] Settings → Compliance → "CISA BOD 22-01" → download JSON:
       - Campo `report_type: "CISA BOD 22-01 Compliance"`
       - Sezione KEV con elenco dei match KEV dell'organizzazione
-      - Campo `scope_note` che chiarisce che SentriKat non fa
-        external network-perimeter scan
+      - Blocco `document_integrity` con `algorithm`, `content_hash`,
+        `hmac_sha256`, `verification_note`
 - [ ] Settings → Compliance → "NIS2 Directive" → download JSON:
       - Campo `report_type: "NIS2 Directive - Vulnerability Management Compliance"`
       - Sezioni per i controlli di vulnerability management
+      - Blocco `document_integrity` presente
+- [ ] PCI-DSS / ISO 27001 / SOC 2 (se Compliance Pack abilitato):
+      - `GET /api/reports/compliance/pci-dss?format=json` → 200
+      - `GET /api/reports/compliance/iso-27001?format=json` → 200
+      - `GET /api/reports/compliance/soc2?format=json` → 200
+      - Ognuno con `document_integrity.hmac_sha256` non vuoto
 - [ ] Ripeti il download in formato PDF:
       - Prima pagina: nome org, data, framework
       - Una sezione per ogni controllo
+      - Footer con hash SHA-256 visibile
 - [ ] Verifica che i bottoni "Download JSON" / "Download PDF" funzionino
       senza errore e che la risposta arrivi entro 10s per un org di
       dimensioni realistiche
+- [ ] **Tamper test**: scarica il JSON, modifica un campo a caso,
+      ricalcola SHA-256 sul canonicale → deve differire dal
+      `content_hash` nel blocco originale → prova che l'integrità
+      rileva la manomissione
 
 ## B.8 Vulnerability trending dashboard (2 min)
 

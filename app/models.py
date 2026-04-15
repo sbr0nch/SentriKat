@@ -3764,11 +3764,15 @@ class SubscriptionPlan(db.Model):
         {
             # Professional: €199/mo (€1,990/yr)
             # EA limits: 25 agents, 5 users
-            # Includes LDAP, integrations, compliance reports - real enterprise value
+            # Includes compliance reports, Jira, SIEM — single-org plan.
+            # (LDAP / SSO / Multi-Tenant are Business+ only. Pro is
+            # intentionally max_organizations: 1 so the quota matches
+            # the multi_org feature flag — see PR on claude/fix-test-checklist
+            # for the incoherence that used to exist here.)
             'name': 'pro',
             'display_name': 'Professional',
-            'description': 'For growing organizations with LDAP and integrations',
-            'max_agents': 25, 'max_users': 5, 'max_organizations': 3,
+            'description': 'For growing single-tenant organizations with compliance reports and integrations',
+            'max_agents': 25, 'max_users': 5, 'max_organizations': 1,
             'max_products': -1, 'max_api_keys': 5, 'max_storage_mb': 2000,
             'price_monthly_cents': 19900, 'price_annual_cents': 199000,
             'currency': 'EUR',
