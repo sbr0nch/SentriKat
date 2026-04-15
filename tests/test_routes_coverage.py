@@ -968,3 +968,188 @@ class TestProductCPEEndpoints:
         if response.status_code == 200:
             data = response.get_json()
             assert isinstance(data, dict)
+
+
+class TestFooterVersionString:
+    """
+    Bug fix: footer version string must differ between SaaS and on-premise.
+
+    - on-premise: shows "v{APP_VERSION}" (binary version — customers upgrade)
+    - SaaS, normal user: shows "SentriKat Cloud" (product name, no binary version)
+    - SaaS, super_admin (not impersonating), with SENTRIKAT_BUILD_SHA set:
+        shows "SentriKat Cloud · build <sha7>" (ops/debug aid)
+    - SaaS, super_admin impersonating a tenant: shows "SentriKat Cloud"
+        (matches what the impersonated user sees)
+    """
+
+    def _render_footer(self, app, **session_overrides):
+        """Render a minimal template that uses the app_version_string global."""
+        from flask import render_template_string
+        with app.test_request_context('/'):
+            from flask import session as flask_session
+            flask_session.clear()
+            for key, val in session_overrides.items():
+                flask_session[key] = val
+            return render_template_string('{{ app_version_string }}')
+
+    def test_onpremise_shows_binary_version(self, app):
+        """On-premise mode shows v{APP_VERSION}."""
+        from app import APP_VERSION
+        with patch('app.saas._SENTRIKAT_MODE', 'onpremise'):
+            rendered = self._render_footer(app)
+            assert rendered == f'v{APP_VERSION}'
+
+    def test_saas_normal_user_shows_cloud(self, app, test_user):
+        """SaaS mode, normal user: shows 'SentriKat Cloud' (no build sha)."""
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            with patch.dict(os.environ, {'SENTRIKAT_BUILD_SHA': 'abcdef1234567'}):
+                rendered = self._render_footer(app, user_id=test_user.id)
+                assert rendered == 'SentriKat Cloud'
+
+    def test_saas_super_admin_with_build_sha(self, app, admin_user):
+        """SaaS super_admin (not impersonating) + build sha: shows build info."""
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            with patch.dict(os.environ, {'SENTRIKAT_BUILD_SHA': 'abcdef1234567'}):
+                rendered = self._render_footer(app, user_id=admin_user.id)
+                assert rendered == 'SentriKat Cloud · build abcdef1'
+
+    def test_saas_super_admin_without_build_sha(self, app, admin_user):
+        """SaaS super_admin without build sha env var: shows plain name."""
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            env = {k: v for k, v in os.environ.items() if k != 'SENTRIKAT_BUILD_SHA'}
+            with patch.dict(os.environ, env, clear=True):
+                rendered = self._render_footer(app, user_id=admin_user.id)
+                assert rendered == 'SentriKat Cloud'
+
+    def test_saas_super_admin_impersonating_hides_build_sha(self, app, admin_user):
+        """SaaS super_admin while impersonating a tenant: treated as tenant user."""
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            with patch.dict(os.environ, {'SENTRIKAT_BUILD_SHA': 'abcdef1234567'}):
+                rendered = self._render_footer(
+                    app,
+                    user_id=admin_user.id,
+                    impersonated=True,
+                    impersonated_by='portal-admin',
+                )
+                assert rendered == 'SentriKat Cloud'
+
+    def test_saas_no_user_shows_cloud(self, app):
+        """SaaS mode with no logged-in user: shows plain 'SentriKat Cloud'."""
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            with patch.dict(os.environ, {'SENTRIKAT_BUILD_SHA': 'abcdef1234567'}):
+                rendered = self._render_footer(app)
+                assert rendered == 'SentriKat Cloud'
+
+
+class TestAlertsSettingsSmtpBanner:
+    """
+    Bug fix: the Alerts Settings page (/alerts/settings) rendered an SMTP
+    channel-status card in both SaaS and on-premise mode. In SaaS mode
+    tenants cannot configure SMTP (the platform operator runs a central
+    provider) so the card is meaningless and misleading. It must be
+    hidden in SaaS and the Webhooks card should expand to full width.
+    """
+
+    def test_onpremise_shows_smtp_card(self, admin_client, setup_complete):
+        """On-premise: SMTP card is rendered on the alerts settings page."""
+        with patch('app.saas._SENTRIKAT_MODE', 'onpremise'):
+            response = admin_client.get('/alerts/settings')
+            assert response.status_code == 200
+            body = response.get_data(as_text=True)
+            assert 'id="smtpStatus"' in body
+            assert 'id="smtpDetail"' in body
+            assert 'id="webhookStatus"' in body
+            assert 'Configure SMTP' in body
+
+    def test_saas_hides_smtp_card(self, admin_client, setup_complete):
+        """SaaS: SMTP card is hidden; webhook card is still rendered."""
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            response = admin_client.get('/alerts/settings')
+            assert response.status_code == 200
+            body = response.get_data(as_text=True)
+            # SMTP channel-card markers must not be present
+            assert 'id="smtpStatus"' not in body
+            assert 'id="smtpDetail"' not in body
+            # The "Configure SMTP" link from the SMTP card is gone too
+            assert 'Configure SMTP' not in body
+            # Webhook card is still there and functional
+            assert 'id="webhookStatus"' in body
+            assert 'Configure Webhooks' in body
+
+
+class TestScheduledReportsPage:
+    """
+    Bug fix: /reports/scheduled used to 403 on page load for tenants on
+    the free/starter plan, because the template fired /api/reports/scheduled
+    which is gated by @requires_professional('Scheduled Reports') →
+    compliance_reports feature. The error bubbled up as "Failed to load
+    reports" with a red alert instead of a friendly upsell.
+
+    Super-admins (platform operator) without an active org_id in session
+    used to get a 400 from the API. They should always see the full page.
+
+    Fix:
+    * The page route gates at render time with has_scheduled_reports_feature
+      and renders a feature-locked upsell card for tenants without the plan.
+    * get_scheduled_reports() returns [] for super-admin with no org_id,
+      instead of 400.
+    """
+
+    def test_page_returns_200_for_super_admin(self, admin_client, setup_complete):
+        """Super-admin always sees the full page, no 403."""
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            response = admin_client.get('/reports/scheduled')
+            assert response.status_code == 200
+            body = response.get_data(as_text=True)
+            # Super-admin sees the list + New Report CTA, not the upsell
+            assert 'id="reportList"' in body
+            assert 'New Report' in body
+            assert 'featureLockedState' not in body
+
+    def test_page_shows_upsell_for_tenant_without_feature(
+        self, client, setup_complete, db_session, test_org
+    ):
+        """Tenant org_admin without compliance_reports: 200 with upsell, no 403."""
+        from app.models import User
+        from werkzeug.security import generate_password_hash
+
+        org_admin = User(
+            username='orgadminfree',
+            email='orgadmin@test.local',
+            password_hash=generate_password_hash('pw'),
+            role='org_admin',
+            organization_id=test_org.id,
+            is_active=True,
+            auth_type='local',
+        )
+        db_session.add(org_admin)
+        db_session.commit()
+
+        with client.session_transaction() as sess:
+            sess['user_id'] = org_admin.id
+            sess['organization_id'] = test_org.id
+            sess['_fresh'] = True
+
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            # No subscription on test_org → free plan features →
+            # compliance_reports is False
+            response = client.get('/reports/scheduled')
+            assert response.status_code == 200
+            body = response.get_data(as_text=True)
+            assert 'featureLockedState' in body
+            assert 'not available on your current plan' in body
+            # The list placeholder and "New Report" button are suppressed
+            assert 'id="reportList"' not in body
+            assert 'Upgrade your plan' in body
+
+    def test_api_returns_empty_for_super_admin_without_org(
+        self, admin_client, setup_complete, db_session
+    ):
+        """Super-admin hitting /api/reports/scheduled without an org_id → []."""
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            with admin_client.session_transaction() as sess:
+                sess.pop('organization_id', None)
+            response = admin_client.get('/api/reports/scheduled')
+            assert response.status_code == 200
+            data = response.get_json()
+            assert data == []

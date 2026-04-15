@@ -585,6 +585,28 @@ def create_app(config_class=Config):
             except Exception:
                 pass
 
+        # Footer version string — differs between on-premise and SaaS:
+        # * on-premise customers upgrade their own binary and need the exact
+        #   release they are running ("v1.0.0-beta.2").
+        # * SaaS tenants never upgrade themselves; the binary version is noise
+        #   and leaks implementation detail, so we show a product name instead.
+        #   The platform operator (super_admin, not impersonating a tenant) can
+        #   still see the build SHA when SENTRIKAT_BUILD_SHA is set at image
+        #   build time, for ops/debugging purposes.
+        if saas_mode:
+            is_platform_operator = (
+                current_user is not None
+                and getattr(current_user, 'role', None) == 'super_admin'
+                and not session.get('impersonated', False)
+            )
+            build_sha = os.environ.get('SENTRIKAT_BUILD_SHA', '').strip()
+            if is_platform_operator and build_sha:
+                app_version_string = f'SentriKat Cloud · build {build_sha[:7]}'
+            else:
+                app_version_string = 'SentriKat Cloud'
+        else:
+            app_version_string = f'v{APP_VERSION}'
+
         return dict(
             current_user=current_user,
             auth_enabled=auth_enabled,
@@ -594,6 +616,7 @@ def create_app(config_class=Config):
             subscription=subscription_info,
             session_timeout_minutes=session_timeout_minutes,
             app_version=APP_VERSION,
+            app_version_string=app_version_string,
             display_settings=display_settings,
             license_revoked_banner=license_revoked_banner,
             impersonated=session.get('impersonated', False),
