@@ -139,9 +139,21 @@ def _add_report_integrity(report_data, generated_by_user=None):
 @login_required
 @requires_professional('Scheduled Reports')
 def get_scheduled_reports():
-    """Get all scheduled reports for the current organization"""
+    """Get all scheduled reports for the current organization.
+
+    For a platform super-admin that has no active ``organization_id`` in
+    session (e.g. just logged in directly without picking a tenant) we
+    return an empty list instead of a 400, so the scheduled-reports page
+    renders cleanly for the operator. Once they scope into a tenant the
+    normal filter kicks in.
+    """
+    from app.auth import _safe_get_user
+
     org_id = session.get('organization_id')
     if not org_id:
+        user = _safe_get_user(session.get('user_id'))
+        if user and user.is_super_admin():
+            return jsonify([])
         return jsonify({'error': 'Organization not found'}), 400
 
     reports = ScheduledReport.query.filter_by(organization_id=org_id).all()

@@ -1075,3 +1075,81 @@ class TestAlertsSettingsSmtpBanner:
             # Webhook card is still there and functional
             assert 'id="webhookStatus"' in body
             assert 'Configure Webhooks' in body
+
+
+class TestScheduledReportsPage:
+    """
+    Bug fix: /reports/scheduled used to 403 on page load for tenants on
+    the free/starter plan, because the template fired /api/reports/scheduled
+    which is gated by @requires_professional('Scheduled Reports') →
+    compliance_reports feature. The error bubbled up as "Failed to load
+    reports" with a red alert instead of a friendly upsell.
+
+    Super-admins (platform operator) without an active org_id in session
+    used to get a 400 from the API. They should always see the full page.
+
+    Fix:
+    * The page route gates at render time with has_scheduled_reports_feature
+      and renders a feature-locked upsell card for tenants without the plan.
+    * get_scheduled_reports() returns [] for super-admin with no org_id,
+      instead of 400.
+    """
+
+    def test_page_returns_200_for_super_admin(self, admin_client, setup_complete):
+        """Super-admin always sees the full page, no 403."""
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            response = admin_client.get('/reports/scheduled')
+            assert response.status_code == 200
+            body = response.get_data(as_text=True)
+            # Super-admin sees the list + New Report CTA, not the upsell
+            assert 'id="reportList"' in body
+            assert 'New Report' in body
+            assert 'featureLockedState' not in body
+
+    def test_page_shows_upsell_for_tenant_without_feature(
+        self, client, setup_complete, db_session, test_org
+    ):
+        """Tenant org_admin without compliance_reports: 200 with upsell, no 403."""
+        from app.models import User
+        from werkzeug.security import generate_password_hash
+
+        org_admin = User(
+            username='orgadminfree',
+            email='orgadmin@test.local',
+            password_hash=generate_password_hash('pw'),
+            role='org_admin',
+            organization_id=test_org.id,
+            is_active=True,
+            auth_type='local',
+        )
+        db_session.add(org_admin)
+        db_session.commit()
+
+        with client.session_transaction() as sess:
+            sess['user_id'] = org_admin.id
+            sess['organization_id'] = test_org.id
+            sess['_fresh'] = True
+
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            # No subscription on test_org → free plan features →
+            # compliance_reports is False
+            response = client.get('/reports/scheduled')
+            assert response.status_code == 200
+            body = response.get_data(as_text=True)
+            assert 'featureLockedState' in body
+            assert 'not available on your current plan' in body
+            # The list placeholder and "New Report" button are suppressed
+            assert 'id="reportList"' not in body
+            assert 'Upgrade your plan' in body
+
+    def test_api_returns_empty_for_super_admin_without_org(
+        self, admin_client, setup_complete, db_session
+    ):
+        """Super-admin hitting /api/reports/scheduled without an org_id → []."""
+        with patch('app.saas._SENTRIKAT_MODE', 'saas'):
+            with admin_client.session_transaction() as sess:
+                sess.pop('organization_id', None)
+            response = admin_client.get('/api/reports/scheduled')
+            assert response.status_code == 200
+            data = response.get_json()
+            assert data == []

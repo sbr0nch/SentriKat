@@ -1113,8 +1113,34 @@ def alerts_settings():
 @bp.route('/reports/scheduled')
 @org_admin_required
 def scheduled_reports():
-    """Scheduled reports management page."""
-    return render_template('scheduled_reports.html')
+    """Scheduled reports management page.
+
+    The page itself always returns 200 — feature gating happens in the
+    template, so tenants without the ``compliance_reports`` entitlement get
+    a friendly in-page upsell instead of a bare 403 from the API calls fired
+    on page load. Super-admins (platform operator) always see the full page
+    regardless of the current org's plan.
+    """
+    from app.auth import _safe_get_user
+    from app.saas import get_scoped_org_id, get_effective_features
+
+    has_feature = False
+    user = _safe_get_user(session.get('user_id'))
+    if user and user.is_super_admin():
+        has_feature = True
+    else:
+        try:
+            org_id = get_scoped_org_id(user=user)
+            if org_id:
+                features = get_effective_features(org_id)
+                has_feature = bool(features.get('compliance_reports', False))
+        except Exception:
+            has_feature = False
+
+    return render_template(
+        'scheduled_reports.html',
+        has_scheduled_reports_feature=has_feature,
+    )
 
 @bp.route('/admin-panel')
 @org_admin_required

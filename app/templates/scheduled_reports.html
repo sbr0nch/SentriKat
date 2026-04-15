@@ -23,11 +23,14 @@
         <h4 class="mb-0">Scheduled Reports</h4>
         <small class="text-muted">Automated vulnerability reports delivered by email</small>
     </div>
+    {% if has_scheduled_reports_feature %}
     <button class="btn btn-primary btn-sm" onclick="showCreateModal()">
         <i class="bi bi-plus-lg me-1"></i>New Report
     </button>
+    {% endif %}
 </div>
 
+{% if has_scheduled_reports_feature %}
 <div id="reportList"></div>
 
 <div id="emptyState" class="text-center py-5 d-none">
@@ -36,6 +39,21 @@
     <p class="text-muted">Create automated reports to keep your team informed about vulnerability status.</p>
     <button class="btn btn-primary btn-sm" onclick="showCreateModal()"><i class="bi bi-plus-lg me-1"></i>Create First Report</button>
 </div>
+{% else %}
+<div id="featureLockedState" class="card border-0 shadow-sm">
+    <div class="card-body text-center py-5">
+        <i class="bi bi-calendar-check text-primary" style="font-size:3rem"></i>
+        <h5 class="mt-3">Scheduled Reports are not available on your current plan</h5>
+        <p class="text-muted mb-4">
+            Automated weekly, monthly, and compliance reports (CISA BOD 22-01, EU NIS2)
+            are included in the Professional plan and above.
+        </p>
+        <a href="/admin-panel#subscription" class="btn btn-primary btn-sm">
+            <i class="bi bi-arrow-up-circle me-1"></i>Upgrade your plan
+        </a>
+    </div>
+</div>
+{% endif %}
 
 <!-- Create/Edit Modal -->
 <div class="modal fade" id="reportModal" tabindex="-1">
@@ -298,6 +316,11 @@ async function deleteReport(id) {
 function escHtml(s) { if (!s) return ''; const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 function timeAgo(d) { const s=Math.floor((Date.now()-d.getTime())/1000); if(s<60)return'just now'; if(s<3600)return Math.floor(s/60)+'m ago'; if(s<86400)return Math.floor(s/3600)+'h ago'; return Math.floor(s/86400)+'d ago'; }
 
-loadReports();
+// Only fire the initial fetch when the list container exists — in the
+// feature-locked branch the template renders an upsell card instead of
+// #reportList, so there is nothing to populate and no API call to make.
+if (document.getElementById('reportList')) {
+    loadReports();
+}
 </script>
 {% endblock %}
