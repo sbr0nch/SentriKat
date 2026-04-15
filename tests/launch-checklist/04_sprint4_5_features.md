@@ -5,24 +5,53 @@
 
 ---
 
-## D.1 Assignments — workflow embedded nei match (Sprint 4 #29)
+## D.1 Assignments — pagina standalone + workflow embedded (Sprint 4 #29)
 
-> ⚠️ **Non esiste** una pagina standalone "Assignments" con voce in
-> sidebar — gli assignment vivono dentro il dettaglio del singolo
-> match sulla Dashboard. La feature backend e' completa (vedi
-> `/api/remediation/assignments`), ma la UI e' solo quella embedded.
-> Follow-up tracciato: pagina Assignments standalone con tabella
-> + filtri + bulk actions.
+> 💡 Disponibili due UI per la stessa feature:
+> 1. **Pagina standalone**: sidebar → Overview → **Assignments**
+>    (`/assignments`). Tabella con filtri (status, priority, assigned_to,
+>    search), sort, paginazione, click su "👁" apre detail modal.
+>    Visibile a tutti gli utenti autenticati; i campi `notes` e
+>    `resolution_notes` sono redatti per `role='user'` / `manager`
+>    (solo `admin / org_admin / super_admin` li vedono — M15).
+> 2. **Embedded nei match**: Dashboard → click su un match → dettaglio
+>    CVE → sezione "Remediation" / "Assignments" (usa la stessa API).
 
 **Setup**: avere almeno 1 prodotto con vulnerabilita'. Login come `org_admin`.
+
+### D.1.1 Pagina standalone `/assignments`
+
+- [ ] Sidebar → Overview → Assignments → pagina carica entro 2s
+- [ ] Header mostra due pill: "Total: N" e "Overdue: M"
+- [ ] Tabella con colonne: CVE, Product, Assignee, Priority, Status,
+      Due date, Tracker, Actions
+- [ ] Filtro `status=open` → solo open
+- [ ] Filtro `priority=critical` → solo critical
+- [ ] Filtro `assigned_to=you@example.com` → solo le tue
+- [ ] Ricerca "CVE-2024" → debounced (350ms), aggiorna automaticamente
+- [ ] Sort by "priority" → critical in cima
+- [ ] Paginazione: crea > 25 assignments → Prev/Next/numeri di pagina
+- [ ] Row overdue ha sfondo rosso chiaro + icona warning
+- [ ] Click bottone "👁" → detail modal con CVE info, assignee, note,
+      tracker link
+- [ ] Login come `role='user'`: notes vengono mostrate come
+      *"Notes are restricted to org administrators (M15 redaction)"*
+- [ ] Login come `org_admin`: footer del modal mostra bottoni
+      "In progress", "Resolved", "Accepted risk", "Delete"
+- [ ] Click "Resolved" → conferma stilizzata (showConfirm) → status
+      aggiornato + riga aggiornata in tabella
+- [ ] Assignment in stato terminale (resolved / accepted_risk): modal
+      mostra messaggio "terminal state — create a new one instead"
+- [ ] Click "Delete" → conferma danger → row rimossa
+
+### D.1.2 Embedded in match detail
 
 - [ ] Dashboard → click su un match → dettaglio CVE → tab/sezione
       "Remediation" / "Assignments"
 - [ ] Click "+ Create Assignment" (nel dettaglio match) → modal si apre
 - [ ] Compila: assignee, priority, due_date, notes
 - [ ] Salva → appare nella sezione remediation del match
-- [ ] **API smoke** (per verificare filtri/paginazione che la UI non
-      espone):
+- [ ] **API smoke**:
       ```bash
       curl -sk -H "Cookie: $COOKIE_A" \
         "$BASE/api/remediation/assignments?status=open&per_page=25" \
@@ -32,18 +61,12 @@
       `overdue`. **Mai 500** — se vedi un 500 grep dei log per
       `Failed to serialize assignment id=` (il fix di hardening logga
       la riga incriminata e prosegue).
-- [ ] Filtri via API: `?status=open`, `?priority=high`, `?assigned_to=...`
-- [ ] Inline status change dal match → persiste dopo reload (verifica
-      via API con `GET /api/remediation/assignments/<id>`)
-- [ ] Modifica notes / resolution_notes → salva → persiste
 - [ ] Delete assignment via API:
       `curl -sk -X DELETE -H "Cookie: $COOKIE_A" "$BASE/api/remediation/assignments/<id>"`
       → rimossa
-- [ ] **M15 note redaction**: login come `role='user'` (non admin):
-      GET `/api/remediation/assignments/<id>` → i campi `notes` e
-      `resolution_notes` devono essere `null` (redatti). Questo e'
-      by design — solo `admin / org_admin / super_admin` vedono le
-      note, il resto dell'assignment e' visibile.
+- [ ] **M15 note redaction via API**: login come `role='user'`,
+      `GET /api/remediation/assignments/<id>` → `notes` e
+      `resolution_notes` devono essere `null` (redatti)
 
 ## D.2 Issue Tracker Integration (Sprint 4 #30)
 
@@ -82,31 +105,36 @@ YouTrack / Webhook).
 
 ## D.4 SBOM Export — CycloneDX / SPDX / STIX 2.1 (Sprint 4 #32 + Sprint 5)
 
-> ⚠️ L'export SBOM e' esposto **solo via API**, non c'e' un bottone
-> "Export" in Dashboard. Se il cliente si aspetta un download in
-> browser e' un gap noto da colmare.
+> 💡 Disponibile da tre entry-point: (1) Dashboard → Export dropdown →
+> SBOM Export section, (2) Sidebar → Inventory → SBOM Export
+> (`/exports/sbom`, pagina dedicata con explainer + curl snippet),
+> (3) API diretta. **Nota di tuning**: la route STIX si chiama
+> `stix21`, non `stix` — l'alias non esiste.
 
-- [ ] **CycloneDX 1.5 JSON** via curl:
-      ```bash
-      curl -sk -H "Cookie: $COOKIE_A" "$BASE/api/sbom/export/cyclonedx" -o sbom-cdx.json
-      ```
+- [ ] **CycloneDX 1.5 JSON** via `/exports/sbom` → click "Download JSON"
+      sul card CycloneDX → file `sentrikat-sbom-cyclonedx-YYYY-MM-DD.json`
+      scaricato. Verifica:
       - `bomFormat: "CycloneDX"`, `specVersion: "1.5"`
       - `components` array: ogni component ha `type`, `name`, `version`,
         `purl` (es. `pkg:apt/openssl/openssl@1.1.1k`), `supplier` (vendor)
       - `vulnerabilities` array: ogni vuln ha `id`, `source`, `ratings`,
         `affects` refs
-- [ ] **Validazione online**: upload `sbom-cdx.json` su
+- [ ] **Validazione online**: upload `sentrikat-sbom-cyclonedx-*.json` su
       https://cyclonedx.github.io/cyclonedx.org/tool-center/ → no errors
-- [ ] **SPDX 2.3 JSON** via curl:
+- [ ] **Same endpoint via curl**:
+      ```bash
+      curl -sk -H "Cookie: $COOKIE_A" "$BASE/api/sbom/export/cyclonedx" -o sbom-cdx.json
+      ```
+- [ ] **SPDX 2.3 JSON** (via `/exports/sbom` o via curl):
       ```bash
       curl -sk -H "Cookie: $COOKIE_A" "$BASE/api/sbom/export/spdx" -o sbom-spdx.json
       ```
       - `spdxVersion: "SPDX-2.3"`
       - `packages` array con SPDXID, name, versionInfo, externalRefs
         (cpe23Type se disponibile)
-- [ ] **STIX 2.1 JSON** via curl:
+- [ ] **STIX 2.1 JSON** (attenzione: endpoint = `stix21`):
       ```bash
-      curl -sk -H "Cookie: $COOKIE_A" "$BASE/api/sbom/export/stix" -o sbom-stix.json
+      curl -sk -H "Cookie: $COOKIE_A" "$BASE/api/sbom/export/stix21" -o sbom-stix.json
       ```
       - `type: "bundle"`, `id` starts with `bundle--`
       - `objects` array:

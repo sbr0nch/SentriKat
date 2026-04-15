@@ -237,3 +237,175 @@ def test_api_key(db_session, test_org):
     db_session.add(api_key)
     db_session.commit()
     return {'api_key': api_key, 'raw_key': raw_key}
+
+
+# =============================================================================
+# RBAC fixtures (Sprint 6 — prevention of the viewer/manager regression class
+# we fixed manually on claude/fix-test-checklist).
+#
+# These fixtures give every test a cheap way to assert that a specific role
+# gets the expected ALLOW / DENY verdict on a given endpoint without having
+# to re-create users and organizations by hand. They also include a second
+# organization + a user in it so cross-tenant isolation can be asserted
+# directly.
+# =============================================================================
+
+@pytest.fixture
+def viewer_user(db_session, test_org):
+    """Create a plain 'user' (aka viewer) in the primary test org.
+
+    NOTE #1: SentriKat has no separate 'viewer' role — `user` IS the
+    read-only role. This fixture name mirrors the mental model the
+    product team uses ('viewer = read-only'). If a test needs a user
+    that can create products, use `manager_user` instead.
+
+    NOTE #2: The User.can_manage_products column defaults to TRUE in
+    the model (models.py:1163). That default leaks through
+    @manager_required which treats can_manage_products=True as a
+    capability override. In the RBAC tests we set it to False
+    EXPLICITLY so the fixture represents a true read-only user. In
+    production, this means a new row with role='user' gets write
+    access to products / exclusions / import queue unless an org_admin
+    actively flips the flag off — that's a footgun tracked as a
+    follow-up (see docstring of test_rbac_regression.py).
+    """
+    from app.models import User
+    from werkzeug.security import generate_password_hash
+
+    user = User(
+        username='viewer',
+        email='viewer@test.local',
+        password_hash=generate_password_hash('viewerpass123'),
+        role='user',
+        can_manage_products=False,  # see NOTE #2 — explicit for the RBAC contract
+        organization_id=test_org.id,
+        is_active=True,
+        auth_type='local',
+    )
+    db_session.add(user)
+    db_session.commit()
+    return user
+
+
+@pytest.fixture
+def manager_user(db_session, test_org):
+    """Create a 'manager' user in the primary test org.
+
+    Manager can manage products / run imports / use integrations but
+    cannot manage users, settings, or billing.
+    """
+    from app.models import User
+    from werkzeug.security import generate_password_hash
+
+    user = User(
+        username='manageruser',
+        email='manager@test.local',
+        password_hash=generate_password_hash('managerpass123'),
+        role='manager',
+        can_manage_products=True,
+        organization_id=test_org.id,
+        is_active=True,
+        auth_type='local',
+    )
+    db_session.add(user)
+    db_session.commit()
+    return user
+
+
+@pytest.fixture
+def org_admin_user(db_session, test_org):
+    """Create an 'org_admin' user in the primary test org.
+
+    Org-admin can do everything except cross-tenant operations and
+    platform-wide settings (those require super_admin).
+    """
+    from app.models import User
+    from werkzeug.security import generate_password_hash
+
+    user = User(
+        username='orgadmin',
+        email='orgadmin@test.local',
+        password_hash=generate_password_hash('orgadminpass123'),
+        role='org_admin',
+        organization_id=test_org.id,
+        is_active=True,
+        auth_type='local',
+    )
+    db_session.add(user)
+    db_session.commit()
+    return user
+
+
+@pytest.fixture
+def second_org(db_session):
+    """A second, unrelated organization for cross-tenant tests."""
+    from app.models import Organization
+    org = Organization(
+        name='Second Test Organization',
+        display_name='Second Test Org',
+        active=True,
+    )
+    db_session.add(org)
+    db_session.commit()
+    return org
+
+
+@pytest.fixture
+def second_org_admin(db_session, second_org):
+    """An org_admin whose only org is `second_org` — used to check that
+    cross-tenant GET / POST / PATCH actions are refused.
+    """
+    from app.models import User
+    from werkzeug.security import generate_password_hash
+
+    user = User(
+        username='secondorgadmin',
+        email='secondorgadmin@test.local',
+        password_hash=generate_password_hash('secondpass123'),
+        role='org_admin',
+        organization_id=second_org.id,
+        is_active=True,
+        auth_type='local',
+    )
+    db_session.add(user)
+    db_session.commit()
+    return user
+
+
+def _login_client(client, user):
+    """Attach a session cookie for ``user`` to ``client``.
+
+    The login decorator requires both ``user_id`` and, for tenant-scoped
+    endpoints, ``organization_id`` in the session. We mirror what the
+    real /api/auth/login endpoint does on success.
+    """
+    with client.session_transaction() as sess:
+        sess['user_id'] = user.id
+        if user.organization_id:
+            sess['organization_id'] = user.organization_id
+        sess['_fresh'] = True
+    return client
+
+
+@pytest.fixture
+def viewer_client(client, viewer_user):
+    """Test client authenticated as role='user' in the primary org."""
+    return _login_client(client, viewer_user)
+
+
+@pytest.fixture
+def manager_client(client, manager_user):
+    """Test client authenticated as role='manager' in the primary org."""
+    return _login_client(client, manager_user)
+
+
+@pytest.fixture
+def org_admin_client(client, org_admin_user):
+    """Test client authenticated as role='org_admin' in the primary org."""
+    return _login_client(client, org_admin_user)
+
+
+@pytest.fixture
+def second_org_client(client, second_org_admin):
+    """Test client authenticated as org_admin of the OTHER organization."""
+    return _login_client(client, second_org_admin)

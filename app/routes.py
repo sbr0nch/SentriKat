@@ -1103,6 +1103,35 @@ def dependencies():
     return render_template('dependencies.html')
 
 
+@bp.route('/exports/sbom')
+@login_required
+def exports_sbom():
+    """SBOM Export hub — explainer page with CycloneDX / SPDX / STIX download buttons.
+
+    The actual downloads are served by the existing sbom_export blueprint at
+    /api/sbom/export/{cyclonedx,spdx,stix21}. This page exists purely for
+    discoverability: the Dashboard already has an Export dropdown, but QA
+    feedback showed users couldn't find it.
+    """
+    return render_template('exports_sbom.html')
+
+
+@bp.route('/assignments')
+@login_required
+def assignments_page():
+    """Standalone Remediation Assignments page.
+
+    Renders the Assignments table. Data is loaded client-side from the
+    existing /api/remediation/assignments endpoint so all filters,
+    pagination, sorting, and note-redaction logic is reused.
+
+    Visible to every authenticated user. The backend API already scopes
+    to the caller's organization_id and redacts notes for non-admin
+    roles (M15), so there is no extra gating needed here.
+    """
+    return render_template('assignments.html')
+
+
 @bp.route('/alerts/settings')
 @org_admin_required
 def alerts_settings():

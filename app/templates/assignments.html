@@ -1,0 +1,535 @@
+{% extends 'base.html' %}
+
+{% block title %}Assignments - SentriKat{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/"><i class="bi bi-house-door"></i></a></li>
+<li class="breadcrumb-item active" aria-current="page">Remediation Assignments</li>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .assignment-row td { vertical-align: middle; }
+    .assignment-row.overdue { background-color: rgba(220, 53, 69, 0.05); }
+    .priority-badge.critical { background: #dc3545; }
+    .priority-badge.high     { background: #fd7e14; }
+    .priority-badge.medium   { background: #ffc107; color: #000; }
+    .priority-badge.low      { background: #6c757d; }
+    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+    .status-dot.open         { background: #0d6efd; }
+    .status-dot.in_progress  { background: #6610f2; }
+    .status-dot.resolved     { background: #198754; }
+    .status-dot.accepted_risk{ background: #6c757d; }
+    .assignment-notes { white-space: pre-wrap; font-size: 0.85rem; color: var(--text-muted); }
+    .stat-pill { background: var(--gray-50); border: 1px solid var(--border-color); border-radius: 999px; padding: 0.3rem 0.9rem; font-size: 0.85rem; }
+    .stat-pill .count { font-weight: 700; margin-left: 0.25rem; }
+    .stat-pill.overdue { background: rgba(220, 53, 69, 0.08); border-color: rgba(220, 53, 69, 0.2); color: #b52a37; }
+    .redacted-note { font-style: italic; color: var(--text-muted); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <h2 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>Remediation Assignments</h2>
+        <div class="d-flex gap-2 align-items-center flex-wrap">
+            <span class="stat-pill">Total<span class="count" id="statTotal">–</span></span>
+            <span class="stat-pill overdue"><i class="bi bi-exclamation-triangle me-1"></i>Overdue<span class="count" id="statOverdue">–</span></span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadAssignments()" title="Reload">
+                <i class="bi bi-arrow-clockwise"></i>
+            </button>
+        </div>
+    </div>
+
+    <div class="alert alert-info small mb-3" id="readonlyBanner" style="display: none;">
+        <i class="bi bi-info-circle me-2"></i>
+        You have read-only access to assignments. Inline editing, deletion, and
+        sensitive notes are restricted to org administrators.
+    </div>
+
+    <!-- Filters -->
+    <div class="card mb-3">
+        <div class="card-body py-3">
+            <form id="filterForm" class="row g-2 align-items-end" onsubmit="return applyFilters(event)">
+                <div class="col-md-3">
+                    <label class="form-label small mb-1">Search</label>
+                    <input type="text" class="form-control form-control-sm" id="fSearch"
+                           placeholder="CVE, assignee, notes...">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-1">Status</label>
+                    <select class="form-select form-select-sm" id="fStatus">
+                        <option value="">All</option>
+                        <option value="open">Open</option>
+                        <option value="in_progress">In progress</option>
+                        <option value="resolved">Resolved</option>
+                        <option value="accepted_risk">Accepted risk</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-1">Priority</label>
+                    <select class="form-select form-select-sm" id="fPriority">
+                        <option value="">All</option>
+                        <option value="critical">Critical</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-1">Assigned to</label>
+                    <input type="text" class="form-control form-control-sm" id="fAssignedTo"
+                           placeholder="user@example.com">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-1">Sort</label>
+                    <select class="form-select form-select-sm" id="fSort">
+                        <option value="due_date">Due date</option>
+                        <option value="priority">Priority</option>
+                        <option value="status">Status</option>
+                        <option value="created_at">Created</option>
+                    </select>
+                </div>
+                <div class="col-md-1 d-grid">
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="bi bi-funnel"></i>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>CVE</th>
+                            <th>Product</th>
+                            <th>Assignee</th>
+                            <th>Priority</th>
+                            <th>Status</th>
+                            <th>Due date</th>
+                            <th>Tracker</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="assignmentsTable">
+                        <tr><td colspan="8" class="text-center py-5 text-muted">
+                            <div class="spinner-border spinner-border-sm me-2"></div>Loading…
+                        </td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card-footer d-flex justify-content-between align-items-center flex-wrap gap-2" id="pager" style="display: none;">
+            <div class="small text-muted" id="pagerInfo"></div>
+            <nav><ul class="pagination pagination-sm mb-0" id="pagerButtons"></ul></nav>
+        </div>
+    </div>
+
+    <!-- Detail modal -->
+    <div class="modal fade" id="assignmentDetailModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-clipboard-check me-2"></i>Assignment detail
+                        <small class="text-muted ms-2" id="detailId"></small>
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="detailBody">
+                    <div class="text-center py-4 text-muted">
+                        <div class="spinner-border spinner-border-sm me-2"></div>Loading…
+                    </div>
+                </div>
+                <div class="modal-footer" id="detailFooter"></div>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    /**
+     * Assignments page controller.
+     *
+     * All data comes from the existing /api/remediation/assignments endpoint.
+     * The backend scopes by session organization_id and redacts `notes` /
+     * `resolution_notes` for non-admin roles (M15), so this page trusts the
+     * response and renders whatever it gets back.
+     *
+     * Write actions (status change, delete) require org_admin — we detect
+     * that via /api/auth/status and hide/disable the controls accordingly.
+     */
+
+    const ASSIGN_ADMIN_ROLES = ['org_admin', 'super_admin'];
+    let canEditAssignments = false;
+    let currentPage = 1;
+    const pageSize = 25;
+
+    async function detectPermissions() {
+        try {
+            const res = await fetch('/api/auth/status');
+            if (!res.ok) return;
+            const data = await res.json();
+            const role = (data.user && data.user.role) || '';
+            canEditAssignments = ASSIGN_ADMIN_ROLES.includes(role) || data.user?.is_admin === true;
+        } catch (_) { /* default read-only */ }
+        if (!canEditAssignments) {
+            document.getElementById('readonlyBanner').style.display = '';
+        }
+    }
+
+    function esc(s) {
+        if (s === null || s === undefined) return '';
+        const d = document.createElement('div');
+        d.textContent = String(s);
+        return d.innerHTML;
+    }
+
+    function fmtDate(iso) {
+        if (!iso) return '<span class="text-muted">—</span>';
+        // Date-only strings (YYYY-MM-DD) render in local TZ without the time shift
+        if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+        try { return new Date(iso).toLocaleDateString(); } catch (_) { return esc(iso); }
+    }
+
+    function statusLabel(s) {
+        return ({
+            open: 'Open',
+            in_progress: 'In progress',
+            resolved: 'Resolved',
+            accepted_risk: 'Accepted risk',
+        })[s] || s;
+    }
+
+    function priorityBadge(p) {
+        const cls = ['critical','high','medium','low'].includes(p) ? p : 'medium';
+        return `<span class="badge priority-badge ${cls} text-uppercase">${esc(p || 'medium')}</span>`;
+    }
+
+    function statusBadge(s) {
+        const cls = s || 'open';
+        return `<span class="status-dot ${cls}"></span>${esc(statusLabel(s))}`;
+    }
+
+    function trackerCell(a) {
+        if (!a.tracker_issue_key) return '<span class="text-muted">—</span>';
+        const label = esc(a.tracker_issue_key);
+        if (a.tracker_issue_url) {
+            return `<a href="${esc(a.tracker_issue_url)}" target="_blank" rel="noopener" class="small">
+                <i class="bi bi-box-arrow-up-right me-1"></i>${label}
+            </a>`;
+        }
+        return `<span class="small">${label}</span>`;
+    }
+
+    function renderRow(a) {
+        const overdueClass = a.is_overdue ? 'overdue' : '';
+        const cveLabel = (a.cve_info && a.cve_info.cve_id) || a.cve_id || '<span class="text-muted">—</span>';
+        const productLabel = a.product_name
+            ? `${esc(a.product_name)} <small class="text-muted">${esc(a.product_version || '')}</small>`
+            : '<span class="text-muted">—</span>';
+        const dueLabel = a.is_overdue
+            ? `<span class="text-danger fw-semibold"><i class="bi bi-exclamation-triangle me-1"></i>${fmtDate(a.due_date)}</span>`
+            : fmtDate(a.due_date);
+
+        return `
+          <tr class="assignment-row ${overdueClass}" data-id="${a.id}">
+            <td class="fw-semibold">${esc(cveLabel)}</td>
+            <td>${productLabel}</td>
+            <td>${esc(a.assigned_to || '')}</td>
+            <td>${priorityBadge(a.priority)}</td>
+            <td>${statusBadge(a.status)}</td>
+            <td>${dueLabel}</td>
+            <td>${trackerCell(a)}</td>
+            <td class="text-end">
+              <button type="button" class="btn btn-sm btn-outline-primary" onclick="openDetail(${a.id})">
+                <i class="bi bi-eye"></i>
+              </button>
+            </td>
+          </tr>
+        `;
+    }
+
+    async function loadAssignments(page = 1) {
+        currentPage = page;
+        const tbody = document.getElementById('assignmentsTable');
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center py-4 text-muted">
+            <div class="spinner-border spinner-border-sm me-2"></div>Loading…
+        </td></tr>`;
+
+        const params = new URLSearchParams({
+            page: String(page),
+            per_page: String(pageSize),
+        });
+        const s = document.getElementById('fSearch').value.trim();
+        if (s) params.set('search', s);
+        const st = document.getElementById('fStatus').value;
+        if (st) params.set('status', st);
+        const pr = document.getElementById('fPriority').value;
+        if (pr) params.set('priority', pr);
+        const at = document.getElementById('fAssignedTo').value.trim();
+        if (at) params.set('assigned_to', at);
+        const so = document.getElementById('fSort').value;
+        if (so) params.set('sort', so);
+
+        try {
+            const res = await fetch(`/api/remediation/assignments?${params}`);
+            if (!res.ok) {
+                const j = await res.json().catch(() => ({}));
+                throw new Error(j.error || j.message || `HTTP ${res.status}`);
+            }
+            const data = await res.json();
+            document.getElementById('statTotal').textContent = data.total ?? 0;
+            document.getElementById('statOverdue').textContent = data.overdue ?? 0;
+
+            if (!data.assignments || data.assignments.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="8" class="text-center py-5 text-muted">
+                    <i class="bi bi-inbox d-block mb-2" style="font-size: 2rem;"></i>
+                    No assignments match the current filters.
+                </td></tr>`;
+            } else {
+                tbody.innerHTML = data.assignments.map(renderRow).join('');
+            }
+
+            renderPager(data);
+        } catch (err) {
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-4 text-danger">
+                <i class="bi bi-exclamation-triangle me-2"></i>${esc(err.message)}
+            </td></tr>`;
+        }
+    }
+
+    function renderPager(data) {
+        const pager = document.getElementById('pager');
+        const info = document.getElementById('pagerInfo');
+        const btns = document.getElementById('pagerButtons');
+        const totalPages = data.pages || 1;
+        if (totalPages <= 1) {
+            pager.style.display = 'none';
+            return;
+        }
+        pager.style.display = '';
+        const from = (data.page - 1) * data.per_page + 1;
+        const to = Math.min(data.page * data.per_page, data.total);
+        info.textContent = `${from}–${to} of ${data.total}`;
+        let html = '';
+        html += `<li class="page-item ${data.page <= 1 ? 'disabled' : ''}">
+            <a href="#" class="page-link" onclick="loadAssignments(${data.page - 1}); return false;">Prev</a>
+        </li>`;
+        // Render up to 7 page buttons centered around current page
+        const start = Math.max(1, data.page - 3);
+        const end   = Math.min(totalPages, start + 6);
+        for (let p = start; p <= end; p++) {
+            html += `<li class="page-item ${p === data.page ? 'active' : ''}">
+                <a href="#" class="page-link" onclick="loadAssignments(${p}); return false;">${p}</a>
+            </li>`;
+        }
+        html += `<li class="page-item ${data.page >= totalPages ? 'disabled' : ''}">
+            <a href="#" class="page-link" onclick="loadAssignments(${data.page + 1}); return false;">Next</a>
+        </li>`;
+        btns.innerHTML = html;
+    }
+
+    function applyFilters(ev) {
+        ev.preventDefault();
+        loadAssignments(1);
+        return false;
+    }
+
+    async function openDetail(id) {
+        const modalEl = document.getElementById('assignmentDetailModal');
+        const body = document.getElementById('detailBody');
+        const footer = document.getElementById('detailFooter');
+        const label = document.getElementById('detailId');
+        label.textContent = `#${id}`;
+        body.innerHTML = `<div class="text-center py-4 text-muted">
+            <div class="spinner-border spinner-border-sm me-2"></div>Loading…
+        </div>`;
+        footer.innerHTML = '';
+        new bootstrap.Modal(modalEl).show();
+
+        try {
+            const res = await fetch(`/api/remediation/assignments/${id}`);
+            if (!res.ok) {
+                const j = await res.json().catch(() => ({}));
+                throw new Error(j.error || j.message || `HTTP ${res.status}`);
+            }
+            const a = await res.json();
+            renderDetail(a);
+        } catch (err) {
+            body.innerHTML = `<div class="alert alert-danger mb-0">${esc(err.message)}</div>`;
+        }
+    }
+
+    function renderDetail(a) {
+        const body = document.getElementById('detailBody');
+        const footer = document.getElementById('detailFooter');
+
+        const cve = (a.cve_info && a.cve_info.cve_id) || a.cve_id || '—';
+        const cvss = a.cve_info && a.cve_info.cvss_score !== null && a.cve_info.cvss_score !== undefined
+            ? `${a.cve_info.cvss_score}`
+            : null;
+        const sev = a.cve_info && a.cve_info.severity;
+
+        const notesBlock = (a.notes === null || a.notes === undefined)
+            ? `<p class="redacted-note">Notes are restricted to org administrators (M15 redaction).</p>`
+            : (a.notes
+                ? `<pre class="assignment-notes mb-0">${esc(a.notes)}</pre>`
+                : `<p class="text-muted mb-0 fst-italic">No notes.</p>`);
+
+        const resolutionBlock = (a.resolution_notes === null || a.resolution_notes === undefined)
+            ? `<p class="redacted-note">Resolution notes restricted to org administrators.</p>`
+            : (a.resolution_notes
+                ? `<pre class="assignment-notes mb-0">${esc(a.resolution_notes)}</pre>`
+                : `<p class="text-muted mb-0 fst-italic">No resolution notes.</p>`);
+
+        body.innerHTML = `
+          <dl class="row mb-0">
+            <dt class="col-sm-3">CVE</dt>
+            <dd class="col-sm-9">${esc(cve)}${sev ? ` <span class="badge bg-secondary ms-1">${esc(sev)}</span>` : ''}${cvss ? ` <span class="badge bg-dark ms-1">CVSS ${esc(cvss)}</span>` : ''}</dd>
+
+            <dt class="col-sm-3">Product</dt>
+            <dd class="col-sm-9">${a.product_name ? esc(a.product_name) + ' ' + esc(a.product_version || '') : '<span class="text-muted">—</span>'}</dd>
+
+            <dt class="col-sm-3">Assignee</dt>
+            <dd class="col-sm-9">${esc(a.assigned_to || '')}</dd>
+
+            <dt class="col-sm-3">Assigned by</dt>
+            <dd class="col-sm-9">${esc(a.assigned_by || '')}</dd>
+
+            <dt class="col-sm-3">Priority</dt>
+            <dd class="col-sm-9">${priorityBadge(a.priority)}</dd>
+
+            <dt class="col-sm-3">Status</dt>
+            <dd class="col-sm-9">${statusBadge(a.status)}</dd>
+
+            <dt class="col-sm-3">Due date</dt>
+            <dd class="col-sm-9">${a.is_overdue
+                ? `<span class="text-danger fw-semibold"><i class="bi bi-exclamation-triangle me-1"></i>${fmtDate(a.due_date)} (overdue)</span>`
+                : fmtDate(a.due_date)}</dd>
+
+            <dt class="col-sm-3">Created</dt>
+            <dd class="col-sm-9">${fmtDate(a.created_at)}</dd>
+
+            ${a.tracker_issue_key ? `
+            <dt class="col-sm-3">Tracker</dt>
+            <dd class="col-sm-9">${trackerCell(a)}
+                <span class="badge bg-secondary ms-1 text-uppercase">${esc(a.tracker_type || '')}</span>
+            </dd>` : ''}
+
+            <dt class="col-sm-3">Notes</dt>
+            <dd class="col-sm-9">${notesBlock}</dd>
+
+            <dt class="col-sm-3">Resolution</dt>
+            <dd class="col-sm-9">${resolutionBlock}</dd>
+          </dl>
+        `;
+
+        // Footer actions — only render write controls if the caller is org_admin+.
+        if (canEditAssignments) {
+            const isTerminal = ['resolved', 'accepted_risk'].includes(a.status);
+            footer.innerHTML = `
+              <div class="me-auto">
+                ${isTerminal
+                  ? `<span class="text-muted small fst-italic">
+                       Assignment in terminal state — create a new one instead of
+                       reopening.
+                     </span>`
+                  : `<div class="btn-group btn-group-sm">
+                       <button class="btn btn-outline-primary" onclick="changeStatus(${a.id}, 'in_progress')" ${a.status === 'in_progress' ? 'disabled' : ''}>
+                         <i class="bi bi-play-circle me-1"></i>In progress
+                       </button>
+                       <button class="btn btn-outline-success" onclick="changeStatus(${a.id}, 'resolved')">
+                         <i class="bi bi-check2-circle me-1"></i>Resolved
+                       </button>
+                       <button class="btn btn-outline-secondary" onclick="changeStatus(${a.id}, 'accepted_risk')">
+                         <i class="bi bi-shield-check me-1"></i>Accepted risk
+                       </button>
+                     </div>`
+                }
+              </div>
+              <button class="btn btn-outline-danger btn-sm" onclick="deleteAssignment(${a.id})">
+                <i class="bi bi-trash me-1"></i>Delete
+              </button>
+              <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+            `;
+        } else {
+            footer.innerHTML = `
+              <span class="text-muted small me-auto fst-italic">Read-only access</span>
+              <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+            `;
+        }
+    }
+
+    async function changeStatus(id, newStatus) {
+        const ok = await showConfirm(
+            `Move this assignment to <strong>${esc(statusLabel(newStatus))}</strong>?`,
+            'Change status',
+            'Confirm',
+            newStatus === 'accepted_risk' ? 'btn-warning' : 'btn-primary',
+        );
+        if (!ok) return;
+        try {
+            const res = await fetch(`/api/remediation/assignments/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: newStatus }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                showToast(data.error || data.message || `HTTP ${res.status}`, 'danger');
+                return;
+            }
+            showToast('Status updated', 'success');
+            bootstrap.Modal.getInstance(document.getElementById('assignmentDetailModal'))?.hide();
+            loadAssignments(currentPage);
+        } catch (err) {
+            showToast(`Network error: ${err.message}`, 'danger');
+        }
+    }
+
+    async function deleteAssignment(id) {
+        const ok = await showConfirm(
+            'Delete this assignment? This cannot be undone.',
+            'Delete assignment',
+            'Delete',
+            'btn-danger',
+        );
+        if (!ok) return;
+        try {
+            const res = await fetch(`/api/remediation/assignments/${id}`, { method: 'DELETE' });
+            if (!res.ok && res.status !== 204) {
+                const j = await res.json().catch(() => ({}));
+                showToast(j.error || j.message || `HTTP ${res.status}`, 'danger');
+                return;
+            }
+            showToast('Assignment deleted', 'success');
+            bootstrap.Modal.getInstance(document.getElementById('assignmentDetailModal'))?.hide();
+            loadAssignments(currentPage);
+        } catch (err) {
+            showToast(`Network error: ${err.message}`, 'danger');
+        }
+    }
+
+    // Debounced search input
+    let searchTimer = null;
+    document.getElementById('fSearch').addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => loadAssignments(1), 350);
+    });
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        await detectPermissions();
+        loadAssignments(1);
+    });
+</script>
+{% endblock %}
