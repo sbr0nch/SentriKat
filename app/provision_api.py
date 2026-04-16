@@ -172,7 +172,22 @@ def provision_tenant():
 
     # Check if user already exists. Response intentionally does NOT echo
     # the existing organization id (H4 information leak).
+    # Use normalized email for dedup to catch Gmail aliases (user+tag,
+    # u.s.e.r, @googlemail.com → same canonical address).
+    from app.email_normalizer import normalize_email_for_dedup
+    canonical_email = normalize_email_for_dedup(email)
     existing_user = User.query.filter_by(email=email).first()
+    if not existing_user and canonical_email != email:
+        # Check aliases: query same domain, compare canonical forms in Python.
+        # Scope to domain for index utilization.
+        domain = canonical_email.split('@')[1]
+        candidates = User.query.filter(
+            User.email.ilike(f'%@{domain}')
+        ).all()
+        for u in candidates:
+            if normalize_email_for_dedup(u.email) == canonical_email:
+                existing_user = u
+                break
     if existing_user:
         return jsonify({
             'error': 'User with this email already exists',
