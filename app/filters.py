@@ -1,9 +1,13 @@
+import logging
+import re
+import json
+
 from app import db
 from app.models import Product, Vulnerability, VulnerabilityMatch, VendorFixOverride
 from app.version_utils import _version_sort_key, _version_in_range, detect_version_format
 from datetime import date
-import re
-import json
+
+logger = logging.getLogger(__name__)
 
 def normalize_string(s):
     """Normalize string for matching (lowercase, strip spaces)"""
@@ -475,6 +479,14 @@ def _has_active_risk_exception(vulnerability, product):
             active_filter,
         ).first()
         if specific:
+            logger.debug(
+                "RiskException id=%d suppressed %s for product id=%d (%s %s) "
+                "[product-specific, org_id=%d, expires=%s]",
+                specific.id, vulnerability.cve_id, product.id,
+                product.vendor, product.product_name,
+                specific.organization_id,
+                specific.expires_at or 'permanent',
+            )
             return True
 
         # 2) Wildcard — org-wide exception for this CVE (product_id IS NULL).
@@ -484,7 +496,17 @@ def _has_active_risk_exception(vulnerability, product):
             RiskException.product_id.is_(None),
             active_filter,
         ).first()
-        return wildcard is not None
+        if wildcard:
+            logger.debug(
+                "RiskException id=%d suppressed %s for product id=%d (%s %s) "
+                "[wildcard/org-wide, org_id=%d, expires=%s]",
+                wildcard.id, vulnerability.cve_id, product.id,
+                product.vendor, product.product_name,
+                wildcard.organization_id,
+                wildcard.expires_at or 'permanent',
+            )
+            return True
+        return False
     except Exception:
         # Fail-open: never crash match evaluation because of an exception
         # lookup error. Correctness here is best-effort; the worst case is

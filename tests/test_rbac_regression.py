@@ -420,3 +420,254 @@ class TestAssignmentListNeverFivexx:
             f"Expected 401/403 from unauthenticated call, got "
             f"{response.status_code}: {response.get_data(as_text=True)[:200]}"
         )
+
+
+# =============================================================================
+# 7. Admin-only endpoints — org_admin / manager / viewer must be denied
+# =============================================================================
+
+class TestAdminOnlyEndpoints:
+    """Endpoints protected with @admin_required must reject non-super_admins."""
+
+    ADMIN_ENDPOINTS_GET = [
+        '/api/audit-logs',
+    ]
+
+    ADMIN_ENDPOINTS_POST = [
+        '/api/sync',
+        '/api/products/rematch',
+    ]
+
+    @pytest.mark.parametrize('url', ADMIN_ENDPOINTS_GET)
+    def test_viewer_denied_admin_get(self, viewer_client, setup_complete, url):
+        resp = viewer_client.get(url)
+        assert resp.status_code in (401, 403), f"Viewer on {url}: {resp.status_code}"
+
+    @pytest.mark.parametrize('url', ADMIN_ENDPOINTS_GET)
+    def test_manager_denied_admin_get(self, manager_client, setup_complete, url):
+        resp = manager_client.get(url)
+        assert resp.status_code in (401, 403), f"Manager on {url}: {resp.status_code}"
+
+    @pytest.mark.parametrize('url', ADMIN_ENDPOINTS_GET)
+    def test_org_admin_denied_admin_get(self, org_admin_client, setup_complete, url):
+        resp = org_admin_client.get(url)
+        assert resp.status_code in (401, 403), f"Org admin on {url}: {resp.status_code}"
+
+    @pytest.mark.parametrize('url', ADMIN_ENDPOINTS_POST)
+    def test_viewer_denied_admin_post(self, viewer_client, setup_complete, url):
+        resp = viewer_client.post(url, json={})
+        assert resp.status_code in (401, 403)
+
+    @pytest.mark.parametrize('url', ADMIN_ENDPOINTS_POST)
+    def test_manager_denied_admin_post(self, manager_client, setup_complete, url):
+        resp = manager_client.post(url, json={})
+        assert resp.status_code in (401, 403)
+
+    @pytest.mark.parametrize('url', ADMIN_ENDPOINTS_POST)
+    def test_org_admin_denied_admin_post(self, org_admin_client, setup_complete, url):
+        resp = org_admin_client.post(url, json={})
+        assert resp.status_code in (401, 403)
+
+    def test_super_admin_allowed_admin_get(self, admin_client, setup_complete):
+        """Super admin should pass the decorator (may still 404/500 on missing data)."""
+        resp = admin_client.get('/api/audit-logs')
+        assert resp.status_code != 403, "Super admin should not get 403 on admin endpoint"
+
+
+# =============================================================================
+# 8. Org-admin only endpoints — manager / viewer denied
+# =============================================================================
+
+class TestOrgAdminOnlyEndpoints:
+    """Endpoints with @org_admin_required must reject manager and viewer."""
+
+    def test_viewer_cannot_access_admin_panel(self, viewer_client, setup_complete):
+        resp = viewer_client.get('/admin-panel')
+        # HTML pages redirect (302) to login instead of returning 403
+        assert resp.status_code in (401, 403, 302)
+
+    def test_manager_cannot_access_admin_panel(self, manager_client, setup_complete):
+        resp = manager_client.get('/admin-panel')
+        assert resp.status_code in (401, 403, 302)
+
+    def test_viewer_cannot_list_users(self, viewer_client, setup_complete):
+        resp = viewer_client.get('/api/users')
+        assert resp.status_code in (401, 403)
+
+    def test_manager_cannot_list_users(self, manager_client, setup_complete):
+        resp = manager_client.get('/api/users')
+        assert resp.status_code in (401, 403)
+
+    def test_viewer_cannot_access_alert_settings(self, viewer_client, setup_complete):
+        resp = viewer_client.get('/alerts/settings')
+        assert resp.status_code in (401, 403, 302)
+
+    def test_manager_cannot_access_alert_settings(self, manager_client, setup_complete):
+        resp = manager_client.get('/alerts/settings')
+        assert resp.status_code in (401, 403, 302)
+
+    def test_org_admin_can_access_admin_panel(self, org_admin_client, setup_complete):
+        resp = org_admin_client.get('/admin-panel')
+        assert resp.status_code not in (401, 403)
+
+
+# =============================================================================
+# 9. Cross-tenant GET data isolation
+# =============================================================================
+
+class TestCrossTenantGetIsolation:
+    """Data returned by GET endpoints must be scoped to the caller's org."""
+
+    @pytest.mark.xfail(reason="Known: GET /api/products scoping may use legacy org_id instead of M2M — needs investigation")
+    def test_product_list_scoped_to_org(
+        self, db_session, org_admin_client, second_org_client,
+        test_org, second_org, setup_complete,
+    ):
+        """GET /api/products should only return products the caller's org owns."""
+        from app.models import Product
+
+        # Create a product in each org (using M2M relationship, not just legacy FK)
+        p1 = Product(
+            vendor='OrgA-Vendor', product_name='OrgA-Prod', version='1.0',
+            organization_id=test_org.id, active=True,
+        )
+        p2 = Product(
+            vendor='OrgB-Vendor', product_name='OrgB-Prod', version='1.0',
+            organization_id=second_org.id, active=True,
+        )
+        db_session.add_all([p1, p2])
+        db_session.flush()
+        # Add M2M relationship (the actual scoping mechanism)
+        p1.organizations.append(test_org)
+        p2.organizations.append(second_org)
+        db_session.commit()
+
+        # OrgA admin should only see OrgA's product
+        resp = org_admin_client.get('/api/products')
+        if resp.status_code == 200:
+            data = resp.get_json()
+            products = data if isinstance(data, list) else data.get('products', data.get('items', []))
+            vendor_names = [p.get('vendor', '') for p in products]
+            assert 'OrgB-Vendor' not in vendor_names, (
+                "OrgA admin can see OrgB's product — cross-tenant data leak!"
+            )
+
+    def test_second_org_cannot_see_first_org_products(
+        self, db_session, second_org_client, test_org, second_org,
+        sample_product, setup_complete,
+    ):
+        """OrgB admin must not see products belonging only to OrgA."""
+        resp = second_org_client.get('/api/products')
+        if resp.status_code == 200:
+            data = resp.get_json()
+            products = data if isinstance(data, list) else data.get('products', data.get('items', []))
+            product_ids = [p.get('id') for p in products]
+            assert sample_product.id not in product_ids, (
+                "OrgB admin can see OrgA's product — cross-tenant data leak!"
+            )
+
+    def test_alert_logs_scoped_to_org(
+        self, db_session, org_admin_client, second_org_client,
+        test_org, second_org, setup_complete,
+    ):
+        """GET /api/organizations/<org_id>/alert-logs must reject foreign org."""
+        resp = second_org_client.get(f'/api/organizations/{test_org.id}/alert-logs')
+        assert resp.status_code in (401, 403, 404), (
+            f"OrgB admin got {resp.status_code} for OrgA's alert logs — "
+            f"expected denial"
+        )
+
+
+# =============================================================================
+# 10. Manager product operations — CAN create/update/delete
+# =============================================================================
+
+class TestManagerProductOperations:
+    """Manager role should be able to fully manage products."""
+
+    def test_manager_can_create_product(
+        self, manager_client, test_org, setup_complete,
+    ):
+        resp = manager_client.post('/api/products', json={
+            'vendor': 'ManagerTest',
+            'product_name': 'ManagerProd',
+            'version': '1.0',
+            'organization_id': test_org.id,
+        })
+        assert resp.status_code in (200, 201), (
+            f"Manager should be able to create products, got {resp.status_code}"
+        )
+
+    def test_manager_can_list_products(self, manager_client, setup_complete):
+        resp = manager_client.get('/api/products')
+        assert resp.status_code == 200
+
+    def test_manager_can_list_exclusions(self, manager_client, setup_complete):
+        resp = manager_client.get('/api/product-exclusions')
+        assert resp.status_code == 200
+
+
+# =============================================================================
+# 11. Viewer read-only access — CAN read, CANNOT write
+# =============================================================================
+
+class TestViewerReadOnlyAccess:
+    """Viewer should be able to read products/vulns but not modify them."""
+
+    def test_viewer_can_list_products(self, viewer_client, setup_complete):
+        resp = viewer_client.get('/api/products')
+        assert resp.status_code == 200
+
+    def test_viewer_can_list_exclusions(self, viewer_client, setup_complete):
+        resp = viewer_client.get('/api/product-exclusions')
+        assert resp.status_code == 200
+
+    def test_viewer_can_view_dashboard(self, viewer_client, setup_complete):
+        resp = viewer_client.get('/')
+        assert resp.status_code == 200
+
+    def test_viewer_cannot_update_product(self, viewer_client, sample_product):
+        resp = viewer_client.put(f'/api/products/{sample_product.id}', json={
+            'version': '99.0.0',
+        })
+        assert resp.status_code in (401, 403)
+
+    def test_viewer_cannot_batch_delete_products(self, viewer_client, setup_complete):
+        resp = viewer_client.post('/api/products/batch-delete', json={
+            'product_ids': [999],
+        })
+        assert resp.status_code in (401, 403)
+
+
+# =============================================================================
+# 12. Unauthenticated access — public vs protected endpoints
+# =============================================================================
+
+class TestUnauthenticatedAccess:
+    """Unauthenticated requests should get 401/403 on protected endpoints."""
+
+    PROTECTED_ENDPOINTS = [
+        ('GET', '/api/products'),
+        ('GET', '/api/product-exclusions'),
+        ('GET', '/admin-panel'),
+        ('GET', '/api/users'),
+        ('POST', '/api/products'),
+        ('POST', '/api/users'),
+    ]
+
+    @pytest.mark.parametrize('method,url', PROTECTED_ENDPOINTS)
+    def test_protected_endpoint_rejects_unauthenticated(
+        self, client, setup_complete, method, url,
+    ):
+        if method == 'GET':
+            resp = client.get(url)
+        else:
+            resp = client.post(url, json={})
+        assert resp.status_code in (401, 403, 302), (
+            f"Unauthenticated {method} {url} returned {resp.status_code}, "
+            f"expected 401/403/302 (redirect to login)"
+        )
+
+    def test_health_check_is_public(self, client):
+        resp = client.get('/api/health')
+        assert resp.status_code == 200

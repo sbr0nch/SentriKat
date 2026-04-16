@@ -72,6 +72,34 @@
         font-size: 0.8rem;
         margin-left: 4px;
     }
+
+    /* Alert History section */
+    .alert-history-filters .form-select,
+    .alert-history-filters .form-control {
+        font-size: 0.8rem;
+        padding: 4px 8px;
+        height: auto;
+    }
+    .alert-history-table { font-size: 0.85rem; }
+    .alert-history-table td { vertical-align: middle; }
+    .alert-history-table .badge { font-size: 0.7rem; font-weight: 500; }
+    .alert-history-table .error-text {
+        max-width: 200px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 0.75rem;
+        color: var(--critical-color, #b91c1c);
+        cursor: help;
+    }
+    .alert-history-pagination .page-link {
+        font-size: 0.8rem;
+        padding: 4px 10px;
+    }
+    .alert-history-meta {
+        font-size: 0.75rem;
+        color: var(--gray-500, #6b7280);
+    }
 </style>
 {% endblock %}
 
@@ -357,6 +385,80 @@
                     <i class="bi bi-check-circle me-1"></i>Save Delivery
                 </button>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Alert Delivery History -->
+<div class="card mt-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-clock-history me-2"></i>Alert Delivery History</span>
+        <div class="d-flex align-items-center gap-2">
+            <span class="alert-history-meta" id="historyAutoRefreshLabel">Auto-refresh: 60s</span>
+            <button class="btn btn-outline-primary btn-sm" onclick="loadAlertHistory(1)" title="Refresh">
+                <i class="bi bi-arrow-clockwise"></i>
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <!-- Filter Bar -->
+        <div class="row g-2 mb-3 alert-history-filters">
+            <div class="col-md-3 col-sm-6">
+                <select class="form-select" id="historyFilterType" onchange="loadAlertHistory(1)">
+                    <option value="">All Types</option>
+                    <option value="critical_cve">Critical CVE</option>
+                    <option value="new_cve">New CVE</option>
+                    <option value="ransomware">Ransomware</option>
+                    <option value="container_vuln">Container Vuln</option>
+                </select>
+            </div>
+            <div class="col-md-2 col-sm-6">
+                <select class="form-select" id="historyFilterStatus" onchange="loadAlertHistory(1)">
+                    <option value="">All Statuses</option>
+                    <option value="success">Success</option>
+                    <option value="failed">Failed</option>
+                    <option value="skipped">Skipped</option>
+                </select>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <input type="date" class="form-control" id="historyFilterDateFrom" placeholder="From date" onchange="loadAlertHistory(1)">
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <input type="date" class="form-control" id="historyFilterDateTo" placeholder="To date" onchange="loadAlertHistory(1)">
+            </div>
+            <div class="col-md-1 col-sm-12">
+                <button class="btn btn-outline-secondary btn-sm w-100" onclick="clearHistoryFilters()" title="Clear filters">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- History Table -->
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 alert-history-table">
+                <thead>
+                    <tr>
+                        <th class="small fw-semibold" style="min-width:150px;">Date/Time</th>
+                        <th class="small fw-semibold">Organization</th>
+                        <th class="small fw-semibold text-center">Type</th>
+                        <th class="small fw-semibold text-center">Status</th>
+                        <th class="small fw-semibold text-center">Matches</th>
+                        <th class="small fw-semibold text-center">Recipients</th>
+                        <th class="small fw-semibold">Error</th>
+                    </tr>
+                </thead>
+                <tbody id="historyTableBody">
+                    <tr><td colspan="7" class="text-center text-muted py-4"><i class="bi bi-hourglass-split me-1"></i>Loading alert history...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="d-flex justify-content-between align-items-center mt-3">
+            <span class="alert-history-meta" id="historyMeta"></span>
+            <nav>
+                <ul class="pagination pagination-sm mb-0 alert-history-pagination" id="historyPagination"></ul>
+            </nav>
         </div>
     </div>
 </div>
@@ -784,8 +886,167 @@ function collapseAllDelivery() {
 }
 
 // ========================================================
+// Alert Delivery History
+// ========================================================
+let historyCurrentPage = 1;
+let historyRefreshTimer = null;
+
+const ALERT_TYPE_BADGES = {
+    critical_cve: '<span class="badge bg-danger">Critical CVE</span>',
+    new_cve:      '<span class="badge bg-primary">New CVE</span>',
+    ransomware:   '<span class="badge bg-warning text-dark">Ransomware</span>',
+    container_vuln: '<span class="badge" style="background-color:#6f42c1;">Container Vuln</span>'
+};
+
+const STATUS_BADGES = {
+    success: '<span class="badge bg-success">Success</span>',
+    failed:  '<span class="badge bg-danger">Failed</span>',
+    skipped: '<span class="badge bg-secondary">Skipped</span>'
+};
+
+function getHistoryFilters() {
+    return {
+        alert_type: document.getElementById('historyFilterType').value,
+        status:     document.getElementById('historyFilterStatus').value,
+        date_from:  document.getElementById('historyFilterDateFrom').value,
+        date_to:    document.getElementById('historyFilterDateTo').value
+    };
+}
+
+async function loadAlertHistory(page) {
+    page = page || historyCurrentPage || 1;
+    historyCurrentPage = page;
+
+    const filters = getHistoryFilters();
+    const params = new URLSearchParams({ page: page, per_page: 20 });
+    if (filters.alert_type) params.set('alert_type', filters.alert_type);
+    if (filters.status)     params.set('status', filters.status);
+    if (filters.date_from)  params.set('date_from', filters.date_from);
+    if (filters.date_to)    params.set('date_to', filters.date_to);
+
+    const tbody = document.getElementById('historyTableBody');
+    try {
+        const data = await apiFetch(`/api/settings/alerts/history?${params.toString()}`);
+        renderAlertHistory(data);
+    } catch (err) {
+        console.error('Failed to load alert history:', err);
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4"><i class="bi bi-exclamation-triangle me-1"></i>Failed to load alert history</td></tr>';
+        document.getElementById('historyMeta').textContent = '';
+        document.getElementById('historyPagination').innerHTML = '';
+    }
+
+    // Reset auto-refresh timer
+    scheduleHistoryRefresh();
+}
+
+function renderAlertHistory(data) {
+    const tbody = document.getElementById('historyTableBody');
+    const logs = data.logs || [];
+
+    if (logs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4"><i class="bi bi-inbox me-1"></i>No alert history found</td></tr>';
+        document.getElementById('historyMeta').textContent = 'No records';
+        document.getElementById('historyPagination').innerHTML = '';
+        return;
+    }
+
+    tbody.innerHTML = logs.map(log => {
+        const sentAt = log.sent_at ? new Date(log.sent_at) : null;
+        const dateStr = sentAt ? sentAt.toLocaleString(undefined, {
+            year: 'numeric', month: 'short', day: 'numeric',
+            hour: '2-digit', minute: '2-digit'
+        }) : '---';
+        const typeBadge = ALERT_TYPE_BADGES[log.alert_type] || `<span class="badge bg-secondary">${escapeHtml(log.alert_type)}</span>`;
+        const statusBadge = STATUS_BADGES[log.status] || `<span class="badge bg-secondary">${escapeHtml(log.status)}</span>`;
+        const errorHtml = log.error_message
+            ? `<span class="error-text" title="${escapeHtml(log.error_message)}">${escapeHtml(log.error_message)}</span>`
+            : '<span class="text-muted">---</span>';
+
+        return `<tr>
+            <td class="small">${escapeHtml(dateStr)}</td>
+            <td class="small">${escapeHtml(log.organization_name || '')}</td>
+            <td class="text-center">${typeBadge}</td>
+            <td class="text-center">${statusBadge}</td>
+            <td class="text-center">${log.matches_count ?? 0}</td>
+            <td class="text-center">${log.recipients_count ?? 0}</td>
+            <td>${errorHtml}</td>
+        </tr>`;
+    }).join('');
+
+    // Meta info
+    const total = data.total || 0;
+    const pageStart = ((data.page - 1) * data.per_page) + 1;
+    const pageEnd = Math.min(data.page * data.per_page, total);
+    document.getElementById('historyMeta').textContent = `Showing ${pageStart}-${pageEnd} of ${total} record${total !== 1 ? 's' : ''}`;
+
+    // Pagination
+    renderHistoryPagination(data.page, data.pages);
+}
+
+function renderHistoryPagination(currentPage, totalPages) {
+    const container = document.getElementById('historyPagination');
+    if (totalPages <= 1) { container.innerHTML = ''; return; }
+
+    let html = '';
+
+    // Previous
+    html += `<li class="page-item ${currentPage <= 1 ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="event.preventDefault();loadAlertHistory(${currentPage - 1})" aria-label="Previous">&laquo;</a>
+    </li>`;
+
+    // Page numbers — show a window around the current page
+    const maxVisible = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+    if (endPage - startPage < maxVisible - 1) {
+        startPage = Math.max(1, endPage - maxVisible + 1);
+    }
+
+    if (startPage > 1) {
+        html += `<li class="page-item"><a class="page-link" href="#" onclick="event.preventDefault();loadAlertHistory(1)">1</a></li>`;
+        if (startPage > 2) html += '<li class="page-item disabled"><span class="page-link">&hellip;</span></li>';
+    }
+
+    for (let p = startPage; p <= endPage; p++) {
+        html += `<li class="page-item ${p === currentPage ? 'active' : ''}">
+            <a class="page-link" href="#" onclick="event.preventDefault();loadAlertHistory(${p})">${p}</a>
+        </li>`;
+    }
+
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) html += '<li class="page-item disabled"><span class="page-link">&hellip;</span></li>';
+        html += `<li class="page-item"><a class="page-link" href="#" onclick="event.preventDefault();loadAlertHistory(${totalPages})">${totalPages}</a></li>`;
+    }
+
+    // Next
+    html += `<li class="page-item ${currentPage >= totalPages ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="event.preventDefault();loadAlertHistory(${currentPage + 1})" aria-label="Next">&raquo;</a>
+    </li>`;
+
+    container.innerHTML = html;
+}
+
+function clearHistoryFilters() {
+    document.getElementById('historyFilterType').value = '';
+    document.getElementById('historyFilterStatus').value = '';
+    document.getElementById('historyFilterDateFrom').value = '';
+    document.getElementById('historyFilterDateTo').value = '';
+    loadAlertHistory(1);
+}
+
+function scheduleHistoryRefresh() {
+    if (historyRefreshTimer) clearInterval(historyRefreshTimer);
+    historyRefreshTimer = setInterval(() => {
+        loadAlertHistory(historyCurrentPage);
+    }, 60000);
+}
+
+// ========================================================
 // Init
 // ========================================================
-document.addEventListener('DOMContentLoaded', loadAll);
+document.addEventListener('DOMContentLoaded', () => {
+    loadAll();
+    loadAlertHistory(1);
+});
 </script>
 {% endblock %}
