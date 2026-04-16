@@ -3214,6 +3214,8 @@
                             <!-- Compliance Pack add-on (separate from base plan features) -->
                             {% set addons = subscription.get_addons() %}
                             {% set has_compliance_pack = addons.get('compliance_pack', False) %}
+                            {% set plan_name = subscription.plan.name if (subscription and subscription.plan) else 'free' %}
+                            {% set addon_eligible = plan_name in ('pro', 'business', 'enterprise') %}
                             <div class="card mb-4 {{ 'border-success' if has_compliance_pack else 'border-secondary' }}">
                                 <div class="card-header d-flex justify-content-between align-items-center">
                                     <span>
@@ -3241,16 +3243,81 @@
                                                 Available as a paid add-on on top of any Pro, Business, or Enterprise plan.
                                             </p>
                                             {% if has_compliance_pack %}
-                                            <span class="text-success small"><i class="bi bi-check-circle me-1"></i>Your subscription includes the Compliance Pack.</span>
+                                            <!-- Active: show manage dropdown -->
+                                            <span class="text-success small d-block mb-2"><i class="bi bi-check-circle me-1"></i>Your subscription includes the Compliance Pack.</span>
+                                            <div class="dropdown">
+                                                <button class="btn btn-outline-success btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                                    <i class="bi bi-gear me-1"></i>Manage
+                                                </button>
+                                                <ul class="dropdown-menu">
+                                                    <li><a class="dropdown-item" href="/admin#complianceReportsSection"><i class="bi bi-file-earmark-bar-graph me-2"></i>PCI-DSS Report</a></li>
+                                                    <li><a class="dropdown-item" href="/admin#complianceReportsSection"><i class="bi bi-file-earmark-bar-graph me-2"></i>ISO 27001 Report</a></li>
+                                                    <li><a class="dropdown-item" href="/admin#complianceReportsSection"><i class="bi bi-file-earmark-bar-graph me-2"></i>SOC 2 Report</a></li>
+                                                </ul>
+                                            </div>
+                                            {% elif addon_eligible %}
+                                            <!-- Eligible plan but addon not purchased: show Request Add-on -->
+                                            <button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#compliancePackModal">
+                                                <i class="bi bi-cart-plus me-1"></i>Request Add-on
+                                            </button>
                                             {% else %}
-                                            <a href="https://sentrikat.com/pricing" target="_blank" class="btn btn-outline-primary btn-sm">
-                                                <i class="bi bi-cart-plus me-1"></i>Learn more
-                                            </a>
+                                            <!-- Plan too low: show upgrade message -->
+                                            <div class="alert alert-warning py-2 px-3 mb-0 small">
+                                                <i class="bi bi-arrow-up-circle me-1"></i>
+                                                Upgrade your plan to Pro, Business, or Enterprise first to unlock add-on eligibility.
+                                                <a href="https://sentrikat.com/pricing" target="_blank" class="ms-1">View Plans</a>
+                                            </div>
                                             {% endif %}
                                         </div>
                                     </div>
                                 </div>
                             </div>
+
+                            <!-- Compliance Pack Request Modal -->
+                            {% if addon_eligible and not has_compliance_pack %}
+                            <div class="modal fade" id="compliancePackModal" tabindex="-1" aria-labelledby="compliancePackModalLabel" aria-hidden="true">
+                                <div class="modal-dialog modal-dialog-centered">
+                                    <div class="modal-content">
+                                        <div class="modal-header">
+                                            <h5 class="modal-title" id="compliancePackModalLabel">
+                                                <i class="bi bi-shield-lock me-2"></i>Compliance Pack Add-on
+                                            </h5>
+                                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                        </div>
+                                        <div class="modal-body">
+                                            <div class="text-center mb-3">
+                                                <i class="bi bi-shield-fill-check text-primary" style="font-size: 3rem;"></i>
+                                            </div>
+                                            <p>
+                                                The <strong>Compliance Pack</strong> adds auditor-grade gap analysis reports
+                                                for the most demanding compliance frameworks:
+                                            </p>
+                                            <ul class="mb-3">
+                                                <li><strong>PCI-DSS v4.0</strong> &mdash; Payment Card Industry Data Security Standard</li>
+                                                <li><strong>ISO/IEC 27001:2022</strong> &mdash; Information Security Management System</li>
+                                                <li><strong>SOC 2</strong> &mdash; Trust Services Criteria (Security)</li>
+                                            </ul>
+                                            <div class="alert alert-light border text-center py-3 mb-3">
+                                                <span class="fs-4 fw-bold text-primary">&euro;199<span class="fs-6 fw-normal text-muted">/mo</span></span>
+                                                <br>
+                                                <small class="text-muted">Billed monthly on top of your current plan</small>
+                                            </div>
+                                            <p class="text-muted small mb-0">
+                                                <i class="bi bi-info-circle me-1"></i>
+                                                Your admin will be notified when the add-on is activated.
+                                            </p>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+                                            <a href="mailto:sales@sentrikat.com?subject=Compliance%20Pack%20Add-on%20Request&body=Organization%3A%20{{ subscription.organization.display_name|default(subscription.organization.name, true)|urlencode }}%0APlan%3A%20{{ plan_name }}%0A%0AI%20would%20like%20to%20add%20the%20Compliance%20Pack%20add-on%20to%20our%20subscription."
+                                               class="btn btn-primary btn-sm">
+                                                <i class="bi bi-envelope me-1"></i>Contact Sales
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
                             {% endif %}
 
                             <!-- Upgrade CTA -->

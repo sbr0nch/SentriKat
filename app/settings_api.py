@@ -2571,6 +2571,80 @@ def set_email_reply_to():
     return jsonify({'success': True, 'reply_to': org.email_reply_to})
 
 
+@settings_bp.route('/subscription/addons', methods=['GET'])
+def get_subscription_addons():
+    """Return the list of available add-ons with their current state for the caller's org.
+
+    Any authenticated user can view their own organization's add-on state.
+    Non-SaaS deployments return an empty list (add-ons are a SaaS concept).
+
+    Response (200)::
+
+        {
+            "addons": [
+                {
+                    "name": "compliance_pack",
+                    "display_name": "Compliance Pack",
+                    "description": "PCI-DSS v4.0, ISO 27001:2022, and SOC 2 gap analysis reports.",
+                    "price_label": "\u20ac199/mo",
+                    "active": true,
+                    "eligible": true,
+                    "requires_plan": ["pro", "business", "enterprise"]
+                }
+            ]
+        }
+    """
+    # Session-based auth check: any logged-in user can view their own
+    # org's addon state.  We check the session directly rather than using
+    # a decorator to match the pattern in compliance_reports.py.
+    if 'user_id' not in session:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    if not is_saas_mode():
+        return jsonify({'addons': []})
+
+    from app.saas import get_scoped_org_id
+    from app.models import Subscription
+
+    user = User.query.get(session['user_id'])
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    org_id = get_scoped_org_id(user)
+    if not org_id:
+        org_id = user.organization_id
+
+    sub = Subscription.query.filter_by(organization_id=org_id).filter(
+        Subscription.status.in_(['active', 'trialing'])
+    ).first()
+
+    plan_name = sub.plan.name if (sub and sub.plan) else 'free'
+    addons_dict = sub.get_addons() if sub else {}
+
+    # Eligible plans for the Compliance Pack add-on
+    eligible_plans = ('pro', 'business', 'enterprise')
+
+    addons_out = [
+        {
+            'name': 'compliance_pack',
+            'display_name': 'Compliance Pack',
+            'description': (
+                'PCI-DSS v4.0, ISO 27001:2022, and SOC 2 gap analysis reports. '
+                'Auditor-grade self-assessment reports for your compliance programme.'
+            ),
+            'price_label': '\u20ac199/mo',
+            'price_cents': 19900,
+            'currency': 'EUR',
+            'active': bool(addons_dict.get('compliance_pack', False)),
+            'eligible': plan_name in eligible_plans,
+            'requires_plan': list(eligible_plans),
+            'current_plan': plan_name,
+        },
+    ]
+
+    return jsonify({'addons': addons_out})
+
+
 @settings_bp.route('/email/quota', methods=['GET'])
 @saas_admin_or_org_admin
 def get_email_quota():
