@@ -557,25 +557,33 @@ def _handle_license_addon_changed(tenant_email, payload):
 
     Payload::
 
-        {addon_name, enabled: true|false, reason}
+        {addon_name, enabled: true|false, reason, organization_id (optional)}
 
     Toggles the named add-on on the tenant's :class:`Subscription` using
     :meth:`Subscription.set_addons`.  Unknown add-on names are accepted
     and stored (forward-compatible); the feature-gate layer simply ignores
     names it doesn't recognise.
+
+    The tenant can be identified either by ``tenant_id`` (email) at the
+    top level, or by ``organization_id`` inside the payload (portal compat).
     """
     from app import db as app_db
+    from app.models import Subscription
 
-    addon_name = payload.get('addon_name')
+    addon_name = payload.get('addon_name') or payload.get('addon')
     if not addon_name or not isinstance(addon_name, str):
         return {'status': 'error', 'error': 'payload.addon_name required (string)'}
 
     enabled = payload.get('enabled', True)
     if not isinstance(enabled, bool):
-        # Be lenient: accept truthy/falsy values.
         enabled = bool(enabled)
 
+    # Try tenant_email lookup first; fall back to organization_id in payload
     sub, _org = _find_subscription_for_tenant(tenant_email)
+    if not sub:
+        org_id = payload.get('organization_id')
+        if org_id:
+            sub = Subscription.query.filter_by(organization_id=int(org_id)).first()
     if not sub:
         logger.info(
             "license.addon_changed tenant=%s: no subscription, skipping",

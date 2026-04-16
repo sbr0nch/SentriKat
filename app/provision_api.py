@@ -859,7 +859,8 @@ def list_plans():
 _KNOWN_ADDONS = frozenset({'compliance_pack'})
 
 
-@provision_bp.route('/addons', methods=['POST'])
+@provision_bp.route('/addon', methods=['POST'])
+@provision_bp.route('/addons', methods=['POST'])  # Accept both singular and plural
 @limiter.limit("10/minute")
 @_require_provision_key
 def manage_addon():
@@ -872,6 +873,7 @@ def manage_addon():
     {
         "organization_id": 5,               // Required
         "addon_name": "compliance_pack",     // Required (must be in _KNOWN_ADDONS)
+        "addon": "compliance_pack",          // Alias for addon_name (portal compat)
         "action": "enable"                   // Required: "enable" or "disable"
     }
 
@@ -888,7 +890,7 @@ def manage_addon():
         return jsonify({'error': 'No data provided'}), 400
 
     org_id = data.get('organization_id')
-    addon_name = (data.get('addon_name') or '').strip()
+    addon_name = (data.get('addon_name') or data.get('addon') or '').strip()
     action = (data.get('action') or '').strip().lower()
 
     if not org_id or not addon_name or not action:
