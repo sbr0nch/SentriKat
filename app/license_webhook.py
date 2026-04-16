@@ -111,6 +111,7 @@ ALLOWED_EVENT_TYPES = frozenset({
     'license.limits_updated',
     'license.suspended',
     'license.unsuspended',
+    'license.addon_changed',
 })
 
 
@@ -551,12 +552,72 @@ def _handle_license_limits_updated(tenant_email, payload):
         return {'status': 'error', 'error': str(e)}
 
 
+def _handle_license_addon_changed(tenant_email, payload):
+    """``license.addon_changed`` — enable or disable an add-on.
+
+    Payload::
+
+        {addon_name, enabled: true|false, reason}
+
+    Toggles the named add-on on the tenant's :class:`Subscription` using
+    :meth:`Subscription.set_addons`.  Unknown add-on names are accepted
+    and stored (forward-compatible); the feature-gate layer simply ignores
+    names it doesn't recognise.
+    """
+    from app import db as app_db
+
+    addon_name = payload.get('addon_name')
+    if not addon_name or not isinstance(addon_name, str):
+        return {'status': 'error', 'error': 'payload.addon_name required (string)'}
+
+    enabled = payload.get('enabled', True)
+    if not isinstance(enabled, bool):
+        # Be lenient: accept truthy/falsy values.
+        enabled = bool(enabled)
+
+    sub, _org = _find_subscription_for_tenant(tenant_email)
+    if not sub:
+        logger.info(
+            "license.addon_changed tenant=%s: no subscription, skipping",
+            tenant_email,
+        )
+        return {
+            'status': 'ok',
+            'action': 'addon_change_skipped',
+            'reason': 'no_subscription',
+        }
+
+    addons = sub.get_addons()
+    old_value = addons.get(addon_name)
+    addons[addon_name] = enabled
+    sub.set_addons(addons)
+
+    try:
+        app_db.session.commit()
+        logger.info(
+            "license.addon_changed tenant=%s addon=%s enabled=%s (was %s) reason=%s",
+            tenant_email, addon_name, enabled, old_value, payload.get('reason'),
+        )
+        return {
+            'status': 'ok',
+            'action': 'addon_changed',
+            'addon_name': addon_name,
+            'enabled': enabled,
+            'was': old_value,
+        }
+    except Exception as e:
+        app_db.session.rollback()
+        logger.error(f"license.addon_changed commit failed: {e}")
+        return {'status': 'error', 'error': str(e)}
+
+
 EVENT_HANDLERS = {
     'license.plan_changed': _handle_license_plan_changed,
     'license.revoked': _handle_license_revoked,
     'license.limits_updated': _handle_license_limits_updated,
     'license.suspended': _handle_license_suspended,
     'license.unsuspended': _handle_license_unsuspended,
+    'license.addon_changed': _handle_license_addon_changed,
 }
 
 

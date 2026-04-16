@@ -1353,12 +1353,29 @@ def get_products():
             else:
                 query = query.filter(Product.organization_id == filter_org)
     else:
-        # Get user's current organization using scoped helper (handles SaaS + on-premise)
-        org_id = get_scoped_org_id(current_user)
-        logger.info(f"get_products: org_id={org_id}")
+        # Build the full set of organization IDs the user can access.
+        # This covers the primary org (legacy FK), the session-selected org,
+        # and any additional orgs granted via multi-org memberships.
+        accessible_org_ids = set()
 
-        if not org_id:
-            logger.info("get_products: no org_id, returning empty list")
+        # 1. Session / scoped org (handles SaaS + on-premise)
+        scoped_id = get_scoped_org_id(current_user)
+        if scoped_id:
+            accessible_org_ids.add(scoped_id)
+
+        # 2. Legacy primary organization
+        if current_user.organization_id:
+            accessible_org_ids.add(current_user.organization_id)
+
+        # 3. All multi-org memberships
+        for org_info in current_user.get_all_organizations():
+            accessible_org_ids.add(org_info['id'])
+
+        accessible_org_ids = list(accessible_org_ids)
+        logger.info(f"get_products: accessible_org_ids={accessible_org_ids}")
+
+        if not accessible_org_ids:
+            logger.info("get_products: no accessible orgs, returning empty list")
             if page:
                 return jsonify({'products': [], 'total': 0, 'page': 1, 'per_page': per_page, 'pages': 0})
             return jsonify([])
@@ -1366,20 +1383,20 @@ def get_products():
         # Get products assigned via many-to-many table - fetch IDs first
         org_product_ids = db.session.execute(
             select(product_organizations.c.product_id).where(
-                product_organizations.c.organization_id == org_id
+                product_organizations.c.organization_id.in_(accessible_org_ids)
             )
         ).scalars().all()
         if org_product_ids:
             query = query.filter(
                 db.or_(
                     Product.id.in_(org_product_ids),
-                    Product.organization_id == org_id
+                    Product.organization_id.in_(accessible_org_ids)
                 )
             )
         else:
-            query = query.filter(Product.organization_id == org_id)
+            query = query.filter(Product.organization_id.in_(accessible_org_ids))
 
-        logger.info(f"get_products: filtered to org {org_id}")
+        logger.info(f"get_products: filtered to orgs {accessible_org_ids}")
 
     # Apply search filter - split into words and require ALL to match
     if search:
