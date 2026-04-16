@@ -804,7 +804,8 @@ class VulnerabilityMatch(db.Model):
             asset_score = 10  # Default: medium
             try:
                 critical_install = ProductInstallation.query.filter(
-                    ProductInstallation.product_id == product.id
+                    ProductInstallation.product_id == product.id,
+                    ProductInstallation.removed_at.is_(None)
                 ).join(Asset).filter(
                     Asset.criticality.in_(['critical', 'high'])
                 ).first()
@@ -1160,7 +1161,7 @@ class User(db.Model):
     role = db.Column(db.String(20), default='user', index=True)  # super_admin, org_admin, manager, user
     is_admin = db.Column(db.Boolean, default=False)  # Backward compatibility - maps to super_admin or org_admin
     is_active = db.Column(db.Boolean, default=True, index=True)
-    can_manage_products = db.Column(db.Boolean, default=True)
+    can_manage_products = db.Column(db.Boolean, default=False)
     can_view_all_orgs = db.Column(db.Boolean, default=False)  # Super admin only
 
     # Session tracking
@@ -1905,6 +1906,7 @@ class ProductInstallation(db.Model):
     discovered_at = db.Column(db.DateTime, default=datetime.utcnow)  # When first seen
     last_seen_at = db.Column(db.DateTime, default=datetime.utcnow)  # Last confirmed present
     verified_at = db.Column(db.DateTime, nullable=True)  # Manual verification date
+    removed_at = db.Column(db.DateTime, nullable=True, index=True)  # Soft-delete: agent reported uninstalled
 
     # Relationships
     product = db.relationship('Product', backref=db.backref('installations', lazy='dynamic'))
@@ -1977,7 +1979,8 @@ class ProductInstallation(db.Model):
             'vulnerability_count': self.vulnerability_count,
             'discovered_at': discovered_iso,
             'last_seen_at': self.last_seen_at.isoformat() if self.last_seen_at else None,
-            'verified_at': self.verified_at.isoformat() if self.verified_at else None
+            'verified_at': self.verified_at.isoformat() if self.verified_at else None,
+            'removed_at': self.removed_at.isoformat() if self.removed_at else None
         }
 
 
@@ -3856,7 +3859,8 @@ class SubscriptionPlan(db.Model):
             existing = cls.query.filter_by(name=plan_data['name']).first()
             if existing:
                 # Update features, limits, and pricing to latest defaults
-                for key in ('features', 'max_agents', 'max_users', 'max_organizations',
+                for key in ('description', 'display_name', 'features',
+                            'max_agents', 'max_users', 'max_organizations',
                             'max_products', 'max_api_keys', 'max_storage_mb',
                             'price_monthly_cents', 'price_annual_cents'):
                     if key in plan_data:

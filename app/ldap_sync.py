@@ -490,7 +490,7 @@ class LDAPSyncEngine:
                 role=highest_mapping.role,
                 organization_id=highest_mapping.organization_id,
                 is_admin=(highest_mapping.role in ['super_admin', 'org_admin']),
-                can_manage_products=True,
+                can_manage_products=(highest_mapping.role in ['manager', 'org_admin', 'super_admin']),
                 is_active=True
             )
 

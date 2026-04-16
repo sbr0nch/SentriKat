@@ -1614,6 +1614,8 @@ def process_inventory_job(job):
                     installation.is_direct_dependency = is_direct_val if is_direct_val is not None else installation.is_direct_dependency
                     installation.distro_package_version = product_data.get('distro_package_version') or installation.distro_package_version
                     installation.last_seen_at = datetime.utcnow()
+                    if installation.removed_at:
+                        installation.removed_at = None  # Re-discovered: un-soft-delete
                     installations_updated += 1
 
                 items_processed += 1
@@ -1662,7 +1664,7 @@ def process_inventory_job(job):
                             new_version='(uninstalled)',
                             detected_by='agent'
                         )
-                        db.session.delete(removed_inst)
+                        removed_inst.removed_at = datetime.utcnow()
                         installations_removed += 1
                 except Exception as e:
                     logger.warning(f"Error removing uninstalled product in job {job_id}: {e}")
@@ -2268,6 +2270,8 @@ def report_inventory():
                 installation.install_path = product_data.get('path')
                 installation.distro_package_version = product_data.get('distro_package_version') or installation.distro_package_version
                 installation.last_seen_at = datetime.utcnow()
+                if installation.removed_at:
+                    installation.removed_at = None  # Re-discovered: un-soft-delete
                 installations_updated += 1
 
         # Remove installations NOT seen in this scan (software was uninstalled).
@@ -2386,10 +2390,10 @@ def report_inventory():
                         )
                     except Exception:
                         pass
-                    db.session.delete(removed_inst)
+                    removed_inst.removed_at = datetime.utcnow()
                     installations_removed += 1
                 if removed_ids:
-                    logger.info(f"Removed {len(removed_ids)} uninstalled products from {hostname}")
+                    logger.info(f"Soft-deleted {len(removed_ids)} uninstalled products from {hostname}")
 
         # Log inventory event
         AgentEvent.log_event(
@@ -3104,7 +3108,8 @@ def delete_asset(asset_id):
             products_still_installed = set(
                 row.product_id for row in
                 ProductInstallation.query.filter(
-                    ProductInstallation.product_id.in_(affected_product_ids)
+                    ProductInstallation.product_id.in_(affected_product_ids),
+                    ProductInstallation.removed_at.is_(None)
                 ).with_entities(ProductInstallation.product_id).distinct().all()
             )
             orphan_ids = set(affected_product_ids) - products_still_installed
