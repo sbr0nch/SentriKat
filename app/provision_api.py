@@ -181,8 +181,14 @@ def provision_tenant():
 
     # B8.2 — Resolve subscription plan BEFORE starting any writes so that a
     # bad `plan_name` does not leave behind a half-created Organization/User.
-    plan_name = data.get('plan_name', 'free')
-    plan = SubscriptionPlan.query.filter_by(name=plan_name, is_active=True).first()
+    # Accept any canonical plan during Early Access (free/starter/pro/business/
+    # enterprise). The license-server forwards the user's chosen plan and
+    # we honour it regardless of billing status.
+    plan_name = (data.get('plan_name') or 'free').strip().lower()
+    plan = SubscriptionPlan.query.filter(
+        db.func.lower(SubscriptionPlan.name) == plan_name,
+        SubscriptionPlan.is_active.is_(True),
+    ).first()
     if not plan:
         # Fall back to default plan
         plan = SubscriptionPlan.query.filter_by(is_default=True).first()
@@ -192,6 +198,14 @@ def provision_tenant():
     if not plan:
         logger.error("No subscription plans found. Run seed_default_plans() first.")
         return jsonify({'error': 'No subscription plans configured'}), 500
+
+    # Determine billing mode: if no Stripe IDs are provided, this is an
+    # Early Access tenant — we do NOT generate invoices or call Stripe;
+    # plan features are unlocked regardless. The license-server contract
+    # is: Stripe IDs present = paid path, absent = EA path.
+    stripe_customer_id = data.get('stripe_customer_id') or None
+    stripe_subscription_id = data.get('stripe_subscription_id') or None
+    is_ea = not stripe_customer_id and not stripe_subscription_id
 
     try:
         # ------------------------------------------------------------------
@@ -252,8 +266,8 @@ def provision_tenant():
                 current_period_end=now + timedelta(days=30),
                 trial_start=now if trial_days > 0 else None,
                 trial_end=(now + timedelta(days=trial_days)) if trial_days > 0 else None,
-                stripe_customer_id=data.get('stripe_customer_id'),
-                stripe_subscription_id=data.get('stripe_subscription_id')
+                stripe_customer_id=stripe_customer_id,
+                stripe_subscription_id=stripe_subscription_id
             )
             db.session.add(subscription)
             db.session.flush()
@@ -275,7 +289,12 @@ def provision_tenant():
                 'plan': plan.name,
                 'plan_display_name': plan.display_name,
                 'subscription_status': subscription.status,
-                'trial_ends': subscription.trial_end.isoformat() if subscription.trial_end else None
+                'trial_ends': subscription.trial_end.isoformat() if subscription.trial_end else None,
+                # Billing transparency for the license-server. EA tenants
+                # never get charged here — features are unlocked anyway.
+                'billing_mode': 'ea' if is_ea else 'paid',
+                'amount_due_cents': 0 if is_ea else None,
+                'invoice_required': False if is_ea else None,
             }
         }
 
@@ -292,9 +311,10 @@ def provision_tenant():
 
         db.session.commit()
 
+        billing_mode = 'EA (no Stripe, $0)' if is_ea else f'paid (stripe_sub={stripe_subscription_id})'
         logger.info(
             f"Provisioned new tenant: org={org_slug} (id={org.id}), "
-            f"user={email} (id={user.id}), plan={plan.name}"
+            f"user={email} (id={user.id}), plan={plan.name}, billing={billing_mode}"
         )
 
         return jsonify(response_payload), 201
