@@ -3190,7 +3190,6 @@
                                             'white_label': 'White-Labeling',
                                             'api_access': 'API Access',
                                             'compliance_reports': 'NIS2/DORA + BOD 22-01 Reports',
-                                            'compliance_pack': 'Compliance Pack (PCI-DSS / ISO 27001 / SOC 2)',
                                             'jira_integration': 'Issue Trackers',
                                             'siem_integration': 'SIEM Integration',
                                             'push_agents': 'Push Agents',
@@ -3208,6 +3207,47 @@
                                             <span class="{{ '' if features.get(key) else 'text-muted' }}">{{ label }}</span>
                                         </div>
                                         {% endfor %}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Compliance Pack add-on (separate from base plan features) -->
+                            {% set addons = subscription.get_addons() %}
+                            {% set has_compliance_pack = addons.get('compliance_pack', False) %}
+                            <div class="card mb-4 {{ 'border-success' if has_compliance_pack else 'border-secondary' }}">
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <span>
+                                        <i class="bi bi-puzzle me-2"></i>Paid Add-on
+                                    </span>
+                                    {% if has_compliance_pack %}
+                                    <span class="badge bg-success">Active</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">Not purchased</span>
+                                    {% endif %}
+                                </div>
+                                <div class="card-body">
+                                    <div class="d-flex align-items-start">
+                                        <div class="me-3">
+                                            {% if has_compliance_pack %}
+                                            <i class="bi bi-shield-fill-check text-success" style="font-size: 2rem;"></i>
+                                            {% else %}
+                                            <i class="bi bi-shield-lock text-secondary" style="font-size: 2rem;"></i>
+                                            {% endif %}
+                                        </div>
+                                        <div class="flex-grow-1">
+                                            <h6 class="mb-1">Compliance Pack</h6>
+                                            <p class="text-muted small mb-2">
+                                                PCI-DSS, ISO 27001, and SOC 2 gap analysis reports.
+                                                Available as a paid add-on on top of any Pro, Business, or Enterprise plan.
+                                            </p>
+                                            {% if has_compliance_pack %}
+                                            <span class="text-success small"><i class="bi bi-check-circle me-1"></i>Your subscription includes the Compliance Pack.</span>
+                                            {% else %}
+                                            <a href="https://sentrikat.com/pricing" target="_blank" class="btn btn-outline-primary btn-sm">
+                                                <i class="bi bi-cart-plus me-1"></i>Learn more
+                                            </a>
+                                            {% endif %}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
