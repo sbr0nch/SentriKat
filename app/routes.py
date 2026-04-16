@@ -6818,10 +6818,19 @@ def create_user():
     if auth_type == 'ldap':
         return jsonify({'error': 'Cannot create LDAP users directly. Use LDAP discovery instead.'}), 400
 
-    # Check if username or email already exists
+    # Check if username or email already exists (including Gmail aliases)
+    from app.email_normalizer import normalize_email_for_dedup
     existing = User.query.filter(
         db.or_(User.username == data['username'], User.email == data['email'])
     ).first()
+    if not existing:
+        canonical = normalize_email_for_dedup(data['email'])
+        if canonical != data['email']:
+            domain = canonical.split('@')[1]
+            for u in User.query.filter(User.email.ilike(f'%@{domain}')).all():
+                if normalize_email_for_dedup(u.email) == canonical:
+                    existing = u
+                    break
     if existing:
         return jsonify({'error': 'Username or email already exists'}), 400
 
