@@ -760,7 +760,7 @@ def create_product_from_queue(queue_item):
                 existing_install = ProductInstallation.query.filter_by(
                     asset_id=asset.id,
                     product_id=product.id
-                ).first()
+                ).filter(ProductInstallation.removed_at.is_(None)).first()
                 if not existing_install:
                     installation = ProductInstallation(
                         asset_id=asset.id,

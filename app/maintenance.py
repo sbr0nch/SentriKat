@@ -33,6 +33,7 @@ class MaintenanceResult:
 
     def __init__(self):
         self.installations_removed = 0
+        self.installations_purged = 0
         self.assets_marked_stale = 0
         self.assets_removed = 0
         self.products_cleaned = 0
@@ -45,6 +46,7 @@ class MaintenanceResult:
     def to_dict(self):
         return {
             'installations_removed': self.installations_removed,
+            'installations_purged': self.installations_purged,
             'assets_marked_stale': self.assets_marked_stale,
             'assets_removed': self.assets_removed,
             'products_cleaned': self.products_cleaned,
@@ -76,9 +78,10 @@ def cleanup_stale_installations(days=None, dry_run=False):
 
     threshold = datetime.utcnow() - timedelta(days=days)
 
-    # Find stale installations
+    # Find stale installations (active only — soft-deleted are purged separately)
     stale_query = ProductInstallation.query.filter(
-        ProductInstallation.last_seen_at < threshold
+        ProductInstallation.last_seen_at < threshold,
+        ProductInstallation.removed_at.is_(None)
     )
 
     count = stale_query.count()
@@ -97,6 +100,44 @@ def cleanup_stale_installations(days=None, dry_run=False):
             db.session.commit()
 
         logger.info(f"Removed {count} stale product installations (>{days} days old)")
+
+    return count
+
+
+DEFAULT_SOFT_DELETE_PURGE_DAYS = 90  # Hard-delete soft-deleted installations after 90 days
+
+
+def purge_soft_deleted_installations(days=None, dry_run=False):
+    """
+    Hard-delete ProductInstallation records that were soft-deleted more than X days ago.
+
+    Soft-deleted records (removed_at IS NOT NULL) are kept for audit and
+    re-discovery purposes. After the retention period they are purged to
+    reclaim storage.
+    """
+    if days is None:
+        days = DEFAULT_SOFT_DELETE_PURGE_DAYS
+
+    threshold = datetime.utcnow() - timedelta(days=days)
+
+    purge_query = ProductInstallation.query.filter(
+        ProductInstallation.removed_at.isnot(None),
+        ProductInstallation.removed_at < threshold
+    )
+
+    count = purge_query.count()
+
+    if count > 0 and not dry_run:
+        purge_ids = [i.id for i in purge_query.all()]
+        batch_size = 100
+        for i in range(0, len(purge_ids), batch_size):
+            batch = purge_ids[i:i + batch_size]
+            ProductInstallation.query.filter(
+                ProductInstallation.id.in_(batch)
+            ).delete(synchronize_session=False)
+            db.session.commit()
+
+        logger.info(f"Purged {count} soft-deleted installations (removed >{days} days ago)")
 
     return count
 
@@ -458,7 +499,7 @@ def auto_acknowledge_upgraded_vulnerabilities(dry_run=False):
         # Get all current installation versions for this product
         installations = ProductInstallation.query.filter_by(
             product_id=product_id
-        ).all()
+        ).filter(ProductInstallation.removed_at.is_(None)).all()
 
         if not installations:
             continue  # No installations - handled by software_removed logic
@@ -534,6 +575,16 @@ def run_full_maintenance(dry_run=False, settings=None):
     except Exception as e:
         result.errors.append(f"Installation cleanup failed: {str(e)}")
         logger.error(f"Installation cleanup failed: {e}", exc_info=True)
+
+    try:
+        # 1b. Purge old soft-deleted installations
+        result.installations_purged = purge_soft_deleted_installations(
+            days=settings.get('soft_delete_purge_days'),
+            dry_run=dry_run
+        )
+    except Exception as e:
+        result.errors.append(f"Soft-delete purge failed: {str(e)}")
+        logger.error(f"Soft-delete purge failed: {e}", exc_info=True)
 
     try:
         # 2. Update asset status
@@ -618,7 +669,8 @@ def get_maintenance_stats():
     # Stale installations (not seen for 30+ days)
     install_threshold = now - timedelta(days=DEFAULT_INSTALLATION_STALE_DAYS)
     stale_installations = ProductInstallation.query.filter(
-        ProductInstallation.last_seen_at < install_threshold
+        ProductInstallation.last_seen_at < install_threshold,
+        ProductInstallation.removed_at.is_(None)
     ).count()
 
     # Stale assets (not checking in for 14+ days)
@@ -702,7 +754,9 @@ def get_product_version_summary(product_id):
     Returns:
         List of dicts with version info
     """
-    installations = ProductInstallation.query.filter_by(product_id=product_id).all()
+    installations = ProductInstallation.query.filter_by(product_id=product_id).filter(
+        ProductInstallation.removed_at.is_(None)
+    ).all()
 
     version_map = {}
     for inst in installations:

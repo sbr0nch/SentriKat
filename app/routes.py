@@ -4443,7 +4443,9 @@ def get_product_installations(product_id):
             return jsonify({'error': 'Access denied'}), 403
 
     # Get installations with asset info
-    installations = ProductInstallation.query.filter_by(product_id=product_id).all()
+    installations = ProductInstallation.query.filter_by(product_id=product_id).filter(
+        ProductInstallation.removed_at.is_(None)
+    ).all()
 
     result = []
     for inst in installations:
@@ -6671,7 +6673,7 @@ def create_user():
         role=role,
         is_admin=derived_is_admin,
         is_active=data.get('is_active', True),
-        can_manage_products=data.get('can_manage_products', True),
+        can_manage_products=data.get('can_manage_products', False),
         can_view_all_orgs=can_view_all
     )
 

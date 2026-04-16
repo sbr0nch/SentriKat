@@ -800,9 +800,19 @@ class TestInstallationTracking:
         client.post(INVENTORY_URL, json=payload2,
                      headers=_auth_headers(test_api_key['raw_key']))
 
-        remaining = ProductInstallation.query.filter_by(asset_id=asset.id).all()
-        assert len(remaining) == 1
-        assert remaining[0].product.product_name == 'ProdA'
+        # Soft-delete: uninstalled software stays in DB with removed_at set
+        active = ProductInstallation.query.filter_by(asset_id=asset.id).filter(
+            ProductInstallation.removed_at.is_(None)
+        ).all()
+        assert len(active) == 1
+        assert active[0].product.product_name == 'ProdA'
+
+        # The soft-deleted record is still in DB
+        removed = ProductInstallation.query.filter_by(asset_id=asset.id).filter(
+            ProductInstallation.removed_at.isnot(None)
+        ).all()
+        assert len(removed) == 1
+        assert removed[0].product.product_name == 'ProdB'
 
     @patch(LICENSE_PATCH, side_effect=_license_ok_side_effect)
     @patch(CPE_PATCH)

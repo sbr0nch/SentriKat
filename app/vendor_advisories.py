@@ -191,6 +191,7 @@ def _get_product_os_info(product_id: int) -> dict:
     installation = (
         ProductInstallation.query
         .filter_by(product_id=product_id)
+        .filter(ProductInstallation.removed_at.is_(None))
         .join(Asset, ProductInstallation.asset_id == Asset.id)
         .with_entities(
             Asset.os_name,

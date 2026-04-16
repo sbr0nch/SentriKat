@@ -2323,7 +2323,7 @@ def restore_full_backup():
                     role=user_data.get('role', 'user'),
                     is_admin=user_data.get('is_admin', False),
                     is_active=user_data.get('is_active', True),
-                    can_manage_products=user_data.get('can_manage_products', True),
+                    can_manage_products=user_data.get('can_manage_products', False),
                     can_view_all_orgs=user_data.get('can_view_all_orgs', False)
                 )
                 # Set a temporary password for local users (they'll need to reset)

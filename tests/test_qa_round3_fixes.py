@@ -378,12 +378,12 @@ class TestAgentInventoryAnomalyThreshold:
             "20% removal should NOT trigger the anomaly path"
         )
 
-        installs_after = ProductInstallation.query.filter_by(
+        active_after = ProductInstallation.query.filter_by(
             asset_id=asset.id, detected_by='agent'
-        ).count()
-        assert installs_after == 8, (
+        ).filter(ProductInstallation.removed_at.is_(None)).count()
+        assert active_after == 8, (
             f"Legitimate uninstall of 2/10 products was blocked "
-            f"(expected 8 installs, got {installs_after})"
+            f"(expected 8 active installs, got {active_after})"
         )
 
     def test_threshold_is_configurable(
