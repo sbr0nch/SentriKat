@@ -215,9 +215,21 @@ def saml_acs():
     auto_provision = get_setting('saml_auto_provision', 'true') == 'true'
 
     if not auto_provision:
-        # Check if user exists
+        # Check if user exists (including Gmail aliases)
         from app.models import User
-        user = User.query.filter_by(email=user_data.get('email')).first()
+        from app.email_normalizer import normalize_email_for_dedup
+        saml_email = user_data.get('email')
+        canonical_email = normalize_email_for_dedup(saml_email)
+        user = User.query.filter_by(email=saml_email).first()
+        if not user and canonical_email != saml_email:
+            domain = canonical_email.split('@')[1]
+            candidates = User.query.filter(
+                User.email.ilike(f'%@{domain}')
+            ).all()
+            for u in candidates:
+                if normalize_email_for_dedup(u.email) == canonical_email:
+                    user = u
+                    break
         if not user:
             logger.warning(f"SAML user not found and auto-provision disabled: {user_data.get('email')}")
             return redirect(url_for('auth.login', error='saml_user_not_found'))

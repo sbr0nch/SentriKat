@@ -834,8 +834,20 @@ def request_password_reset():
     success_message = 'If an account with that email exists, a password reset link has been sent.'
 
     try:
-        # Case-insensitive email lookup
+        # Case-insensitive email lookup with Gmail alias normalization
+        # so user+tag@gmail.com can still trigger a reset for user@gmail.com.
+        from app.email_normalizer import normalize_email_for_dedup
+        canonical_email = normalize_email_for_dedup(email)
         user = User.query.filter(func.lower(User.email) == email).first()
+        if not user and canonical_email != email:
+            domain = canonical_email.split('@')[1]
+            candidates = User.query.filter(
+                User.email.ilike(f'%@{domain}')
+            ).all()
+            for u in candidates:
+                if normalize_email_for_dedup(u.email) == canonical_email:
+                    user = u
+                    break
 
         if not user or not user.is_active:
             logger.info(f"Password reset requested for unknown/inactive email: {email} from {request.remote_addr}")

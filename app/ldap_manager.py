@@ -420,8 +420,24 @@ class LDAPManager:
             existing_user = User.query.filter_by(username=username).first()
 
             # Also check by email (different username but same email)
+            # Use normalized email to catch Gmail aliases (user+tag,
+            # u.s.e.r, @googlemail.com → same canonical address).
+            from app.email_normalizer import normalize_email_for_dedup
+            canonical_email = normalize_email_for_dedup(email)
+
             if not existing_user:
                 existing_user = User.query.filter_by(email=email).first()
+                if not existing_user and canonical_email != email:
+                    # Check aliases: query same domain, compare canonical
+                    # forms in Python. Scope to domain for index utilization.
+                    domain = canonical_email.split('@')[1]
+                    candidates = User.query.filter(
+                        User.email.ilike(f'%@{domain}')
+                    ).all()
+                    for u in candidates:
+                        if normalize_email_for_dedup(u.email) == canonical_email:
+                            existing_user = u
+                            break
                 if existing_user:
                     # User exists with different username but same email
                     if not existing_user.is_active:

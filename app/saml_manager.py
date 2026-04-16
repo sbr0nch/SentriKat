@@ -305,8 +305,22 @@ def get_or_create_saml_user(user_data: Dict) -> Tuple[Optional[Any], bool]:
         logger.error("SAML response missing email")
         return None, False
 
+    # Use normalized email to catch Gmail aliases (user+tag,
+    # u.s.e.r, @googlemail.com → same canonical address).
+    from app.email_normalizer import normalize_email_for_dedup
+    canonical_email = normalize_email_for_dedup(email)
+
     # Try to find existing user
     user = User.query.filter_by(email=email).first()
+    if not user and canonical_email != email:
+        domain = canonical_email.split('@')[1]
+        candidates = User.query.filter(
+            User.email.ilike(f'%@{domain}')
+        ).all()
+        for u in candidates:
+            if normalize_email_for_dedup(u.email) == canonical_email:
+                user = u
+                break
 
     if user:
         # Only allow SAML login for users who are already SAML-type or local users
