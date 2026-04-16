@@ -24,10 +24,10 @@ http {
 
         server_tokens off;
 
-        # Security headers
-        add_header X-Frame-Options "SAMEORIGIN" always;
+        # Security headers. X-Frame-Options / X-XSS-Protection removed
+        # (CSP frame-ancestors supersedes the first, browsers ignore the
+        # second).
         add_header X-Content-Type-Options "nosniff" always;
-        add_header X-XSS-Protection "1; mode=block" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         add_header Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()" always;
         add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob: https:; font-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'self'; base-uri 'self'; form-action 'self';" always;

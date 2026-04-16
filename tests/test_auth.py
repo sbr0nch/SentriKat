@@ -104,9 +104,11 @@ class TestLocalAuthentication:
             'password': 'testpassword'
         })
 
+        # H-3: all login-failure paths return the same generic 401 to
+        # prevent user enumeration. The real state is only logged server-side.
         assert response.status_code == 401
         data = response.get_json()
-        assert 'disabled' in data['error'].lower()
+        assert data['error'] == 'Invalid username or password'
 
     def test_login_disabled_organization(self, app, client, db_session):
         """Test login fails when user's organization is disabled."""
@@ -133,9 +135,10 @@ class TestLocalAuthentication:
             'password': 'testpassword'
         })
 
+        # H-3: disabled-org state is not leaked to the caller either.
         assert response.status_code == 401
         data = response.get_json()
-        assert 'organization' in data['error'].lower() or 'disabled' in data['error'].lower()
+        assert data['error'] == 'Invalid username or password'
 
     def test_logout(self, app, client, db_session):
         """Test logout clears session."""
@@ -203,15 +206,21 @@ class TestAccountLockout:
                 'password': 'wrongpassword'
             })
 
-        # Now try with correct password - should still be locked
+        # Now try with correct password - lockout should still reject it.
         response = client.post('/api/auth/login', json={
             'username': 'locktest',
             'password': 'correctpassword'
         })
 
+        # H-3: the lockout is enforced server-side but the response stays
+        # generic so attackers can't tell whether an account exists or is
+        # currently locked. Verify the user is actually locked by reading
+        # the DB directly.
         assert response.status_code == 401
         data = response.get_json()
-        assert 'locked' in data['error'].lower()
+        assert data['error'] == 'Invalid username or password'
+        db_session.refresh(user)
+        assert user.is_locked()
 
 
 class TestTwoFactorAuthentication:

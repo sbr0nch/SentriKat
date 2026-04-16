@@ -237,6 +237,10 @@ ALLOWED_SETTING_KEYS = {
     'saml_enabled', 'saml_idp_metadata', 'saml_sp_entity_id', 'saml_sp_acs_url',
     'saml_sp_sls_url', 'saml_default_org_id', 'saml_user_mapping',
     'saml_auto_provision', 'saml_update_user_info',
+    # SAML security hardening toggles (H-2)
+    'saml_want_assertions_signed', 'saml_want_messages_signed',
+    'saml_want_assertions_encrypted', 'saml_want_nameid_encrypted',
+    'saml_rejected_times',
     # Syslog / SIEM forwarding settings
     'syslog_enabled', 'syslog_host', 'syslog_port', 'syslog_protocol',
     'syslog_format', 'syslog_facility',

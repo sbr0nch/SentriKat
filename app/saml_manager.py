@@ -102,6 +102,18 @@ def get_saml_settings() -> Dict[str, Any]:
         sp_acs_url = f"{base_url}/saml/acs"
         logger.info(f"SAML ACS URL not set, using: {sp_acs_url}")
 
+    # Per-IdP overrides (can relax the strict defaults when the IdP cannot
+    # be reconfigured). Read from SystemSettings so admins can toggle them
+    # from the UI without touching code.
+    want_assertions_signed = get_setting('saml_want_assertions_signed', 'true') == 'true'
+    want_messages_signed = get_setting('saml_want_messages_signed', 'true') == 'true'
+    want_assertions_encrypted = get_setting('saml_want_assertions_encrypted', 'false') == 'true'
+    want_nameid_encrypted = get_setting('saml_want_nameid_encrypted', 'false') == 'true'
+    try:
+        rejected_times = int(get_setting('saml_rejected_times', '60'))
+    except (TypeError, ValueError):
+        rejected_times = 60
+
     # Build settings dict
     settings = {
         'strict': True,
@@ -116,19 +128,28 @@ def get_saml_settings() -> Dict[str, Any]:
         },
         'idp': idp_data.get('idp', {}),
         'security': {
-            # Don't require specific authentication context - Keycloak and many
-            # IdPs send different context classes than python3-saml's default
+            # Keycloak and some IdPs send different authn context classes than
+            # python3-saml's default — leave this off.
             'requestedAuthnContext': False,
-            # Don't require encrypted assertions (most IdPs don't encrypt by default)
-            'wantNameIdEncrypted': False,
-            'wantAssertionsEncrypted': False,
-            # Allow some clock skew between Docker containers / IdP server
-            'rejectedTimes': 120,
-            # Accept both signed responses and signed assertions
-            'wantAssertionsSigned': False,
-            'wantMessagesSigned': False,
+            # Signing the response AND the assertion is required by default
+            # (H-2). Operators can relax each flag independently from the
+            # SAML admin UI if their IdP cannot sign.
+            'wantAssertionsSigned': want_assertions_signed,
+            'wantMessagesSigned': want_messages_signed,
+            'wantAssertionsEncrypted': want_assertions_encrypted,
+            'wantNameIdEncrypted': want_nameid_encrypted,
+            # Industry-norm clock skew window; configurable for Docker/NTP drift.
+            'rejectedTimes': rejected_times,
         }
     }
+
+    if not want_assertions_signed or not want_messages_signed:
+        logger.warning(
+            "SAML configured with relaxed signature requirements "
+            "(wantAssertionsSigned=%s, wantMessagesSigned=%s). "
+            "This is vulnerable to assertion injection if the IdP is compromised.",
+            want_assertions_signed, want_messages_signed
+        )
 
     # Add SLS if configured
     if sp_sls_url:

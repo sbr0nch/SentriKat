@@ -2063,10 +2063,81 @@ class AgentApiKey(db.Model):
         return f"sk_agent_{secrets.token_urlsafe(32)}"
 
     @staticmethod
-    def hash_key(key):
-        """Hash an API key for storage."""
+    def _agent_key_pepper() -> bytes:
+        """Return the HMAC pepper used for agent key hashing (M-8).
+
+        Falls back to ``SECRET_KEY`` when ``AGENT_KEY_PEPPER`` is not
+        configured so that existing on-prem installations keep working
+        after the upgrade without an explicit migration step. Setting the
+        dedicated variable is strongly recommended — see SECURITY.md.
+        """
+        import os
+        pepper = os.environ.get('AGENT_KEY_PEPPER', '').strip()
+        if pepper:
+            return pepper.encode('utf-8')
+        # Fall back to Flask SECRET_KEY — already required to be set.
+        secret = os.environ.get('SECRET_KEY', '')
+        if not secret:
+            try:
+                from flask import current_app
+                secret = current_app.config.get('SECRET_KEY', '') or ''
+            except Exception:
+                secret = ''
+        if not secret:
+            raise RuntimeError(
+                "Agent key hashing requires AGENT_KEY_PEPPER or SECRET_KEY to be set."
+            )
+        return secret.encode('utf-8')
+
+    @staticmethod
+    def _legacy_hash_key(key):
+        """Legacy unpeppered SHA256 hash (M-8 backward compatibility)."""
         import hashlib
         return hashlib.sha256(key.encode()).hexdigest()
+
+    @staticmethod
+    def hash_key(key):
+        """Hash an API key for storage.
+
+        Uses HMAC-SHA256 with a server-side pepper so that a database leak
+        does not enable offline brute-force of agent keys (M-8). The
+        ``sk_agent_`` prefix plus ``secrets.token_urlsafe(32)`` gives ~256
+        bits of entropy, but pepper hardens against future weakening (e.g.
+        a bug that shortens the entropy source).
+        """
+        import hmac
+        import hashlib
+        return hmac.new(
+            AgentApiKey._agent_key_pepper(),
+            key.encode('utf-8'),
+            hashlib.sha256,
+        ).hexdigest()
+
+    @classmethod
+    def find_by_raw_key(cls, raw_key):
+        """Locate an ``AgentApiKey`` by its plaintext key.
+
+        Transparently handles the transition from the legacy unpeppered
+        SHA256 hash to the new HMAC-SHA256 scheme: if a legacy hash matches
+        we rewrite it to the new format on the spot so we only carry the
+        legacy check for keys that haven't been used since the upgrade.
+        """
+        if not raw_key:
+            return None
+        new_hash = cls.hash_key(raw_key)
+        row = cls.query.filter_by(key_hash=new_hash).first()
+        if row is not None:
+            return row
+        legacy_hash = cls._legacy_hash_key(raw_key)
+        row = cls.query.filter_by(key_hash=legacy_hash).first()
+        if row is not None:
+            try:
+                row.key_hash = new_hash
+                db.session.add(row)
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+        return row
 
     def is_valid(self):
         """Check if key is still valid (active and not expired)."""

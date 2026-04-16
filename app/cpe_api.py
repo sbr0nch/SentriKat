@@ -326,7 +326,11 @@ def link_cpe_to_product(product_id):
 
     Returns updated product.
     """
+    from app.authz import user_can_access_product, current_user as _current_user
     product = Product.query.get_or_404(product_id)
+    if not user_can_access_product(_current_user(), product, write=True):
+        return jsonify({'error': 'Product not found'}), 404
+
     data = request.get_json()
 
     if not data.get('cpe_vendor') or not data.get('cpe_product'):
@@ -365,7 +369,10 @@ def unlink_cpe_from_product(product_id):
 
     Returns updated product.
     """
+    from app.authz import user_can_access_product, current_user as _current_user
     product = Product.query.get_or_404(product_id)
+    if not user_can_access_product(_current_user(), product, write=True):
+        return jsonify({'error': 'Product not found'}), 404
 
     product.cpe_vendor = None
     product.cpe_product = None

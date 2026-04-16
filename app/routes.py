@@ -152,12 +152,8 @@ def _wipe_product_children(pid: int) -> None:
       (product_installations, vulnerability_matches,
       product_version_history, remediation_assignments, risk_exceptions,
       product_aliases, product_organizations). Missing even one causes
-      a constraint violation that looks random to the user because it
-      depends on whether that product happens to have rows in the table
-      with the weak cascade. That's the classic "delete fails for
-      Apache Tomcat but not for random test products" signal — Tomcat
-      has lots of remediation assignments and risk exceptions, test
-      products don't.
+      a constraint violation that manifests intermittently depending on
+      how many related rows exist for the product being deleted.
 
     Deletes are issued in FK-dependency order inside the same
     transaction as the caller, using ``synchronize_session=False`` so
@@ -1918,18 +1914,13 @@ def create_product():
 @login_required
 def get_product(product_id):
     """Get a specific product (organization-scoped)"""
+    from app.authz import user_can_access_product
     product = Product.query.get_or_404(product_id)
 
-    # Organization isolation: verify user has access to this product's org
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
-    if current_user and not _super_admin_unrestricted():
-        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
-        product_org_ids = [org.id for org in product.organizations.all()]
-        if product.organization_id:
-            product_org_ids.append(product.organization_id)
-        if not any(oid in user_org_ids for oid in product_org_ids):
-            return jsonify({'error': 'Product not found'}), 404
+    if not user_can_access_product(current_user, product):
+        return jsonify({'error': 'Product not found'}), 404
 
     return jsonify(product.to_dict())
 
@@ -1942,20 +1933,16 @@ def update_product(product_id):
     Permissions:
     - Super Admin: Can update any product
     - Org Admin: Can update products in their organization
-    - Manager: Can update products in their organization
+    - Manager: Can update products in their organization (includes MSSP
+      multi-org members across every org they belong to)
     """
+    from app.authz import user_can_access_product
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
     product = Product.query.get_or_404(product_id)
 
-    # Permission check: org admins can only edit products in their org
-    if not _super_admin_unrestricted():
-        # Check if product belongs to user's org (via primary or multi-org assignment)
-        product_org_ids = [org.id for org in product.organizations.all()]
-        if product.organization_id:
-            product_org_ids.append(product.organization_id)
-        if current_user.organization_id not in product_org_ids:
-            return jsonify({'error': 'You can only edit products in your organization'}), 403
+    if not user_can_access_product(current_user, product, write=True):
+        return jsonify({'error': 'Product not found'}), 404
 
     data = request.get_json()
 
@@ -2091,10 +2078,12 @@ def delete_product(product_id):
     if product.organization_id and product.organization_id not in product_org_ids:
         product_org_ids.append(product.organization_id)
 
-    # Permission check: non-super-admins can only manage products in their org
-    if not _super_admin_unrestricted():
-        if user_org_id not in product_org_ids:
-            return jsonify({'error': 'You can only delete products in your organization'}), 403
+    # Permission check: non-super-admins can only manage products in their org.
+    # Uses the central authz helper (see app/authz.py) — multi-org MSSP users
+    # must be able to delete in any org they're a member of, not just primary.
+    from app.authz import user_can_access_product
+    if not user_can_access_product(current_user, product, write=True):
+        return jsonify({'error': 'You can only delete products in your organization'}), 403
 
     # Store product info for audit log
     product_info = {

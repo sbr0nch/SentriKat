@@ -402,29 +402,62 @@ def create_app(config_class=Config):
     app.config.setdefault('SESSION_COOKIE_HTTPONLY', True)
     app.config.setdefault('SESSION_COOKIE_SAMESITE', 'Lax')
 
+    # Per-request CSP nonce (M-7). Templates can emit ``nonce="{{ csp_nonce }}"``
+    # on inline <script>/<style> and, once every inline block carries a
+    # nonce, the ``'unsafe-inline'`` entries below can be dropped.
+    import secrets as _secrets
+
+    @app.before_request
+    def _generate_csp_nonce():
+        from flask import g
+        g.csp_nonce = _secrets.token_urlsafe(16)
+
+    @app.context_processor
+    def _inject_csp_nonce():
+        from flask import g
+        return {'csp_nonce': getattr(g, 'csp_nonce', '')}
+
     # Security headers via Talisman (only in production)
     # Set FORCE_HTTPS=false in .env if not using HTTPS (e.g., behind reverse proxy)
-    if os.environ.get('FLASK_ENV') == 'production':
+    from app.environment import is_production as _is_production
+    if _is_production() and not app.config.get('TESTING'):
         from flask_talisman import Talisman
         force_https = os.environ.get('FORCE_HTTPS', 'true').lower() == 'true'
         # For HTTP deployments, session_cookie_secure must be False
         session_cookie_secure = os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
+
+        # Talisman handles HSTS / cookie / referrer; we set CSP ourselves
+        # in the after_request hook below so the per-request nonce (M-7)
+        # can be embedded. flask-talisman < 2.x doesn't accept a callable
+        # policy.
         Talisman(app,
             force_https=force_https,
-            session_cookie_secure=session_cookie_secure,  # Must be False for HTTP
-            strict_transport_security=force_https,  # Only enable HSTS with HTTPS
+            session_cookie_secure=session_cookie_secure,
+            strict_transport_security=force_https,
             strict_transport_security_max_age=31536000 if force_https else 0,
-            content_security_policy={
-                'default-src': "'self'",
-                'script-src': ["'self'", "'unsafe-inline'", "cdn.jsdelivr.net"],
-                'style-src': ["'self'", "'unsafe-inline'", "cdn.jsdelivr.net", "fonts.googleapis.com"],
-                'img-src': ["'self'", "data:"],
-                'font-src': ["'self'", "cdn.jsdelivr.net", "fonts.gstatic.com"],
-                # connect-src: 'self' for our APIs, jsdelivr for source maps
-                # (devtools loads .map files via fetch and CSP blocks them otherwise)
-                'connect-src': ["'self'", "cdn.jsdelivr.net"],
-            }
+            content_security_policy=None,
         )
+
+        @app.after_request
+        def _attach_nonce_csp(response):
+            from flask import g
+            nonce = getattr(g, 'csp_nonce', '')
+            nonce_src = f"'nonce-{nonce}'" if nonce else ''
+            # Templates can use ``nonce="{{ csp_nonce }}"`` on inline
+            # <script>/<style>. ``'unsafe-inline'`` stays until every
+            # template has been migrated; see docs/OWASP-ASVS.md for
+            # tracking.
+            csp = (
+                "default-src 'self'; "
+                f"script-src 'self' cdn.jsdelivr.net {nonce_src} 'unsafe-inline'; "
+                f"style-src 'self' cdn.jsdelivr.net fonts.googleapis.com {nonce_src} 'unsafe-inline'; "
+                "img-src 'self' data: blob: https:; "
+                "font-src 'self' cdn.jsdelivr.net fonts.gstatic.com; "
+                "connect-src 'self' cdn.jsdelivr.net; "
+                "frame-ancestors 'self'; base-uri 'self'; form-action 'self';"
+            )
+            response.headers['Content-Security-Policy'] = csp
+            return response
 
         if force_https:
             # Exempt internal health check paths from HTTPS redirect.
@@ -493,7 +526,15 @@ def create_app(config_class=Config):
         In production, replace with a generic message while keeping the original
         logged server-side.
         """
-        if (app.config.get('ENV') == 'production' or os.environ.get('FLASK_ENV') == 'production'):
+        # M-5: sanitize by default, opt out only when explicitly in debug mode.
+        # Previously this was opt-in via FLASK_ENV=production, so misconfigured
+        # staging environments leaked stack traces.
+        debug_mode = (
+            app.config.get('DEBUG')
+            or os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes')
+            or os.environ.get('SENTRIKAT_ENV', '').lower() == 'development'
+        )
+        if not debug_mode:
             if response.status_code == 500 and response.content_type and 'json' in response.content_type:
                 try:
                     import json
@@ -535,7 +576,7 @@ def create_app(config_class=Config):
     # Make current user and branding available in all templates
     @app.context_processor
     def inject_globals():
-        from flask import session, request
+        from flask import session, request, g
         from app.models import User, SystemSettings, Subscription
         from app.saas import is_saas_mode
         import os
@@ -551,11 +592,24 @@ def create_app(config_class=Config):
         saas_mode = is_saas_mode()
         org_id = session.get('organization_id') if saas_mode else None
 
-        # Helper: query SystemSettings scoped by org in SaaS mode
+        # Request-scoped cache (M-3). ``inject_globals`` fires ~8 queries per
+        # template render; on pages with many partials that dominates DB pool
+        # time. Cache the ``SystemSettings`` lookups for the life of the
+        # request — no cross-request invalidation needed.
+        cache = getattr(g, '_settings_cache', None)
+        if cache is None:
+            cache = g._settings_cache = {}
+
         def _get_branding_setting(key):
+            ck = (key, org_id)
+            if ck in cache:
+                return cache[ck]
             if org_id:
-                return SystemSettings.query.filter_by(key=key, organization_id=org_id).first()
-            return SystemSettings.query.filter_by(key=key, organization_id=None).first()
+                row = SystemSettings.query.filter_by(key=key, organization_id=org_id).first()
+            else:
+                row = SystemSettings.query.filter_by(key=key, organization_id=None).first()
+            cache[ck] = row
+            return row
 
         # Load branding settings (org-scoped in SaaS mode)
         branding = {
@@ -587,6 +641,7 @@ def create_app(config_class=Config):
             if report_branding:
                 branding['report_branding_enabled'] = report_branding.value != 'false'
         except Exception:
+            app.logger.warning("inject_globals: branding settings lookup failed", exc_info=True)
             try:
                 db.session.rollback()
             except Exception:
@@ -614,6 +669,7 @@ def create_app(config_class=Config):
                     'message': 'Your license has been revoked. Contact support.',
                 }
         except Exception:
+            app.logger.warning("inject_globals: license banner flags lookup failed", exc_info=True)
             license_revoked_banner = None
 
         # Load license info (on-premise) or subscription info (SaaS)
