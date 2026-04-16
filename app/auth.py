@@ -753,6 +753,59 @@ def get_csrf_token():
 
 
 # ============================================================================
+# PUBLIC REGISTRATION DISABLED
+# ============================================================================
+#
+# By policy, customer accounts can only be created via:
+#   1. POST /api/provision (called by license-server during trial signup)
+#   2. Internal admin UI (/admin/users) for manual operations
+#   3. Org-admin invite flow (existing team-member invite)
+#   4. LDAP sync (enterprise)
+#
+# Public self-registration is intentionally unavailable. The endpoints
+# below act as a safety net: if anyone re-introduces a /signup or
+# /api/auth/register handler in the future, these guards will catch
+# the request first and return 403 REGISTRATION_DISABLED unless the
+# PUBLIC_REGISTRATION_ENABLED env flag is explicitly set to "true"
+# (intended for dev only).
+#
+# Rationale: unify customer acquisition through the portal trial
+# funnel — avoids capacity bypass, analytics gaps, and orphan
+# accounts invisible in the admin portal.
+# ============================================================================
+
+def _public_registration_enabled():
+    """Return True only if PUBLIC_REGISTRATION_ENABLED is explicitly opt-in."""
+    import os
+    return (os.environ.get('PUBLIC_REGISTRATION_ENABLED') or '').strip().lower() in ('1', 'true', 'yes')
+
+
+@auth_bp.route('/api/auth/register', methods=['POST'])
+@auth_bp.route('/signup', methods=['GET', 'POST'])
+def public_registration_disabled():
+    """Block public registration unless PUBLIC_REGISTRATION_ENABLED=true.
+
+    Customer accounts must be created through the portal trial funnel,
+    org-admin invite, or LDAP sync — see policy comment above.
+    """
+    if not _public_registration_enabled():
+        return jsonify({
+            'error': 'REGISTRATION_DISABLED',
+            'message': (
+                'Public self-registration is disabled on this instance. '
+                'Sign up through the trial funnel at https://sentrikat.com '
+                'or contact your organization administrator.'
+            ),
+        }), 403
+    # Dev-only path: still no real registration, but signal to the caller
+    # that the flag is honoured if they're testing.
+    return jsonify({
+        'error': 'NOT_IMPLEMENTED',
+        'message': 'Public registration flag is enabled but no handler is wired.',
+    }), 501
+
+
+# ============================================================================
 # PASSWORD RESET (Forgot Password)
 # ============================================================================
 
