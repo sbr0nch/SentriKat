@@ -76,10 +76,31 @@
 {% endblock %}
 
 {% block content %}
+{#
+  Single-org vs multi-org UX split (see also the longer comment further
+  down next to the Global Default Rules card).
+
+  A tenant is considered "single-org" when:
+   * we're in SaaS mode AND
+   * the subscription's plan does NOT enable multi_org AND
+   * max_organizations is 1 (or undefined)
+#}
+{% set is_single_org_tenant = (
+    saas_mode
+    and subscription
+    and subscription.plan
+    and not subscription.plan.has_feature('multi_org')
+    and (subscription.plan.max_organizations or 1) <= 1
+) %}
+
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
         <h2 class="h4 fw-bold mb-1"><i class="bi bi-bell me-2"></i>Alert Management</h2>
+        {% if is_single_org_tenant %}
+        <p class="text-muted mb-0 small">Configure alert rules and delivery channels for your organization</p>
+        {% else %}
         <p class="text-muted mb-0 small">Central hub for alert rules, delivery channels, and per-organization configuration</p>
+        {% endif %}
     </div>
 </div>
 
@@ -127,7 +148,19 @@
     </div>
 </div>
 
-<!-- Global Default Rules Card -->
+{#
+  On single-org tenants (SaaS Pro / Starter / Free) the "Global Default
+  Rules + Per-Organization Configuration" split is confusing — it implies
+  the admin will create more orgs later, which the plan disallows. For
+  those tenants we collapse the two sections into a single "Alert Rules
+  for <Org Name>" card that edits the only org the tenant has. On
+  multi-org plans (Business+, Enterprise) and on-prem we keep the full
+  layout because the admin really does have (or will have) several orgs
+  to differentiate. The ``is_single_org_tenant`` flag is set at the top
+  of this block.
+#}
+{% if not is_single_org_tenant %}
+<!-- Global Default Rules Card (multi-org layout only) -->
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-globe me-2"></i>Global Default Rules</span>
@@ -210,10 +243,21 @@
         </div>
     </div>
 </div>
+{% endif %}
 
 <!-- Per-Organization Alert Configuration -->
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
+        {% if is_single_org_tenant %}
+        <span><i class="bi bi-bell me-2"></i>Alert Rules{% if current_user and current_user.organization %}
+            for {{ current_user.organization.display_name or current_user.organization.name }}
+        {% endif %}</span>
+        <div>
+            <button class="btn btn-outline-primary btn-sm" onclick="loadOrgs()" title="Reload">
+                <i class="bi bi-arrow-clockwise"></i>
+            </button>
+        </div>
+        {% else %}
         <span><i class="bi bi-building me-2"></i>Per-Organization Alert Configuration</span>
         <div>
             <button class="btn btn-outline-secondary btn-sm me-1" onclick="collapseAllDelivery()" title="Collapse all">
@@ -223,13 +267,23 @@
                 <i class="bi bi-arrow-clockwise"></i>
             </button>
         </div>
+        {% endif %}
     </div>
     <div class="card-body p-0">
+        {% if is_single_org_tenant %}
+        <div class="px-3 pt-3 pb-2 text-muted small">
+            Your plan includes one organization. Configure the alert rules
+            that apply to it. 0-Day and active-exploitation alerts (CISA
+            KEV / EUVD) are always enabled and cannot be turned off.
+        </div>
+        {% endif %}
         <div class="table-responsive">
             <table class="table table-hover mb-0" id="orgAlertsTable">
                 <thead>
                     <tr>
+                        {% if not is_single_org_tenant %}
                         <th class="small fw-semibold ps-3" style="min-width:180px;">Organization</th>
+                        {% endif %}
                         <th class="small fw-semibold text-center" style="width:60px;" title="Alert on Critical severity CVEs (CVSS 9.0-10.0)">Critical</th>
                         <th class="small fw-semibold text-center" style="width:60px;" title="Alert on High severity CVEs (CVSS 7.0-8.9)">High</th>
                         <th class="small fw-semibold text-center" style="width:60px;" title="Alert on newly discovered CVEs">New CVE</th>
@@ -239,8 +293,8 @@
                         <th class="small fw-semibold text-center" style="width:100px;">Actions</th>
                     </tr>
                 </thead>
-                <tbody id="orgAlertsBody">
-                    <tr><td colspan="8" class="text-center text-muted py-4"><i class="bi bi-hourglass-split me-1"></i>Loading organizations...</td></tr>
+                <tbody id="orgAlertsBody" data-single-org="{{ 'true' if is_single_org_tenant else 'false' }}">
+                    <tr><td colspan="{{ 7 if is_single_org_tenant else 8 }}" class="text-center text-muted py-4"><i class="bi bi-hourglass-split me-1"></i>Loading organizations...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -338,13 +392,25 @@ async function apiFetch(url, options = {}) {
 // Load everything
 // ========================================================
 async function loadAll() {
-    await Promise.all([loadGlobalDefaults(), loadOrgs(), loadChannelStatus()]);
+    // Only fetch global defaults when the card is actually rendered
+    // (multi-org tenants). On single-org tenants we hide the card in
+    // Jinja, so there's no point making the API call and no elements
+    // to populate.
+    const tasks = [loadOrgs(), loadChannelStatus()];
+    if (document.getElementById('ruleCritical')) {
+        tasks.push(loadGlobalDefaults());
+    }
+    await Promise.all(tasks);
 }
 
 async function loadGlobalDefaults() {
+    // Guard: the global defaults card is Jinja-gated to multi-org
+    // tenants. If the card isn't in the DOM (single-org layout), skip.
+    const criticalEl = document.getElementById('ruleCritical');
+    if (!criticalEl) return;
     try {
         const n = await apiFetch('/api/settings/notifications');
-        document.getElementById('ruleCritical').checked = n.notify_on_critical !== false;
+        criticalEl.checked = n.notify_on_critical !== false;
         document.getElementById('ruleHigh').checked = n.notify_on_high === true;
         document.getElementById('ruleNewCve').checked = n.notify_on_new_cve !== false;
         document.getElementById('ruleRansomware').checked = n.notify_on_ransomware !== false;
@@ -355,13 +421,17 @@ async function loadGlobalDefaults() {
 }
 
 async function loadOrgs() {
+    const tbody = document.getElementById('orgAlertsBody');
+    const errorColspan = tbody && tbody.dataset.singleOrg === 'true' ? 7 : 8;
     try {
         orgsData = await apiFetch('/api/settings/alerts/org-overrides');
         renderOrgsTable(orgsData);
     } catch (err) {
         console.error('Failed to load orgs:', err);
-        document.getElementById('orgAlertsBody').innerHTML =
-            '<tr><td colspan="8" class="text-center text-danger py-4"><i class="bi bi-exclamation-triangle me-1"></i>Failed to load organizations</td></tr>';
+        if (tbody) {
+            tbody.innerHTML =
+                `<tr><td colspan="${errorColspan}" class="text-center text-danger py-4"><i class="bi bi-exclamation-triangle me-1"></i>Failed to load organizations</td></tr>`;
+        }
     }
 }
 
@@ -441,11 +511,19 @@ async function loadChannelStatus() {
 // Save global defaults
 // ========================================================
 async function saveGlobalDefaults() {
+    // Guard: the whole "Global Default Rules" card is Jinja-gated to
+    // multi-org tenants. This function is only bound to the Save
+    // button inside that card, so in theory it cannot be called on a
+    // single-org tenant — but if the page state gets weird (e.g. a
+    // stale tab that was loaded before a plan downgrade) we'd rather
+    // no-op than crash with "null is not an object".
     const statusEl = document.getElementById('globalSaveStatus');
+    const criticalEl = document.getElementById('ruleCritical');
+    if (!statusEl || !criticalEl) return;
     statusEl.innerHTML = '<span class="saving-indicator"></span>';
     try {
         const payload = {
-            notify_on_critical: document.getElementById('ruleCritical').checked,
+            notify_on_critical: criticalEl.checked,
             notify_on_high: document.getElementById('ruleHigh').checked,
             notify_on_new_cve: document.getElementById('ruleNewCve').checked,
             notify_on_ransomware: document.getElementById('ruleRansomware').checked,
@@ -465,8 +543,16 @@ async function saveGlobalDefaults() {
 // ========================================================
 function renderOrgsTable(orgs) {
     const tbody = document.getElementById('orgAlertsBody');
+    // Read the single-org flag set on the server render. When true we
+    // drop the Organization column + the "Global Default" option in
+    // the Alert Mode dropdown (there's no global defaults card above
+    // for it to refer to on single-org tenants) and shrink the
+    // colspan used by empty-state / loading rows by one.
+    const isSingleOrg = tbody.dataset.singleOrg === 'true';
+    const colspan = isSingleOrg ? 7 : 8;
+
     if (!orgs || orgs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">No organizations found</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="${colspan}" class="text-center text-muted py-4">No organizations found</td></tr>`;
         return;
     }
 
@@ -499,14 +585,44 @@ function renderOrgsTable(orgs) {
         deliveryHtml += '</div>';
 
         // Alert mode display
-        const modeLabels = { 'new_only': 'New Only', 'daily_reminder': 'Daily', 'escalation': 'Escalation' };
         const modeValue = org.alert_mode || '';
+        // On single-org tenants there is no "Global Default" option —
+        // the global defaults card isn't rendered for them either, so
+        // showing the option would just leave an empty value that
+        // silently falls back to hardcoded constants.
+        const defaultOption = isSingleOrg
+            ? `<option value="new_only" ${!modeValue || modeValue === 'new_only' ? 'selected' : ''}>New Only</option>`
+            : `<option value="" ${!modeValue ? 'selected' : ''}>Global Default</option>
+               <option value="new_only" ${modeValue === 'new_only' ? 'selected' : ''}>New Only</option>`;
 
-        return `<tr class="org-alert-row${inactive}" data-org-id="${org.id}">
-            <td class="ps-3">
+        // Organization cell — hidden on single-org
+        const orgCell = isSingleOrg
+            ? ''
+            : `<td class="ps-3">
                 <strong>${escapeHtml(org.display_name || org.name)}</strong>
                 ${!org.active ? '<br><span class="badge bg-secondary" style="font-size:0.6rem;">Inactive</span>' : ''}
-            </td>
+              </td>`;
+
+        // Actions cell — single-org tenants don't get the "Reset to
+        // global defaults" button because there are no global defaults
+        // to reset to.
+        const actionsCell = isSingleOrg
+            ? `<td class="text-center org-actions-cell">
+                 <button class="btn btn-outline-primary btn-sm" onclick="openDeliveryModal(${org.id})" title="Edit delivery settings">
+                     <i class="bi bi-pencil"></i>
+                 </button>
+               </td>`
+            : `<td class="text-center org-actions-cell">
+                 <button class="btn btn-outline-primary btn-sm" onclick="openDeliveryModal(${org.id})" title="Edit delivery settings">
+                     <i class="bi bi-pencil"></i>
+                 </button>
+                 <button class="btn btn-outline-secondary btn-sm" onclick="resetOrgDefaults(${org.id})" title="Reset to global defaults">
+                     <i class="bi bi-arrow-counterclockwise"></i>
+                 </button>
+               </td>`;
+
+        return `<tr class="org-alert-row${inactive}" data-org-id="${org.id}">
+            ${orgCell}
             <td class="text-center">
                 <input type="checkbox" class="form-check-input org-rule-toggle" data-org-id="${org.id}" data-field="alert_on_critical"
                     ${org.alert_on_critical ? 'checked' : ''} onchange="toggleOrgRule(this)" title="Critical CVEs">
@@ -525,21 +641,13 @@ function renderOrgsTable(orgs) {
             </td>
             <td class="text-center">
                 <select class="form-select alert-mode-select" data-org-id="${org.id}" onchange="changeOrgAlertMode(this)">
-                    <option value="" ${!modeValue ? 'selected' : ''}>Global Default</option>
-                    <option value="new_only" ${modeValue === 'new_only' ? 'selected' : ''}>New Only</option>
+                    ${defaultOption}
                     <option value="daily_reminder" ${modeValue === 'daily_reminder' ? 'selected' : ''}>Daily</option>
                     <option value="escalation" ${modeValue === 'escalation' ? 'selected' : ''}>Escalation</option>
                 </select>
             </td>
             <td>${deliveryHtml}</td>
-            <td class="text-center org-actions-cell">
-                <button class="btn btn-outline-primary btn-sm" onclick="openDeliveryModal(${org.id})" title="Edit delivery settings">
-                    <i class="bi bi-pencil"></i>
-                </button>
-                <button class="btn btn-outline-secondary btn-sm" onclick="resetOrgDefaults(${org.id})" title="Reset to global defaults">
-                    <i class="bi bi-arrow-counterclockwise"></i>
-                </button>
-            </td>
+            ${actionsCell}
         </tr>`;
     }).join('');
 }
