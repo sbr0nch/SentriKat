@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session, send_from_directory, current_app, make_response
+from flask import Blueprint, render_template, request, jsonify, redirect, url_for, session, send_from_directory, current_app, make_response, abort
 from app import db, csrf, limiter
 from sqlalchemy import func
 from sqlalchemy.orm import selectinload
@@ -1202,6 +1202,26 @@ def assignments_page():
     roles (M15), so there is no extra gating needed here.
     """
     return render_template('assignments.html')
+
+
+@bp.route('/products/<int:product_id>')
+@login_required
+def product_detail(product_id):
+    """Product detail page - shows full product info, installations, vulnerabilities, version history."""
+    product = Product.query.get_or_404(product_id)
+
+    # Organization isolation: verify user has access
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+    if current_user and not _super_admin_unrestricted():
+        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
+        product_org_ids = [org.id for org in product.organizations.all()]
+        if product.organization_id:
+            product_org_ids.append(product.organization_id)
+        if not any(oid in user_org_ids for oid in product_org_ids):
+            abort(404)
+
+    return render_template('product_detail.html', product_id=product_id)
 
 
 @bp.route('/alerts/settings')
@@ -2422,9 +2442,20 @@ def delete_product_exclusion(exclusion_id):
         if exclusion.organization_id not in accessible_org_ids:
             return jsonify({'error': 'Access denied'}), 403
 
+    exc_vendor = exclusion.vendor
+    exc_product = exclusion.product_name
+    exc_id = exclusion.id
+    exc_org_id = exclusion.organization_id
+
     db.session.delete(exclusion)
     db.session.commit()
-    return jsonify({'success': True, 'message': f'Exclusion removed for {exclusion.vendor} {exclusion.product_name}'})
+
+    from app.logging_config import log_audit_event
+    log_audit_event('DELETE', 'product_exclusions', exc_id,
+                    old_value={'vendor': exc_vendor, 'product_name': exc_product,
+                               'organization_id': exc_org_id})
+
+    return jsonify({'success': True, 'message': f'Exclusion removed for {exc_vendor} {exc_product}'})
 
 
 @bp.route('/api/product-exclusions', methods=['POST'])
@@ -2477,6 +2508,12 @@ def create_product_exclusion():
     )
     db.session.add(exclusion)
     db.session.commit()
+
+    from app.logging_config import log_audit_event
+    log_audit_event('CREATE', 'product_exclusions', exclusion.id,
+                    new_value={'vendor': vendor, 'product_name': product_name,
+                               'organization_id': org_id, 'reason': reason})
+
     return jsonify({'success': True, 'exclusion': exclusion.to_dict()}), 201
 
 
@@ -4478,6 +4515,97 @@ def get_product_installations(product_id):
         },
         'installations': result,
         'total': len(result)
+    })
+
+
+@bp.route('/api/products/<int:product_id>/version-history', methods=['GET'])
+@login_required
+def get_product_version_history(product_id):
+    """Get version change history for a product across all assets."""
+    product = Product.query.get_or_404(product_id)
+
+    # Check access
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    if not _super_admin_unrestricted():
+        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
+        product_org_ids = [org.id for org in product.organizations.all()]
+        if product.organization_id:
+            product_org_ids.append(product.organization_id)
+        if not any(oid in user_org_ids for oid in product_org_ids):
+            return jsonify({'error': 'Access denied'}), 403
+
+    changes = ProductVersionHistory.query.filter_by(product_id=product_id).order_by(
+        ProductVersionHistory.detected_at.desc()
+    ).limit(200).all()
+
+    result = []
+    for ch in changes:
+        asset = Asset.query.get(ch.asset_id)
+        result.append({
+            'id': ch.id,
+            'asset_id': ch.asset_id,
+            'hostname': asset.hostname if asset else 'Unknown',
+            'previous_version': ch.previous_version,
+            'new_version': ch.new_version,
+            'change_type': ch.change_type,
+            'detected_by': ch.detected_by,
+            'detected_at': ch.detected_at.isoformat() if ch.detected_at else None,
+        })
+
+    return jsonify({
+        'history': result,
+        'total': len(result)
+    })
+
+
+@bp.route('/api/products/<int:product_id>/vulnerabilities', methods=['GET'])
+@login_required
+def get_product_vulnerabilities(product_id):
+    """Get vulnerability matches for a specific product."""
+    product = Product.query.get_or_404(product_id)
+
+    # Check access
+    current_user_id = session.get('user_id')
+    current_user = User.query.get(current_user_id)
+
+    if not _super_admin_unrestricted():
+        user_org_ids = [org['id'] for org in current_user.get_all_organizations()]
+        product_org_ids = [org.id for org in product.organizations.all()]
+        if product.organization_id:
+            product_org_ids.append(product.organization_id)
+        if not any(oid in user_org_ids for oid in product_org_ids):
+            return jsonify({'error': 'Access denied'}), 403
+
+    matches = VulnerabilityMatch.query.filter_by(product_id=product_id).all()
+
+    result = []
+    for m in matches:
+        vuln = m.vulnerability
+        result.append({
+            'match_id': m.id,
+            'cve_id': vuln.cve_id,
+            'vulnerability_name': vuln.vulnerability_name,
+            'severity': vuln.severity,
+            'cvss_score': vuln.cvss_score,
+            'epss_score': vuln.epss_score,
+            'is_actively_exploited': vuln.is_actively_exploited,
+            'known_ransomware': vuln.known_ransomware,
+            'acknowledged': m.acknowledged,
+            'match_method': m.match_method,
+            'match_confidence': m.match_confidence,
+            'created_at': m.created_at.isoformat() if m.created_at else None,
+        })
+
+    # Sort: unacknowledged first, then by severity
+    severity_order = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3}
+    result.sort(key=lambda x: (x['acknowledged'], severity_order.get(x['severity'], 4)))
+
+    return jsonify({
+        'vulnerabilities': result,
+        'total': len(result),
+        'unacknowledged': sum(1 for r in result if not r['acknowledged']),
     })
 
 
@@ -6503,7 +6631,17 @@ def test_smtp(org_id):
 @bp.route('/api/organizations/<int:org_id>/alert-logs', methods=['GET'])
 @login_required
 def get_alert_logs(org_id):
-    """Get alert logs for an organization"""
+    """Get alert logs for an organization.
+
+    Query parameters:
+        page: Page number (1-indexed, default 1)
+        per_page: Items per page (default 20, max 100)
+        limit: Legacy parameter -- if page/per_page are absent, limit rows returned (default 50)
+        alert_type: Filter by alert type (critical_cve, new_cve, ransomware, container_vuln)
+        status: Filter by status (success, failed, skipped)
+        date_from: Filter from date (ISO format YYYY-MM-DD)
+        date_to: Filter to date (ISO format YYYY-MM-DD)
+    """
     # Authorization: verify user can access this organization
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
@@ -6514,10 +6652,53 @@ def get_alert_logs(org_id):
         if org_id not in user_org_ids:
             return jsonify({'error': 'Insufficient permissions to view this organization\'s alert logs'}), 403
 
-    limit = request.args.get('limit', 50, type=int)
-    logs = AlertLog.query.filter_by(organization_id=org_id)\
-        .order_by(AlertLog.sent_at.desc()).limit(limit).all()
-    return jsonify([log.to_dict() for log in logs])
+    query = AlertLog.query.filter_by(organization_id=org_id)
+
+    # Apply filters
+    alert_type = request.args.get('alert_type', '').strip()
+    status_filter = request.args.get('status', '').strip()
+    date_from = request.args.get('date_from', '').strip()
+    date_to = request.args.get('date_to', '').strip()
+
+    if alert_type:
+        query = query.filter(AlertLog.alert_type == alert_type)
+    if status_filter:
+        query = query.filter(AlertLog.status == status_filter)
+    if date_from:
+        try:
+            from_dt = datetime.strptime(date_from, '%Y-%m-%d')
+            query = query.filter(AlertLog.sent_at >= from_dt)
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            to_dt = datetime.strptime(date_to, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+            query = query.filter(AlertLog.sent_at <= to_dt)
+        except ValueError:
+            pass
+
+    query = query.order_by(AlertLog.sent_at.desc())
+
+    # Support paginated or legacy limit-based responses
+    page = request.args.get('page', type=int)
+    per_page = request.args.get('per_page', type=int)
+
+    if page is not None or per_page is not None:
+        page = page or 1
+        per_page = min(per_page or 20, 100)
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+        return jsonify({
+            'logs': [log.to_dict() for log in pagination.items],
+            'total': pagination.total,
+            'page': pagination.page,
+            'per_page': per_page,
+            'pages': pagination.pages
+        })
+    else:
+        # Legacy behaviour: return a flat JSON array
+        limit = request.args.get('limit', 50, type=int)
+        logs = query.limit(limit).all()
+        return jsonify([log.to_dict() for log in logs])
 
 # ============================================================================
 # USER MANAGEMENT & AUTHENTICATION API ENDPOINTS

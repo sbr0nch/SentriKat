@@ -13,11 +13,11 @@ Can be run via:
 - Admin API endpoint
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 import logging
 from sqlalchemy import or_
 from app import db
-from app.models import Asset, ProductInstallation, Product, Organization, AgentEvent
+from app.models import Asset, ProductInstallation, Product, Organization, AgentEvent, RiskException
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,7 @@ class MaintenanceResult:
         self.import_queue_cleaned = 0
         self.vulnerabilities_auto_acknowledged = 0
         self.vulnerabilities_upgraded_acknowledged = 0
+        self.risk_exceptions_expired = 0
         self.errors = []
 
     def to_dict(self):
@@ -54,6 +55,7 @@ class MaintenanceResult:
             'import_queue_cleaned': self.import_queue_cleaned,
             'vulnerabilities_auto_acknowledged': self.vulnerabilities_auto_acknowledged,
             'vulnerabilities_upgraded_acknowledged': self.vulnerabilities_upgraded_acknowledged,
+            'risk_exceptions_expired': self.risk_exceptions_expired,
             'errors': self.errors,
             'success': len(self.errors) == 0
         }
@@ -552,6 +554,39 @@ def auto_acknowledge_upgraded_vulnerabilities(dry_run=False):
     return count
 
 
+def auto_expire_risk_exceptions(dry_run=False):
+    """
+    Expire all active RiskExceptions whose expires_at date has passed.
+
+    This is the scheduled (nightly) counterpart of the JIT expiry in
+    remediation_api.list_risk_exceptions(). Running it in maintenance
+    ensures that downstream queries (filters, dashboards) see consistent
+    status values even when no user has hit the list endpoint recently.
+
+    Args:
+        dry_run: If True, don't actually modify, just count
+
+    Returns:
+        Number of risk exceptions expired
+    """
+    today = date.today()
+    query = RiskException.query.filter(
+        RiskException.status == 'active',
+        RiskException.expires_at.isnot(None),
+        RiskException.expires_at < today,
+    )
+
+    count = query.count()
+
+    if count > 0 and not dry_run:
+        for exc in query.all():
+            exc.status = 'expired'
+        db.session.commit()
+        logger.info(f"Auto-expired {count} risk exceptions past their expiry date")
+
+    return count
+
+
 def run_full_maintenance(dry_run=False, settings=None):
     """
     Run all maintenance tasks.
@@ -651,6 +686,13 @@ def run_full_maintenance(dry_run=False, settings=None):
     except Exception as e:
         result.errors.append(f"Upgraded vulnerability auto-acknowledge failed: {str(e)}")
         logger.error(f"Upgraded vulnerability auto-acknowledge failed: {e}", exc_info=True)
+
+    try:
+        # 8. Auto-expire risk exceptions past their expiry date
+        result.risk_exceptions_expired = auto_expire_risk_exceptions(dry_run=dry_run)
+    except Exception as e:
+        result.errors.append(f"Risk exception auto-expire failed: {str(e)}")
+        logger.error(f"Risk exception auto-expire failed: {e}", exc_info=True)
 
     return result
 

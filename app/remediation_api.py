@@ -1026,6 +1026,13 @@ def create_risk_exception():
     db.session.add(exception)
     db.session.commit()
 
+    from app.logging_config import log_audit_event
+    log_audit_event('CREATE', 'risk_exceptions', exception.id,
+                    new_value={'cve_id': data.get('cve_id'), 'product_id': data.get('product_id'),
+                               'match_id': data.get('match_id'), 'approved_by': approved_by,
+                               'expires_at': str(expires_at) if expires_at else None,
+                               'organization_id': org_id})
+
     return jsonify(exception.to_dict()), 201
 
 
@@ -1045,6 +1052,12 @@ def update_risk_exception(exception_id):
     data = request.get_json()
     if not data:
         return jsonify({'error': 'No data provided'}), 400
+
+    old_values = {
+        'status': exception.status,
+        'justification': exception.justification,
+        'expires_at': str(exception.expires_at) if exception.expires_at else None,
+    }
 
     if 'status' in data:
         allowed_statuses = ('active', 'revoked', 'expired')
@@ -1067,6 +1080,15 @@ def update_risk_exception(exception_id):
             exception.expires_at = None
 
     db.session.commit()
+
+    from app.logging_config import log_audit_event
+    log_audit_event('UPDATE', 'risk_exceptions', exception.id,
+                    old_value=old_values,
+                    new_value={'status': exception.status,
+                               'justification': exception.justification,
+                               'expires_at': str(exception.expires_at) if exception.expires_at else None,
+                               'organization_id': org_id})
+
     return jsonify(exception.to_dict())
 
 
@@ -1083,8 +1105,21 @@ def delete_risk_exception(exception_id):
         id=exception_id, organization_id=org_id
     ).first_or_404()
 
+    exc_id = exception.id
+    exc_data = {
+        'cve_id': exception.cve_id,
+        'product_id': exception.product_id,
+        'match_id': exception.match_id,
+        'approved_by': exception.approved_by,
+        'organization_id': org_id,
+    }
+
     db.session.delete(exception)
     db.session.commit()
+
+    from app.logging_config import log_audit_event
+    log_audit_event('DELETE', 'risk_exceptions', exc_id, old_value=exc_data)
+
     return jsonify({'status': 'deleted'})
 
 

@@ -416,7 +416,14 @@ class Product(db.Model):
             'effective_cpe_vendor': eff_cpe_vendor,
             'effective_cpe_product': eff_cpe_product,
             'effective_cpe_uri': eff_cpe_uri,
-            'has_cpe': self.has_cpe()
+            'has_cpe': self.has_cpe(),
+            # Source and approval fields
+            'source': self.source or 'manual',
+            'approval_status': self.approval_status or 'approved',
+            'pending_since': self.pending_since.isoformat() if self.pending_since else None,
+            'reviewed_at': self.reviewed_at.isoformat() if self.reviewed_at else None,
+            'last_agent_report': self.last_agent_report.isoformat() if self.last_agent_report else None,
+            'auto_disabled': self.auto_disabled or False,
         }
 
         # Optionally include platform summary (extra query)

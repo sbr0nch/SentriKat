@@ -1295,6 +1295,87 @@ def get_alert_org_overrides():
         return jsonify({'error': 'Failed to load organization data'}), 500
 
 
+@settings_bp.route('/alerts/history', methods=['GET'])
+@saas_admin_or_org_admin
+def get_alert_history():
+    """Get alert delivery history across all accessible organizations.
+
+    Query parameters:
+        page: Page number (1-indexed, default 1)
+        per_page: Items per page (default 20, max 100)
+        alert_type: Filter by alert type (critical_cve, new_cve, ransomware, container_vuln)
+        status: Filter by status (success, failed, skipped)
+        date_from: Filter from date (ISO format YYYY-MM-DD)
+        date_to: Filter to date (ISO format YYYY-MM-DD)
+    """
+    from app.models import AlertLog, Organization
+    from app.saas import get_scoped_org_id
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        per_page = min(per_page, 100)
+        alert_type = request.args.get('alert_type', '').strip()
+        status = request.args.get('status', '').strip()
+        date_from = request.args.get('date_from', '').strip()
+        date_to = request.args.get('date_to', '').strip()
+
+        # Scope to accessible organizations
+        scoped_org_id = get_scoped_org_id() if is_saas_mode() else None
+        if scoped_org_id:
+            query = AlertLog.query.filter(AlertLog.organization_id == scoped_org_id)
+        else:
+            # On-premise: admin sees all orgs
+            query = AlertLog.query
+
+        # Apply filters
+        if alert_type:
+            query = query.filter(AlertLog.alert_type == alert_type)
+        if status:
+            query = query.filter(AlertLog.status == status)
+        if date_from:
+            try:
+                from_dt = datetime.strptime(date_from, '%Y-%m-%d')
+                query = query.filter(AlertLog.sent_at >= from_dt)
+            except ValueError:
+                pass
+        if date_to:
+            try:
+                to_dt = datetime.strptime(date_to, '%Y-%m-%d')
+                # Include the entire end date by adding one day
+                to_dt = to_dt.replace(hour=23, minute=59, second=59)
+                query = query.filter(AlertLog.sent_at <= to_dt)
+            except ValueError:
+                pass
+
+        # Order and paginate
+        query = query.order_by(AlertLog.sent_at.desc())
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
+        # Fetch org names for display
+        org_ids = list(set(log.organization_id for log in pagination.items))
+        org_names = {}
+        if org_ids:
+            orgs = Organization.query.filter(Organization.id.in_(org_ids)).all()
+            org_names = {o.id: o.display_name or o.name for o in orgs}
+
+        logs = []
+        for log in pagination.items:
+            d = log.to_dict()
+            d['organization_name'] = org_names.get(log.organization_id, f'Org #{log.organization_id}')
+            logs.append(d)
+
+        return jsonify({
+            'logs': logs,
+            'total': pagination.total,
+            'page': pagination.page,
+            'per_page': per_page,
+            'pages': pagination.pages
+        })
+    except Exception as e:
+        logger.exception("Failed to get alert history")
+        return jsonify({'error': 'Failed to load alert history'}), 500
+
+
 @settings_bp.route('/alerts/org/<int:org_id>/rules', methods=['PATCH'])
 @saas_admin_or_org_admin
 def update_org_alert_rules(org_id):

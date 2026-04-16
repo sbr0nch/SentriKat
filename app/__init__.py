@@ -293,6 +293,28 @@ def _apply_data_migrations(logger, db_uri):
                 pass
 
 
+def _stamp_alembic_head(app, logger):
+    """Stamp the Alembic version table to 'head' if not yet stamped.
+
+    This is a one-time operation that transitions existing databases to
+    Alembic-managed migrations. New databases (created via db.create_all())
+    also get stamped so that future `flask db upgrade` commands work.
+    """
+    try:
+        from flask_migrate import stamp
+        from alembic.migration import MigrationContext
+        with app.extensions['migrate'].db.engine.connect() as conn:
+            ctx = MigrationContext.configure(conn)
+            current_rev = ctx.get_current_revision()
+            if current_rev is None:
+                stamp(revision='head')
+                logger.info("Alembic: stamped database at 'head' (baseline)")
+            else:
+                logger.debug(f"Alembic: already at revision {current_rev}")
+    except Exception as e:
+        logger.debug(f"Alembic stamp skipped: {e}")
+
+
 def _ea_backfill_compliance_pack(logger):
     """During Early Access every tenant gets the Compliance Pack for free.
 
@@ -799,6 +821,9 @@ def create_app(config_class=Config):
                 import logging
                 logging.getLogger(__name__).info(f"Creating new database at: {db_path}")
                 db.create_all()
+
+                # Stamp Alembic head so future migrations start from here
+                _stamp_alembic_head(app, logging.getLogger(__name__))
             else:
                 # Database exists - run migrations for new columns
                 import logging
@@ -807,6 +832,9 @@ def create_app(config_class=Config):
 
                 # Apply schema migrations for new columns (SQLite doesn't auto-add columns)
                 _apply_schema_migrations(logger, db_uri)
+
+                # Stamp Alembic if not yet stamped (one-time transition)
+                _stamp_alembic_head(app, logger)
 
             # Sync subscription plans for SQLite too (needed for SaaS dev/test)
             try:
@@ -831,6 +859,9 @@ def create_app(config_class=Config):
             # Then apply schema migrations for new columns
             logger.info("Applying schema migrations for PostgreSQL...")
             _apply_schema_migrations(logger, db_uri)
+
+            # Stamp Alembic if not yet stamped (one-time transition)
+            _stamp_alembic_head(app, logger)
 
             # Sync subscription plan features/limits with code defaults
             # This ensures DB plans stay aligned when DEFAULT_PLANS changes

@@ -1,0 +1,573 @@
+{% extends 'base.html' %}
+
+{% block title %}Product Detail - SentriKat{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin">Inventory</a></li>
+<li class="breadcrumb-item active" aria-current="page" id="breadcrumbProductName">Product</li>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .product-header { margin-bottom: 1.5rem; }
+    .product-header h2 { margin-bottom: 0.25rem; }
+    .info-card { border: 1px solid var(--border-color); border-radius: 0.5rem; padding: 1rem 1.25rem; background: var(--surface-color); }
+    .info-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 0.15rem; }
+    .info-value { font-size: 0.95rem; font-weight: 500; }
+
+    .criticality-badge { padding: 0.25rem 0.6rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+    .criticality-critical { background: var(--critical-color); color: #fff; }
+    .criticality-high { background: var(--high-color); color: #fff; }
+    .criticality-medium { background: var(--medium-color); color: #fff; }
+    .criticality-low { background: var(--low-color); color: #fff; }
+
+    .severity-badge { padding: 0.2rem 0.5rem; border-radius: 0.2rem; font-size: 0.75rem; font-weight: 600; }
+    .severity-CRITICAL { background: var(--critical-color); color: #fff; }
+    .severity-HIGH { background: var(--high-color); color: #fff; }
+    .severity-MEDIUM { background: var(--medium-color); color: #fff; }
+    .severity-LOW { background: var(--low-color); color: #fff; }
+
+    .status-active { color: var(--success-color); }
+    .status-inactive { color: var(--danger-color); }
+
+    .tab-content .table { margin-bottom: 0; }
+    .tab-content .table th { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); border-bottom-width: 2px; }
+    .tab-content .table td { vertical-align: middle; font-size: 0.9rem; }
+
+    .timeline-item { position: relative; padding-left: 2rem; padding-bottom: 1.25rem; border-left: 2px solid var(--border-color); }
+    .timeline-item:last-child { border-left-color: transparent; padding-bottom: 0; }
+    .timeline-dot { position: absolute; left: -0.45rem; top: 0.15rem; width: 0.75rem; height: 0.75rem; border-radius: 50%; border: 2px solid var(--border-color); background: var(--surface-color); }
+    .timeline-dot.update { border-color: var(--info-color); background: var(--info-color); }
+    .timeline-dot.install { border-color: var(--success-color); background: var(--success-color); }
+    .timeline-dot.downgrade { border-color: var(--warning-color); background: var(--warning-color); }
+    .timeline-dot.uninstall { border-color: var(--danger-color); background: var(--danger-color); }
+
+    .confidence-badge { font-size: 0.7rem; padding: 0.15rem 0.4rem; border-radius: 0.2rem; }
+    .confidence-high { background: rgba(5, 150, 105, 0.15); color: var(--success-color); }
+    .confidence-medium { background: rgba(217, 119, 6, 0.15); color: var(--warning-color); }
+    .confidence-low { background: rgba(185, 28, 28, 0.15); color: var(--danger-color); }
+
+    .empty-state { text-align: center; padding: 3rem 1rem; color: var(--text-muted); }
+    .empty-state i { font-size: 2.5rem; margin-bottom: 0.75rem; display: block; opacity: 0.4; }
+    .org-badge { font-size: 0.8rem; padding: 0.3rem 0.6rem; }
+    .back-link { text-decoration: none; color: var(--text-muted); font-size: 0.9rem; }
+    .back-link:hover { color: var(--primary-color); }
+    .vuln-ack { opacity: 0.55; }
+    .match-method { font-size: 0.7rem; padding: 0.1rem 0.35rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fade-in">
+    <!-- Back link -->
+    <a href="/admin" class="back-link d-inline-flex align-items-center mb-3">
+        <i class="bi bi-arrow-left me-1"></i> Back to Inventory
+    </a>
+
+    <!-- Loading state -->
+    <div id="productLoading" class="text-center py-5">
+        <div class="spinner-border text-primary" role="status"></div>
+        <p class="text-muted mt-2">Loading product details...</p>
+    </div>
+
+    <!-- Error state -->
+    <div id="productError" class="d-none">
+        <div class="alert alert-danger">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            <span id="productErrorMsg">Failed to load product details.</span>
+        </div>
+    </div>
+
+    <!-- Product content (hidden until loaded) -->
+    <div id="productContent" class="d-none">
+        <!-- Product Header -->
+        <div class="product-header">
+            <div class="d-flex align-items-start justify-content-between flex-wrap gap-2">
+                <div>
+                    <h2 class="fw-bold mb-1">
+                        <span id="headerProductName"></span>
+                        <span id="headerCriticalityBadge" class="criticality-badge ms-2"></span>
+                    </h2>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <span class="text-muted" id="headerVendor"></span>
+                        <span class="text-muted">|</span>
+                        <span id="headerVersion" class="text-muted"></span>
+                        <span class="text-muted">|</span>
+                        <span id="headerActiveStatus"></span>
+                    </div>
+                </div>
+                <a href="/admin" class="btn btn-sm btn-outline-secondary" id="editProductBtn" style="display:none;">
+                    <i class="bi bi-pencil me-1"></i> Edit in Inventory
+                </a>
+            </div>
+        </div>
+
+        <!-- Info Cards Row -->
+        <div class="row g-3 mb-4">
+            <!-- CPE Info -->
+            <div class="col-md-4">
+                <div class="info-card h-100">
+                    <h6 class="fw-semibold mb-3"><i class="bi bi-fingerprint me-1"></i> CPE Mapping</h6>
+                    <div class="mb-2">
+                        <div class="info-label">CPE Vendor</div>
+                        <div class="info-value" id="infoCpeVendor">-</div>
+                    </div>
+                    <div class="mb-2">
+                        <div class="info-label">CPE Product</div>
+                        <div class="info-value" id="infoCpeProduct">-</div>
+                    </div>
+                    <div>
+                        <div class="info-label">Match Type</div>
+                        <div class="info-value" id="infoMatchType">-</div>
+                    </div>
+                </div>
+            </div>
+            <!-- Source Info -->
+            <div class="col-md-4">
+                <div class="info-card h-100">
+                    <h6 class="fw-semibold mb-3"><i class="bi bi-info-circle me-1"></i> Source Info</h6>
+                    <div class="mb-2">
+                        <div class="info-label">Source</div>
+                        <div class="info-value" id="infoSource">-</div>
+                    </div>
+                    <div class="mb-2">
+                        <div class="info-label">Approval Status</div>
+                        <div class="info-value" id="infoApproval">-</div>
+                    </div>
+                    <div>
+                        <div class="info-label">Last Agent Report</div>
+                        <div class="info-value" id="infoLastAgent">-</div>
+                    </div>
+                </div>
+            </div>
+            <!-- Stats -->
+            <div class="col-md-4">
+                <div class="info-card h-100">
+                    <h6 class="fw-semibold mb-3"><i class="bi bi-bar-chart me-1"></i> Summary</h6>
+                    <div class="mb-2">
+                        <div class="info-label">Installations</div>
+                        <div class="info-value" id="infoInstallCount"><span class="spinner-border spinner-border-sm"></span></div>
+                    </div>
+                    <div class="mb-2">
+                        <div class="info-label">Open Vulnerabilities</div>
+                        <div class="info-value" id="infoVulnCount"><span class="spinner-border spinner-border-sm"></span></div>
+                    </div>
+                    <div>
+                        <div class="info-label">Platforms</div>
+                        <div class="info-value" id="infoPlatforms">-</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <ul class="nav nav-tabs" role="tablist">
+            <li class="nav-item">
+                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#installationsTab" type="button" role="tab">
+                    <i class="bi bi-hdd-rack me-1"></i> Installations <span class="badge bg-secondary ms-1" id="installBadge">-</span>
+                </button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#vulnerabilitiesTab" type="button" role="tab">
+                    <i class="bi bi-shield-exclamation me-1"></i> Vulnerabilities <span class="badge bg-danger ms-1" id="vulnBadge">-</span>
+                </button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#versionHistoryTab" type="button" role="tab">
+                    <i class="bi bi-clock-history me-1"></i> Version History
+                </button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#organizationsTab" type="button" role="tab">
+                    <i class="bi bi-building me-1"></i> Organizations <span class="badge bg-secondary ms-1" id="orgBadge">-</span>
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content border border-top-0 rounded-bottom" style="background: var(--surface-color);">
+            <!-- Installations Tab -->
+            <div class="tab-pane fade show active p-3" id="installationsTab" role="tabpanel">
+                <div id="installationsLoading" class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm text-primary"></div>
+                    <span class="text-muted ms-2">Loading installations...</span>
+                </div>
+                <div id="installationsContent" class="d-none">
+                    <div class="table-responsive">
+                        <table class="table table-hover table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Hostname</th>
+                                    <th>IP Address</th>
+                                    <th>Version</th>
+                                    <th>OS</th>
+                                    <th>Vulnerable</th>
+                                    <th>Last Seen</th>
+                                </tr>
+                            </thead>
+                            <tbody id="installationsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="installationsEmpty" class="d-none empty-state">
+                    <i class="bi bi-hdd-rack"></i>
+                    <p>No active installations found for this product.</p>
+                </div>
+            </div>
+
+            <!-- Vulnerabilities Tab -->
+            <div class="tab-pane fade p-3" id="vulnerabilitiesTab" role="tabpanel">
+                <div id="vulnsLoading" class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm text-primary"></div>
+                    <span class="text-muted ms-2">Loading vulnerabilities...</span>
+                </div>
+                <div id="vulnsContent" class="d-none">
+                    <div class="table-responsive">
+                        <table class="table table-hover table-sm">
+                            <thead>
+                                <tr>
+                                    <th>CVE ID</th>
+                                    <th>Severity</th>
+                                    <th>CVSS</th>
+                                    <th>EPSS</th>
+                                    <th>Match</th>
+                                    <th>Status</th>
+                                    <th>Exploited</th>
+                                    <th>Found</th>
+                                </tr>
+                            </thead>
+                            <tbody id="vulnsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="vulnsEmpty" class="d-none empty-state">
+                    <i class="bi bi-shield-check"></i>
+                    <p>No vulnerability matches found for this product.</p>
+                </div>
+            </div>
+
+            <!-- Version History Tab -->
+            <div class="tab-pane fade p-3" id="versionHistoryTab" role="tabpanel">
+                <div id="historyLoading" class="text-center py-4">
+                    <div class="spinner-border spinner-border-sm text-primary"></div>
+                    <span class="text-muted ms-2">Loading version history...</span>
+                </div>
+                <div id="historyContent" class="d-none"></div>
+                <div id="historyEmpty" class="d-none empty-state">
+                    <i class="bi bi-clock-history"></i>
+                    <p>No version changes recorded for this product.</p>
+                </div>
+            </div>
+
+            <!-- Organizations Tab -->
+            <div class="tab-pane fade p-3" id="organizationsTab" role="tabpanel">
+                <div id="orgsContent"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    const PRODUCT_ID = {{ product_id }};
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    function formatDate(iso) {
+        if (!iso) return '-';
+        try {
+            const d = new Date(iso);
+            return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+        } catch { return iso; }
+    }
+
+    function formatDateTime(iso) {
+        if (!iso) return '-';
+        try {
+            const d = new Date(iso);
+            return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        } catch { return iso; }
+    }
+
+    function timeAgo(iso) {
+        if (!iso) return '-';
+        try {
+            const d = new Date(iso);
+            const now = new Date();
+            const diffMs = now - d;
+            const diffMins = Math.floor(diffMs / 60000);
+            if (diffMins < 1) return 'just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            const diffHrs = Math.floor(diffMins / 60);
+            if (diffHrs < 24) return `${diffHrs}h ago`;
+            const diffDays = Math.floor(diffHrs / 24);
+            if (diffDays < 30) return `${diffDays}d ago`;
+            return formatDate(iso);
+        } catch { return iso; }
+    }
+
+    const platformIcons = {
+        'windows': '<i class="bi bi-windows text-info" title="Windows"></i>',
+        'linux': '<i class="bi bi-ubuntu text-warning" title="Linux"></i>',
+        'macos': '<i class="bi bi-apple text-secondary" title="macOS"></i>',
+        'bsd': '<i class="bi bi-terminal text-danger" title="BSD"></i>',
+        'unix': '<i class="bi bi-terminal-fill text-success" title="Unix"></i>',
+    };
+
+    // ---- Load product data ----
+    async function loadProduct() {
+        try {
+            const resp = await fetch(`/api/products/${PRODUCT_ID}`);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const p = await resp.json();
+
+            document.getElementById('productLoading').classList.add('d-none');
+            document.getElementById('productContent').classList.remove('d-none');
+
+            // Breadcrumb
+            document.getElementById('breadcrumbProductName').textContent = `${p.vendor} ${p.product_name}`;
+
+            // Header
+            document.getElementById('headerProductName').textContent = p.product_name;
+            document.getElementById('headerVendor').textContent = p.vendor;
+            document.getElementById('headerVersion').textContent = p.version ? `v${p.version}` : 'No version';
+
+            const critBadge = document.getElementById('headerCriticalityBadge');
+            critBadge.textContent = (p.criticality || 'medium').toUpperCase();
+            critBadge.className = `criticality-badge ms-2 criticality-${p.criticality || 'medium'}`;
+
+            const activeEl = document.getElementById('headerActiveStatus');
+            if (p.active) {
+                activeEl.innerHTML = '<i class="bi bi-check-circle-fill status-active me-1"></i><span class="status-active fw-semibold">Active</span>';
+            } else {
+                activeEl.innerHTML = '<i class="bi bi-x-circle-fill status-inactive me-1"></i><span class="status-inactive fw-semibold">Inactive</span>';
+                if (p.auto_disabled) {
+                    activeEl.innerHTML += ' <span class="badge bg-warning text-dark ms-1" title="Auto-disabled due to no agent reports">Auto-disabled</span>';
+                }
+            }
+
+            document.getElementById('editProductBtn').style.display = '';
+
+            // CPE info
+            document.getElementById('infoCpeVendor').textContent = p.effective_cpe_vendor || p.cpe_vendor || '-';
+            document.getElementById('infoCpeProduct').textContent = p.effective_cpe_product || p.cpe_product || '-';
+            const matchTypeMap = { 'auto': 'Auto', 'cpe': 'CPE', 'keyword': 'Keyword', 'both': 'CPE + Keyword' };
+            document.getElementById('infoMatchType').textContent = matchTypeMap[p.match_type] || p.match_type || '-';
+
+            // Source info
+            const sourceEl = document.getElementById('infoSource');
+            if (p.source === 'agent') {
+                sourceEl.innerHTML = '<i class="bi bi-robot me-1"></i> Agent';
+            } else {
+                sourceEl.innerHTML = '<i class="bi bi-person me-1"></i> Manual';
+            }
+
+            const approvalEl = document.getElementById('infoApproval');
+            const approvalMap = {
+                'approved': '<span class="badge bg-success">Approved</span>',
+                'pending': '<span class="badge bg-warning text-dark">Pending</span>',
+                'rejected': '<span class="badge bg-danger">Rejected</span>',
+            };
+            approvalEl.innerHTML = approvalMap[p.approval_status] || escapeHtml(p.approval_status || '-');
+
+            document.getElementById('infoLastAgent').textContent = p.last_agent_report ? timeAgo(p.last_agent_report) : 'Never';
+
+            // Platforms
+            if (p.platforms && p.platforms.length > 0) {
+                document.getElementById('infoPlatforms').innerHTML = p.platforms.map(pl => {
+                    const icon = platformIcons[pl.toLowerCase()];
+                    return icon ? `${icon} ${escapeHtml(pl)}` : escapeHtml(pl);
+                }).join(', ');
+            }
+
+            // Organizations tab (available immediately from product data)
+            renderOrganizations(p.organizations || []);
+
+            // Load tab data in parallel
+            loadInstallations();
+            loadVulnerabilities();
+            loadVersionHistory();
+
+        } catch (err) {
+            document.getElementById('productLoading').classList.add('d-none');
+            document.getElementById('productError').classList.remove('d-none');
+            document.getElementById('productErrorMsg').textContent = `Failed to load product: ${err.message}`;
+        }
+    }
+
+    // ---- Installations ----
+    async function loadInstallations() {
+        try {
+            const resp = await fetch(`/api/products/${PRODUCT_ID}/installations`);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            const items = data.installations || [];
+
+            document.getElementById('installationsLoading').classList.add('d-none');
+            document.getElementById('installBadge').textContent = items.length;
+            document.getElementById('infoInstallCount').textContent = items.length;
+
+            if (items.length === 0) {
+                document.getElementById('installationsEmpty').classList.remove('d-none');
+                return;
+            }
+
+            document.getElementById('installationsContent').classList.remove('d-none');
+            const tbody = document.getElementById('installationsBody');
+            tbody.innerHTML = items.map(inst => {
+                const vulnBadge = inst.is_vulnerable
+                    ? `<span class="badge bg-danger">${inst.vulnerability_count} CVE${inst.vulnerability_count !== 1 ? 's' : ''}</span>`
+                    : '<span class="text-muted">No</span>';
+                const osDisplay = [inst.os_name, inst.os_version].filter(Boolean).join(' ') || '-';
+                return `<tr>
+                    <td class="fw-semibold">${escapeHtml(inst.hostname)}</td>
+                    <td>${escapeHtml(inst.ip_address || '-')}</td>
+                    <td><code>${escapeHtml(inst.version || '-')}</code></td>
+                    <td>${escapeHtml(osDisplay)}</td>
+                    <td>${vulnBadge}</td>
+                    <td title="${escapeHtml(inst.last_seen_at || '')}">${timeAgo(inst.last_seen_at)}</td>
+                </tr>`;
+            }).join('');
+        } catch (err) {
+            document.getElementById('installationsLoading').innerHTML =
+                `<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> Error: ${escapeHtml(err.message)}</span>`;
+        }
+    }
+
+    // ---- Vulnerabilities ----
+    async function loadVulnerabilities() {
+        try {
+            const resp = await fetch(`/api/products/${PRODUCT_ID}/vulnerabilities`);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            const items = data.vulnerabilities || [];
+
+            document.getElementById('vulnsLoading').classList.add('d-none');
+            document.getElementById('vulnBadge').textContent = data.unacknowledged || 0;
+            document.getElementById('infoVulnCount').textContent = data.unacknowledged || 0;
+
+            if (items.length === 0) {
+                document.getElementById('vulnsEmpty').classList.remove('d-none');
+                return;
+            }
+
+            document.getElementById('vulnsContent').classList.remove('d-none');
+            const tbody = document.getElementById('vulnsBody');
+            tbody.innerHTML = items.map(v => {
+                const rowClass = v.acknowledged ? 'vuln-ack' : '';
+                const severityClass = `severity-${(v.severity || '').toUpperCase()}`;
+                const statusBadge = v.acknowledged
+                    ? '<span class="badge bg-secondary">Acknowledged</span>'
+                    : '<span class="badge bg-warning text-dark">Open</span>';
+                const exploitedBadge = v.is_actively_exploited
+                    ? '<span class="badge bg-danger">Yes</span>'
+                    : (v.known_ransomware ? '<span class="badge bg-dark">Ransomware</span>' : '<span class="text-muted">No</span>');
+                const confidenceClass = `confidence-${v.match_confidence || 'medium'}`;
+                const epssDisplay = v.epss_score != null ? (v.epss_score * 100).toFixed(1) + '%' : '-';
+
+                return `<tr class="${rowClass}">
+                    <td><a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(v.cve_id)}" target="_blank" rel="noopener" class="fw-semibold">${escapeHtml(v.cve_id)}</a></td>
+                    <td><span class="severity-badge ${severityClass}">${escapeHtml(v.severity || '-')}</span></td>
+                    <td>${v.cvss_score != null ? v.cvss_score.toFixed(1) : '-'}</td>
+                    <td>${epssDisplay}</td>
+                    <td>
+                        <span class="badge match-method bg-secondary">${escapeHtml(v.match_method || '-')}</span>
+                        <span class="confidence-badge ${confidenceClass}">${escapeHtml(v.match_confidence || '-')}</span>
+                    </td>
+                    <td>${statusBadge}</td>
+                    <td>${exploitedBadge}</td>
+                    <td title="${escapeHtml(v.created_at || '')}">${formatDate(v.created_at)}</td>
+                </tr>`;
+            }).join('');
+        } catch (err) {
+            document.getElementById('vulnsLoading').innerHTML =
+                `<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> Error: ${escapeHtml(err.message)}</span>`;
+        }
+    }
+
+    // ---- Version History ----
+    async function loadVersionHistory() {
+        try {
+            const resp = await fetch(`/api/products/${PRODUCT_ID}/version-history`);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            const items = data.history || [];
+
+            document.getElementById('historyLoading').classList.add('d-none');
+
+            if (items.length === 0) {
+                document.getElementById('historyEmpty').classList.remove('d-none');
+                return;
+            }
+
+            document.getElementById('historyContent').classList.remove('d-none');
+            const container = document.getElementById('historyContent');
+
+            const changeTypeLabels = {
+                'install': 'Installed',
+                'update': 'Updated',
+                'downgrade': 'Downgraded',
+                'reinstall': 'Reinstalled',
+                'uninstall': 'Uninstalled',
+            };
+
+            container.innerHTML = '<div class="py-2">' + items.map(ch => {
+                const dotClass = ch.change_type || 'update';
+                const label = changeTypeLabels[ch.change_type] || ch.change_type || 'Changed';
+                const versionInfo = ch.previous_version
+                    ? `<code>${escapeHtml(ch.previous_version)}</code> <i class="bi bi-arrow-right"></i> <code>${escapeHtml(ch.new_version)}</code>`
+                    : `<code>${escapeHtml(ch.new_version)}</code>`;
+
+                return `<div class="timeline-item">
+                    <div class="timeline-dot ${escapeHtml(dotClass)}"></div>
+                    <div class="d-flex justify-content-between align-items-start flex-wrap">
+                        <div>
+                            <strong>${escapeHtml(label)}</strong> on
+                            <span class="fw-semibold">${escapeHtml(ch.hostname)}</span>
+                            <div class="mt-1">${versionInfo}</div>
+                        </div>
+                        <small class="text-muted" title="${escapeHtml(ch.detected_at || '')}">${timeAgo(ch.detected_at)}</small>
+                    </div>
+                </div>`;
+            }).join('') + '</div>';
+        } catch (err) {
+            document.getElementById('historyLoading').innerHTML =
+                `<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> Error: ${escapeHtml(err.message)}</span>`;
+        }
+    }
+
+    // ---- Organizations ----
+    function renderOrganizations(orgs) {
+        document.getElementById('orgBadge').textContent = orgs.length;
+        const container = document.getElementById('orgsContent');
+
+        if (orgs.length === 0) {
+            container.innerHTML = '<div class="empty-state"><i class="bi bi-building"></i><p>No organizations assigned.</p></div>';
+            return;
+        }
+
+        container.innerHTML = '<div class="d-flex flex-wrap gap-2">' +
+            orgs.map(org => `<span class="badge bg-primary org-badge"><i class="bi bi-building me-1"></i>${escapeHtml(org.display_name || org.name)}</span>`).join('') +
+            '</div>';
+    }
+
+    // Lazy-load tabs on first click
+    let tabsLoaded = { installations: true, vulnerabilities: false, versionHistory: false, organizations: true };
+    document.querySelectorAll('[data-bs-toggle="tab"]').forEach(tab => {
+        tab.addEventListener('shown.bs.tab', function() {
+            // Tabs are loaded on initial page load, no lazy loading needed
+        });
+    });
+
+    // Init
+    loadProduct();
+})();
+</script>
+{% endblock %}
