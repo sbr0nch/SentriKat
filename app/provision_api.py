@@ -29,7 +29,7 @@ from functools import wraps
 
 from flask import Blueprint, request, jsonify
 from app import db, csrf, limiter
-from app.models import Organization, User, Subscription, SubscriptionPlan, UserOrganization, SystemSettings
+from app.models import Organization, User, Subscription, SubscriptionPlan, UserOrganization, SystemSettings, Asset, Product
 from app.saas import is_saas_mode
 
 # B8: idempotency keys are stored in system_settings with this prefix so we
@@ -852,6 +852,71 @@ def list_plans():
 # The license server calls this endpoint to enable or disable paid add-ons
 # (e.g. the Compliance Pack) on a tenant's subscription. Add-ons are stored
 # as a JSON dict on ``subscription.addons`` and layered on top of the base
+@provision_bp.route('/usage/<int:org_id>', methods=['GET'])
+@limiter.limit("30/minute")
+@_require_provision_key
+def get_usage_snapshot(org_id):
+    """Current usage snapshot for a tenant — used by admin portal "Usage" button.
+
+    Returns simple counts vs limits for agents, users, products, organizations.
+    Limits of -1 mean unlimited (returned as null in JSON).
+
+    Response (200):
+        {
+            "agents_used": 3, "agents_limit": 25,
+            "users_used": 2, "users_limit": 5,
+            "products_used": 12, "products_limit": null,
+            "organizations_used": 1, "organizations_limit": null,
+            "storage_used_mb": 0, "storage_limit_mb": null
+        }
+    """
+    org = Organization.query.get(org_id)
+    if not org:
+        return jsonify({'error': 'Organization not found'}), 404
+
+    sub = Subscription.query.filter_by(organization_id=org_id).first()
+
+    # Counts
+    agents_used = Asset.query.filter_by(organization_id=org_id).count()
+    users_used = User.query.filter_by(organization_id=org_id, is_active=True).count()
+    products_used = Product.query.filter(
+        Product.organizations.any(Organization.id == org_id)
+    ).count()
+    # Fall back to legacy FK count if M2M returns 0
+    if products_used == 0:
+        products_used = Product.query.filter_by(organization_id=org_id).count()
+    orgs_used = 1  # The org itself; multi-org tenants count child orgs separately
+
+    # Limits from plan (-1 = unlimited → null in response)
+    def _limit(val):
+        return None if val is None or val < 0 else val
+
+    if sub and sub.plan:
+        plan = sub.plan
+        return jsonify({
+            'agents_used': agents_used,
+            'agents_limit': _limit(plan.max_agents),
+            'users_used': users_used,
+            'users_limit': _limit(plan.max_users),
+            'products_used': products_used,
+            'products_limit': _limit(plan.max_products),
+            'organizations_used': orgs_used,
+            'organizations_limit': _limit(plan.max_organizations),
+            'storage_used_mb': 0,
+            'storage_limit_mb': _limit(plan.max_storage_mb),
+        })
+
+    # No subscription — return counts with no limits
+    return jsonify({
+        'agents_used': agents_used, 'agents_limit': None,
+        'users_used': users_used, 'users_limit': None,
+        'products_used': products_used, 'products_limit': None,
+        'organizations_used': orgs_used, 'organizations_limit': None,
+        'storage_used_mb': 0, 'storage_limit_mb': None,
+    })
+
+
+# =============================================================================
 # plan's feature flags by ``Subscription.has_feature()``.
 # =============================================================================
 
