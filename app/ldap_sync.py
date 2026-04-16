@@ -473,6 +473,28 @@ class LDAPSyncEngine:
 
             ldap_user_data = ldap_result['users'][0]
 
+            # Check for existing user by email (including Gmail aliases)
+            from app.email_normalizer import normalize_email_for_dedup
+            ldap_email = ldap_user_data['email']
+            canonical_email = normalize_email_for_dedup(ldap_email)
+            existing_by_email = User.query.filter_by(email=ldap_email).first()
+            if not existing_by_email and canonical_email != ldap_email:
+                domain = canonical_email.split('@')[1]
+                candidates = User.query.filter(
+                    User.email.ilike(f'%@{domain}')
+                ).all()
+                for u in candidates:
+                    if normalize_email_for_dedup(u.email) == canonical_email:
+                        existing_by_email = u
+                        break
+            if existing_by_email:
+                return {
+                    'success': True,
+                    'user': existing_by_email,
+                    'created': False,
+                    'error': None
+                }
+
             # Determine role and organization from highest priority mapping
             role_priority = {'super_admin': 4, 'org_admin': 3, 'manager': 2, 'user': 1}
             highest_mapping = max(mappings, key=lambda m: (
@@ -480,7 +502,7 @@ class LDAPSyncEngine:
                 m.priority
             ))
 
-            # Create user
+            # Create user — store original email for delivery
             user = User(
                 username=username,
                 email=ldap_user_data['email'],
