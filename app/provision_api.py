@@ -844,3 +844,92 @@ def list_plans():
         'plans': plans_out,
         'total': len(plans_out),
     })
+
+
+# =============================================================================
+# Add-on management
+#
+# The license server calls this endpoint to enable or disable paid add-ons
+# (e.g. the Compliance Pack) on a tenant's subscription. Add-ons are stored
+# as a JSON dict on ``subscription.addons`` and layered on top of the base
+# plan's feature flags by ``Subscription.has_feature()``.
+# =============================================================================
+
+#: Recognised add-on names. Any name not in this set is rejected with 400.
+_KNOWN_ADDONS = frozenset({'compliance_pack'})
+
+
+@provision_bp.route('/addons', methods=['POST'])
+@limiter.limit("10/minute")
+@_require_provision_key
+def manage_addon():
+    """
+    Enable or disable an add-on on a tenant's subscription.
+
+    Called by the License Server after a Stripe add-on purchase/cancellation.
+
+    Request body:
+    {
+        "organization_id": 5,               // Required
+        "addon_name": "compliance_pack",     // Required (must be in _KNOWN_ADDONS)
+        "action": "enable"                   // Required: "enable" or "disable"
+    }
+
+    Returns:
+    {
+        "success": true,
+        "addon_name": "compliance_pack",
+        "action": "enable",
+        "subscription": { ... }
+    }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    org_id = data.get('organization_id')
+    addon_name = (data.get('addon_name') or '').strip()
+    action = (data.get('action') or '').strip().lower()
+
+    if not org_id or not addon_name or not action:
+        return jsonify({'error': 'organization_id, addon_name, and action are required'}), 400
+
+    if addon_name not in _KNOWN_ADDONS:
+        return jsonify({
+            'error': f'Unknown addon: {addon_name!r}',
+            'known_addons': sorted(_KNOWN_ADDONS),
+        }), 400
+
+    if action not in ('enable', 'disable'):
+        return jsonify({'error': 'action must be "enable" or "disable"'}), 400
+
+    sub = Subscription.query.filter_by(organization_id=org_id).first()
+    if not sub:
+        return jsonify({'error': 'No subscription found for this organization'}), 404
+
+    try:
+        addons = sub.get_addons()
+        if action == 'enable':
+            addons[addon_name] = True
+        else:
+            addons[addon_name] = False
+        sub.set_addons(addons)
+        sub.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        logger.info(
+            "Addon %s %sd for org=%s",
+            addon_name, action, org_id,
+        )
+
+        return jsonify({
+            'success': True,
+            'addon_name': addon_name,
+            'action': action,
+            'subscription': sub.to_dict(),
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        logger.exception(f"Failed to {action} addon {addon_name} for org {org_id}: {e}")
+        return jsonify({'error': f'Failed to {action} addon'}), 500
