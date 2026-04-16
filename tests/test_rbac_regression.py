@@ -518,9 +518,8 @@ class TestOrgAdminOnlyEndpoints:
 class TestCrossTenantGetIsolation:
     """Data returned by GET endpoints must be scoped to the caller's org."""
 
-    @pytest.mark.xfail(reason="Known: GET /api/products scoping may use legacy org_id instead of M2M — needs investigation")
     def test_product_list_scoped_to_org(
-        self, db_session, org_admin_client, second_org_client,
+        self, db_session, org_admin_client,
         test_org, second_org, setup_complete,
     ):
         """GET /api/products should only return products the caller's org owns."""
