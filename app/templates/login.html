@@ -584,11 +584,21 @@
 
             try {
                 // The change-password endpoint is protected by
-                // @csrf_protect_session (see auth.py). The blueprint is
-                // csrf-exempt globally so the decorator must get the token
-                // via an explicit header — we read it from the meta tag
-                // injected in the <head>.
-                const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                // @csrf_protect_session (see auth.py). After login, the
+                // session is rotated (session.clear() for fixation
+                // protection), so the CSRF token in the meta tag from
+                // the anonymous session is stale. Fetch a fresh one
+                // bound to the new session.
+                let csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                try {
+                    const tokenResp = await fetch('/api/auth/csrf-token', { credentials: 'same-origin' });
+                    if (tokenResp.ok) {
+                        const tokenData = await tokenResp.json();
+                        if (tokenData.csrf_token) csrfToken = tokenData.csrf_token;
+                    }
+                } catch (e) {
+                    // Fall back to stale token; backend will reject if invalid
+                }
                 const response = await fetch('/api/auth/change-password', {
                     method: 'POST',
                     headers: {
