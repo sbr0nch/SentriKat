@@ -36,6 +36,8 @@ Usage:
 import os
 import hashlib
 import logging
+import threading
+import time
 from functools import wraps
 from flask import jsonify, request, session
 
@@ -45,52 +47,91 @@ logger = logging.getLogger(__name__)
 # On-premise customers cannot enable SaaS mode by simply setting the env var.
 # The token is validated against SENTRIKAT_SAAS_SECRET which must be set as an
 # environment variable on the SaaS deployment (NEVER hardcoded in source code).
-_SAAS_ACTIVATION_SECRET = os.environ.get('SENTRIKAT_SAAS_SECRET', '')
-_SAAS_TOKEN_ENV = os.environ.get('SENTRIKAT_SAAS_TOKEN', '')
-_SENTRIKAT_MODE_RAW = os.environ.get('SENTRIKAT_MODE', 'onpremise').lower()
+
+
+def _current_secret():
+    return os.environ.get('SENTRIKAT_SAAS_SECRET', '')
+
+
+def _current_token():
+    return os.environ.get('SENTRIKAT_SAAS_TOKEN', '')
+
+
+def _current_mode_raw():
+    return os.environ.get('SENTRIKAT_MODE', 'onpremise').lower()
 
 
 def _validate_saas_mode():
     """Validate that SaaS mode is authorized.
 
-    SaaS mode requires SENTRIKAT_SAAS_TOKEN to match a HMAC of the secret.
-    This prevents on-premise customers from enabling SaaS mode.
+    Reads env vars on every call so rotated tokens can be picked up via
+    :func:`reload_saas_mode` without a process restart (M-4).
     """
-    if _SENTRIKAT_MODE_RAW != 'saas':
+    mode_raw = _current_mode_raw()
+    token = _current_token()
+    secret = _current_secret()
+
+    if mode_raw != 'saas':
         return 'onpremise'
 
-    if not _SAAS_TOKEN_ENV:
+    if not token:
         logger.warning(
             "SENTRIKAT_MODE=saas but SENTRIKAT_SAAS_TOKEN not set. "
             "Falling back to on-premise mode."
         )
         return 'onpremise'
 
-    if not _SAAS_ACTIVATION_SECRET:
+    if not secret:
         logger.warning(
             "SENTRIKAT_MODE=saas but SENTRIKAT_SAAS_SECRET not set. "
             "Falling back to on-premise mode."
         )
         return 'onpremise'
 
-    # Validate token: SHA-256 of the secret
-    expected = hashlib.sha256(
-        _SAAS_ACTIVATION_SECRET.encode()
-    ).hexdigest()
+    expected = hashlib.sha256(secret.encode()).hexdigest()
 
-    if _SAAS_TOKEN_ENV == expected:
+    # Constant-time comparison to avoid timing side-channels.
+    import hmac as _hmac
+    if _hmac.compare_digest(token, expected):
         logger.info("SaaS mode activated and validated.")
         return 'saas'
-    else:
-        logger.warning(
-            "SENTRIKAT_SAAS_TOKEN invalid. SaaS mode denied. "
-            "Falling back to on-premise mode."
-        )
-        return 'onpremise'
+
+    logger.warning(
+        "SENTRIKAT_SAAS_TOKEN invalid. SaaS mode denied. "
+        "Falling back to on-premise mode."
+    )
+    return 'onpremise'
 
 
-# Cache the validated mode at module load time
+# Cache the validated mode. Hot-reloaded every ``_SAAS_RELOAD_INTERVAL``
+# seconds (default 5 min) so rotated SENTRIKAT_SAAS_TOKEN values take
+# effect without a restart (M-4).
+_SAAS_RELOAD_INTERVAL = int(os.environ.get('SENTRIKAT_SAAS_RELOAD_SEC', '300'))
 _SENTRIKAT_MODE = _validate_saas_mode()
+_SAAS_LAST_VALIDATED = time.monotonic()
+_SAAS_LOCK = threading.Lock()
+
+
+def reload_saas_mode(force: bool = False) -> str:
+    """Re-validate SaaS mode from the current environment.
+
+    Call explicitly from an admin endpoint to force an immediate refresh,
+    or let the periodic revalidation in :func:`is_saas_mode` handle it.
+    Returns the active mode string after the reload.
+    """
+    global _SENTRIKAT_MODE, _SAAS_LAST_VALIDATED
+    with _SAAS_LOCK:
+        if not force and (time.monotonic() - _SAAS_LAST_VALIDATED) < _SAAS_RELOAD_INTERVAL:
+            return _SENTRIKAT_MODE
+        new_mode = _validate_saas_mode()
+        if new_mode != _SENTRIKAT_MODE:
+            logger.warning(
+                "SaaS mode transitioned: %s -> %s (token/secret rotation detected)",
+                _SENTRIKAT_MODE, new_mode
+            )
+        _SENTRIKAT_MODE = new_mode
+        _SAAS_LAST_VALIDATED = time.monotonic()
+        return _SENTRIKAT_MODE
 
 
 def is_saas_mode():
@@ -98,7 +139,12 @@ def is_saas_mode():
 
     Returns True only when SENTRIKAT_MODE=saas.
     Default is on-premise (returns False).
+
+    Transparently triggers a periodic revalidation (M-4) so rotated
+    SENTRIKAT_SAAS_TOKEN values are picked up without a restart.
     """
+    if (time.monotonic() - _SAAS_LAST_VALIDATED) >= _SAAS_RELOAD_INTERVAL:
+        reload_saas_mode()
     return _SENTRIKAT_MODE == 'saas'
 
 

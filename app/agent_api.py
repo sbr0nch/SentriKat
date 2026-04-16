@@ -46,12 +46,14 @@ import io
 # single requests (e.g., from integrations) go async.
 ASYNC_BATCH_THRESHOLD = 750
 
-# Input validation limits
-MAX_HOSTNAME_LENGTH = 255
-MAX_VENDOR_LENGTH = 200
-MAX_PRODUCT_NAME_LENGTH = 200
-MAX_VERSION_LENGTH = 100
-MAX_PATH_LENGTH = 500
+# Input validation limits — canonical values live in ``app.limits`` (L-5).
+from app.limits import (
+    MAX_HOSTNAME_LENGTH,
+    MAX_VENDOR_LENGTH,
+    MAX_PRODUCT_NAME_LENGTH,
+    MAX_VERSION_LENGTH,
+    MAX_PATH_LENGTH,
+)
 
 # Valid source types and ecosystems for inventory processing
 VALID_SOURCE_TYPES = frozenset({'os_package', 'extension', 'code_library', 'vscode_extension', 'browser_extension'})
@@ -677,9 +679,8 @@ def get_agent_api_key():
         logger.warning(f"Agent auth failed: No X-Agent-Key header from {source_ip}")
         return None, None
 
-    # Hash the key and look it up
-    key_hash = AgentApiKey.hash_key(api_key)
-    agent_key = AgentApiKey.query.filter_by(key_hash=key_hash).first()
+    # Look up the key, transparently upgrading legacy hashes on first use.
+    agent_key = AgentApiKey.find_by_raw_key(api_key)
 
     if not agent_key:
         logger.warning(f"Agent auth failed: Invalid API key from {source_ip}")
@@ -3459,9 +3460,10 @@ def agent_revoke_old_key():
     if not old_key_raw:
         return jsonify({'error': 'old_api_key is required'}), 400
 
-    # Hash the old key to find it
-    old_key_hash = AgentApiKey.hash_key(old_key_raw)
-    old_key = AgentApiKey.query.filter_by(key_hash=old_key_hash, active=True).first()
+    # Locate the old key via the legacy-aware helper (M-8).
+    old_key = AgentApiKey.find_by_raw_key(old_key_raw)
+    if old_key and not old_key.active:
+        old_key = None
 
     if not old_key:
         return jsonify({'status': 'not_found', 'message': 'Old key not found or already revoked'})
@@ -3587,18 +3589,15 @@ def get_product_versions(product_id):
     version spread before CVE assessment.
     """
     from app.auth import get_current_user
+    from app.authz import user_can_access_product
     from app.maintenance import get_product_version_summary
 
     user = get_current_user()
 
     product = Product.query.get_or_404(product_id)
 
-    # Check permission
-    if not user.is_super_admin():
-        user_org_ids = [m.organization_id for m in user.org_memberships.all()]
-        product_org_ids = [o.id for o in product.organizations.all()]
-        if not any(oid in user_org_ids for oid in product_org_ids):
-            return jsonify({'error': 'Access denied'}), 403
+    if not user_can_access_product(user, product):
+        return jsonify({'error': 'Access denied'}), 403
 
     try:
         versions = get_product_version_summary(product_id)
@@ -6271,17 +6270,15 @@ def list_dependencies():
 def get_dependency_detail(product_id):
     """Get detail for a specific dependency including installations across endpoints."""
     from app.auth import get_current_user
+    from app.authz import user_can_access_product
     user = get_current_user()
     if not user:
         return jsonify({'error': 'Authentication required'}), 401
 
     product = Product.query.get_or_404(product_id)
 
-    # Authorization check
-    if not user.is_super_admin():
-        org_ids = [m.organization_id for m in user.org_memberships.all()]
-        if product.organization_id not in org_ids:
-            return jsonify({'error': 'Access denied'}), 403
+    if not user_can_access_product(user, product):
+        return jsonify({'error': 'Access denied'}), 403
 
     # Only show extension/code_library products on this endpoint
     if product.source_type not in ('extension', 'code_library'):

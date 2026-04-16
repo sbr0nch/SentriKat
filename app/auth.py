@@ -16,6 +16,28 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# Generic message returned for every authentication failure path. Collapsing
+# unknown-user, inactive, locked, and bad-password responses into a single
+# message removes the user-enumeration side-channel (audit finding H-3).
+_GENERIC_AUTH_ERROR = 'Invalid username or password'
+
+
+def _login_rate_limit_key():
+    """Rate-limit login by ``(client_ip, username)``.
+
+    Keying on IP alone is trivially bypassed by proxies / IPv6 /64 rotation
+    and lets attackers DoS legitimate users behind shared NAT. Pairing with
+    username eliminates both failure modes (H-3).
+    """
+    from flask_limiter.util import get_remote_address
+    try:
+        data = request.get_json(silent=True) or {}
+    except Exception:
+        data = {}
+    user = (data.get('username') or '').strip().lower()[:64]
+    return f"{get_remote_address()}|{user}"
+
+
 def _saas_log(level, message, action=None, tenant_id=None, actor_email=None,
               details=None):
     """Write a structured SaaS log entry (no-op if not SaaS mode)."""
@@ -466,9 +488,14 @@ def api_setup():
 
 
 @auth_bp.route('/api/auth/login', methods=['POST'])
-@limiter.limit("5 per minute")  # Prevent brute force attacks
+@limiter.limit("5 per minute", key_func=_login_rate_limit_key)
 def api_login():
-    """Handle login via API"""
+    """Handle login via API.
+
+    All failure paths (unknown user, inactive, locked, bad password,
+    disabled org) return the same generic 401 to prevent user enumeration
+    (H-3). Real state is logged server-side for ops visibility.
+    """
     import logging
     logger = logging.getLogger('security')
 
@@ -495,53 +522,46 @@ def api_login():
     user = User.query.filter_by(username=username, is_active=True).first()
 
     if not user:
-        # Also check for inactive user to provide better error
         inactive_user = User.query.filter_by(username=username, is_active=False).first()
         if inactive_user:
             logger.warning(f"Login failed: user {username} is inactive/disabled")
-            return jsonify({'error': 'Account is disabled. Contact administrator.'}), 401
-        logger.warning(f"Login failed: user {username} not found")
-        return jsonify({'error': 'Invalid username or password'}), 401
+        else:
+            logger.warning(f"Login failed: user {username} not found")
+        return jsonify({'error': _GENERIC_AUTH_ERROR}), 401
 
     logger.info(f"User found: {user.username} (id={user.id}, auth_type={user.auth_type}, role={user.role})")
 
-    # Check if account is locked (only for local users)
+    # Lockout and disabled-org checks still apply server-side. We don't
+    # advertise them to the caller — returning the generic error until the
+    # lockout expires avoids confirming account existence.
     if user.auth_type == 'local' and user.is_locked():
         remaining = user.get_lockout_remaining_minutes()
         logger.warning(f"Login blocked: user {username} is locked for {remaining} more minutes")
-        return jsonify({
-            'error': f'Account is temporarily locked. Try again in {remaining} minutes.'
-        }), 401
+        return jsonify({'error': _GENERIC_AUTH_ERROR}), 401
 
-    # Check if user's organization is active (skip for super_admins)
     if user.role != 'super_admin' and not user.is_admin:
         if user.organization and not user.organization.active:
             logger.warning(f"Login blocked: user {username}'s organization '{user.organization.name}' is disabled")
-            return jsonify({'error': 'Your organization has been disabled. Contact administrator.'}), 401
+            return jsonify({'error': _GENERIC_AUTH_ERROR}), 401
 
     # Check authentication type
     if user.auth_type == 'local':
         # Local authentication
         if not user.check_password(password):
-            # Record failed attempt and potentially lock
+            # Record failed attempt and potentially lock (server-side only).
             user.record_failed_login()
             db.session.commit()
 
-            # Check if now locked
             if user.is_locked():
-                remaining = user.get_lockout_remaining_minutes()
                 logger.warning(f"User {username} locked after {user.failed_login_attempts} failed attempts")
-                return jsonify({
-                    'error': f'Account locked due to too many failed attempts. Try again in {remaining} minutes.'
-                }), 401
-
-            logger.warning(f"Login failed for {username}: invalid password (attempt {user.failed_login_attempts})")
+            else:
+                logger.warning(f"Login failed for {username}: invalid password (attempt {user.failed_login_attempts})")
             _saas_log('warning', f'Login failed: invalid password for {username}',
                        action='login_failed',
                        tenant_id=user.organization.name if user.organization else None,
                        actor_email=user.email,
                        details={'attempts': user.failed_login_attempts})
-            return jsonify({'error': 'Invalid username or password'}), 401
+            return jsonify({'error': _GENERIC_AUTH_ERROR}), 401
 
     elif user.auth_type == 'ldap':
         # LDAP authentication - lockout handled by AD, not locally
