@@ -539,7 +539,9 @@ class TestAccountLockout:
         assert test_user.is_locked() is True
         assert test_user.failed_login_attempts >= 5
 
-    # 33. Locked account returns lockout message with remaining time
+    # 33. Locked account still denies access, but response stays generic
+    #     so an attacker cannot distinguish a locked account from an
+    #     invalid credential (audit H-3).
     def test_locked_account_returns_lockout_message(
         self, client, test_user, db_session, setup_complete
     ):
@@ -553,11 +555,12 @@ class TestAccountLockout:
         db_session.refresh(test_user)
         assert test_user.is_locked() is True
 
-        # Next attempt should return lockout message
+        # Next attempt must be rejected but with the generic error — the
+        # lockout state is logged server-side, not exposed to the caller.
         resp = _login(client, 'testuser', 'testpass123')
         assert resp.status_code == 401
-        error_msg = resp.get_json()['error'].lower()
-        assert 'locked' in error_msg
+        error_msg = resp.get_json()['error']
+        assert error_msg == 'Invalid username or password'
 
     # 34. Lockout expires after lockout_duration minutes
     def test_lockout_expires_after_duration(
