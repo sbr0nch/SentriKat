@@ -740,6 +740,18 @@ def change_password():
     return jsonify({'success': True, 'message': 'Password changed successfully'})
 
 
+@auth_bp.route('/api/auth/csrf-token', methods=['GET'])
+def get_csrf_token():
+    """Return a fresh CSRF token bound to the current session.
+
+    Called by the frontend after login (when session.clear() has rotated
+    the session and the meta tag's token from the anonymous session is
+    no longer valid).
+    """
+    from flask_wtf.csrf import generate_csrf
+    return jsonify({'csrf_token': generate_csrf()})
+
+
 # ============================================================================
 # PASSWORD RESET (Forgot Password)
 # ============================================================================

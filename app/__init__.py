@@ -420,6 +420,9 @@ def create_app(config_class=Config):
                 'style-src': ["'self'", "'unsafe-inline'", "cdn.jsdelivr.net", "fonts.googleapis.com"],
                 'img-src': ["'self'", "data:"],
                 'font-src': ["'self'", "cdn.jsdelivr.net", "fonts.gstatic.com"],
+                # connect-src: 'self' for our APIs, jsdelivr for source maps
+                # (devtools loads .map files via fetch and CSP blocks them otherwise)
+                'connect-src': ["'self'", "cdn.jsdelivr.net"],
             }
         )
 
