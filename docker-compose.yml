@@ -158,6 +158,10 @@ services:
     tmpfs:
       - /tmp
       - /app/logs
+      # app/logging_config.py writes to /var/log/sentrikat by default.
+      # Must be tmpfs under read_only:true or the container crashes at boot.
+      # Override with LOG_DIR=/app/logs in .env to redirect logs instead.
+      - /var/log/sentrikat
     volumes:
       - sentrikat_data:/app/data
       # Custom CA certificates for trusting internal/corporate PKI
