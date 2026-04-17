@@ -133,7 +133,7 @@ curl -sk -H "X-API-Key: $SENTRIKAT_API_KEY" \
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ csp_nonce }}">
     /**
      * Trigger an SBOM download. We use a hidden anchor so the browser treats
      * it as a file save rather than a navigation — this avoids clobbering the

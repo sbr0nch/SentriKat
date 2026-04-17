@@ -8,7 +8,7 @@
 {% endblock %}
 
 {% block extra_css %}
-<style>
+<style nonce="{{ csp_nonce }}">
     .assignment-row td { vertical-align: middle; }
     .assignment-row.overdue { background-color: rgba(220, 53, 69, 0.05); }
     .priority-badge.critical { background: #dc3545; }
@@ -156,7 +156,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ csp_nonce }}">
     /**
      * Assignments page controller.
      *

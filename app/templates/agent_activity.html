@@ -7,7 +7,7 @@
 {% endblock %}
 
 {% block extra_css %}
-<style>
+<style nonce="{{ csp_nonce }}">
     /* Worker status card */
     .worker-status-card {
         border-left: 4px solid var(--success-color);
@@ -364,7 +364,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ csp_nonce }}">
 // Auto-refresh interval
 let refreshIntervalId = null;
 const REFRESH_INTERVAL = 10000; // 10 seconds

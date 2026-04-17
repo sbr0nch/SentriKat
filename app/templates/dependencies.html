@@ -7,7 +7,7 @@
 {% endblock %}
 
 {% block extra_css %}
-<style>
+<style nonce="{{ csp_nonce }}">
     .dep-card { border-left: 4px solid var(--border-color); transition: all 0.2s; cursor: pointer; }
     .dep-card:hover { border-left-color: var(--primary-color); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
     .dep-card.vuln-border { border-left-color: var(--danger-color); }
@@ -160,7 +160,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ csp_nonce }}">
 let debounceTimer;
 function debouncedLoad() {
     clearTimeout(debounceTimer);

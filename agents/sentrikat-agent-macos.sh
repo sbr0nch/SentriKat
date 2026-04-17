@@ -23,6 +23,12 @@
 set -euo pipefail
 
 AGENT_VERSION="1.5.0"
+
+# Offline agent-update signing key (audit finding H-4).
+# See docs/AGENT_SIGNING.md. Embedded at build time; never fetched from the
+# server. To skip verification during local development only, set
+# SENTRIKAT_AGENT_SKIP_SIG_VERIFY=1 — never in production.
+SENTRIKAT_MINISIGN_PUBKEY="${SENTRIKAT_MINISIGN_PUBKEY:-}"
 CONFIG_DIR="/Library/Application Support/SentriKat"
 CONFIG_FILE="${CONFIG_DIR}/agent.conf"
 LOG_FILE="/Library/Logs/sentrikat-agent.log"
@@ -1708,6 +1714,50 @@ auto_update_agent() {
         return 1
     fi
     log_info "Checksum verified: ${actual_checksum}"
+
+    # Offline signature verification (H-4). Checksum-only trust assumes
+    # the SentriKat server is trustworthy; signature verification assumes
+    # only that the offline signing key is safe. Skip only when explicitly
+    # disabled (development) or when no pubkey has been embedded yet.
+    if [[ -n "$SENTRIKAT_MINISIGN_PUBKEY" && "${SENTRIKAT_AGENT_SKIP_SIG_VERIFY:-0}" != "1" ]]; then
+        if ! command -v minisign >/dev/null 2>&1; then
+            log_error "minisign not installed but SENTRIKAT_MINISIGN_PUBKEY is set — aborting update."
+            rm -f "$tmp_script"
+            report_update_status "failed" "$old_version" "$target_version" "minisign missing"
+            return 1
+        fi
+
+        local sig_file pub_file
+        sig_file=$(mktemp /tmp/sentrikat-update-XXXXXX.minisig)
+        pub_file=$(mktemp /tmp/sentrikat-pubkey-XXXXXX.pub)
+        register_temp_file "$sig_file"
+        register_temp_file "$pub_file"
+
+        local sig_code
+        sig_code=$(_curl -s -w "%{http_code}" -o "$sig_file" \
+            -H "X-Agent-Key: $API_KEY" \
+            --max-time 30 "${download_url}.minisig" 2>/dev/null)
+        if [[ "$sig_code" != "200" ]]; then
+            log_error "Failed to download agent signature (HTTP $sig_code) — aborting update."
+            rm -f "$tmp_script" "$sig_file" "$pub_file"
+            report_update_status "failed" "$old_version" "$target_version" "Signature download failed: HTTP $sig_code"
+            return 1
+        fi
+
+        printf 'untrusted comment: sentrikat embedded key\n%s\n' "$SENTRIKAT_MINISIGN_PUBKEY" > "$pub_file"
+
+        if ! minisign -V -p "$pub_file" -m "$tmp_script" -x "$sig_file" >/dev/null 2>&1; then
+            log_error "SIGNATURE VERIFICATION FAILED. Possible supply-chain attack. Update aborted."
+            rm -f "$tmp_script" "$sig_file" "$pub_file"
+            report_update_status "failed" "$old_version" "$target_version" "Signature verification failed"
+            return 1
+        fi
+
+        log_info "Signature verified with embedded public key."
+        rm -f "$sig_file" "$pub_file"
+    else
+        log_warn "Offline signature verification SKIPPED (no embedded pubkey or explicitly disabled)."
+    fi
 
     # Verify the downloaded script is valid bash
     if ! head -1 "$tmp_script" | grep -q '^#!/bin/bash'; then

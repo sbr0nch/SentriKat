@@ -7,7 +7,7 @@
 {% endblock %}
 
 {% block extra_css %}
-<style>
+<style nonce="{{ csp_nonce }}">
     .report-card { border-left: 4px solid var(--primary-color); transition: all 0.2s; }
     .report-card.disabled { border-left-color: var(--text-muted); opacity: 0.7; }
     .report-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
@@ -158,7 +158,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ csp_nonce }}">
 const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
 function updateFreqFields() {

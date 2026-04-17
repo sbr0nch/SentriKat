@@ -970,7 +970,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ csp_nonce }}">
     // User permission flags for UI visibility
     const userPermissions = {
         canManageProducts: {% if current_user and (current_user.role in ['manager', 'org_admin', 'super_admin'] or current_user.is_admin or current_user.can_manage_products) %}true{% else %}false{% endif %},

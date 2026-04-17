@@ -7,7 +7,7 @@
 {% endblock %}
 
 {% block extra_css %}
-<style>
+<style nonce="{{ csp_nonce }}">
     .severity-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; min-width: 120px; }
     .severity-bar .critical { background: var(--danger-color); }
     .severity-bar .high { background: #fd7e14; }
@@ -129,7 +129,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ csp_nonce }}">
 let allImages = [];
 let debounceTimer;
 
