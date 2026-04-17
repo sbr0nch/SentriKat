@@ -263,7 +263,7 @@
             </div>
 
             <div class="col-md-12">
-                <button type="button" class="btn btn-primary btn-sm" onclick="saveGlobalDefaults()">
+                <button type="button" class="btn btn-primary btn-sm" id="saveGlobalDefaultsBtn">
                     <i class="bi bi-check-circle me-1"></i>Save Global Defaults
                 </button>
                 <span id="globalSaveStatus"></span>
@@ -281,17 +281,17 @@
             for {{ current_user.organization.display_name or current_user.organization.name }}
         {% endif %}</span>
         <div>
-            <button class="btn btn-outline-primary btn-sm" onclick="loadOrgs()" title="Reload">
+            <button class="btn btn-outline-primary btn-sm reload-orgs-btn" title="Reload">
                 <i class="bi bi-arrow-clockwise"></i>
             </button>
         </div>
         {% else %}
         <span><i class="bi bi-building me-2"></i>Per-Organization Alert Configuration</span>
         <div>
-            <button class="btn btn-outline-secondary btn-sm me-1" onclick="collapseAllDelivery()" title="Collapse all">
+            <button class="btn btn-outline-secondary btn-sm me-1" id="collapseAllDeliveryBtn" title="Collapse all">
                 <i class="bi bi-chevron-contract"></i>
             </button>
-            <button class="btn btn-outline-primary btn-sm" onclick="loadOrgs()" title="Refresh">
+            <button class="btn btn-outline-primary btn-sm reload-orgs-btn" title="Refresh">
                 <i class="bi bi-arrow-clockwise"></i>
             </button>
         </div>
@@ -381,7 +381,7 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="saveDeliverySettings()">
+                <button type="button" class="btn btn-primary" id="saveDeliverySettingsBtn">
                     <i class="bi bi-check-circle me-1"></i>Save Delivery
                 </button>
             </div>
@@ -395,7 +395,7 @@
         <span><i class="bi bi-clock-history me-2"></i>Alert Delivery History</span>
         <div class="d-flex align-items-center gap-2">
             <span class="alert-history-meta" id="historyAutoRefreshLabel">Auto-refresh: 60s</span>
-            <button class="btn btn-outline-primary btn-sm" onclick="loadAlertHistory(1)" title="Refresh">
+            <button class="btn btn-outline-primary btn-sm" id="refreshHistoryBtn" title="Refresh">
                 <i class="bi bi-arrow-clockwise"></i>
             </button>
         </div>
@@ -404,7 +404,7 @@
         <!-- Filter Bar -->
         <div class="row g-2 mb-3 alert-history-filters">
             <div class="col-md-3 col-sm-6">
-                <select class="form-select" id="historyFilterType" onchange="loadAlertHistory(1)">
+                <select class="form-select history-filter" id="historyFilterType">
                     <option value="">All Types</option>
                     <option value="critical_cve">Critical CVE</option>
                     <option value="new_cve">New CVE</option>
@@ -413,7 +413,7 @@
                 </select>
             </div>
             <div class="col-md-2 col-sm-6">
-                <select class="form-select" id="historyFilterStatus" onchange="loadAlertHistory(1)">
+                <select class="form-select history-filter" id="historyFilterStatus">
                     <option value="">All Statuses</option>
                     <option value="success">Success</option>
                     <option value="failed">Failed</option>
@@ -421,13 +421,13 @@
                 </select>
             </div>
             <div class="col-md-3 col-sm-6">
-                <input type="date" class="form-control" id="historyFilterDateFrom" placeholder="From date" onchange="loadAlertHistory(1)">
+                <input type="date" class="form-control history-filter" id="historyFilterDateFrom" placeholder="From date">
             </div>
             <div class="col-md-3 col-sm-6">
-                <input type="date" class="form-control" id="historyFilterDateTo" placeholder="To date" onchange="loadAlertHistory(1)">
+                <input type="date" class="form-control history-filter" id="historyFilterDateTo" placeholder="To date">
             </div>
             <div class="col-md-1 col-sm-12">
-                <button class="btn btn-outline-secondary btn-sm w-100" onclick="clearHistoryFilters()" title="Clear filters">
+                <button class="btn btn-outline-secondary btn-sm w-100" id="clearHistoryFiltersBtn" title="Clear filters">
                     <i class="bi bi-x-lg"></i>
                 </button>
             </div>
@@ -710,15 +710,15 @@ function renderOrgsTable(orgs) {
         // to reset to.
         const actionsCell = isSingleOrg
             ? `<td class="text-center org-actions-cell">
-                 <button class="btn btn-outline-primary btn-sm" onclick="openDeliveryModal(${org.id})" title="Edit delivery settings">
+                 <button class="btn btn-outline-primary btn-sm org-action" data-action="delivery" data-org-id="${org.id}" title="Edit delivery settings">
                      <i class="bi bi-pencil"></i>
                  </button>
                </td>`
             : `<td class="text-center org-actions-cell">
-                 <button class="btn btn-outline-primary btn-sm" onclick="openDeliveryModal(${org.id})" title="Edit delivery settings">
+                 <button class="btn btn-outline-primary btn-sm org-action" data-action="delivery" data-org-id="${org.id}" title="Edit delivery settings">
                      <i class="bi bi-pencil"></i>
                  </button>
-                 <button class="btn btn-outline-secondary btn-sm" onclick="resetOrgDefaults(${org.id})" title="Reset to global defaults">
+                 <button class="btn btn-outline-secondary btn-sm org-action" data-action="reset" data-org-id="${org.id}" title="Reset to global defaults">
                      <i class="bi bi-arrow-counterclockwise"></i>
                  </button>
                </td>`;
@@ -727,22 +727,22 @@ function renderOrgsTable(orgs) {
             ${orgCell}
             <td class="text-center">
                 <input type="checkbox" class="form-check-input org-rule-toggle" data-org-id="${org.id}" data-field="alert_on_critical"
-                    ${org.alert_on_critical ? 'checked' : ''} onchange="toggleOrgRule(this)" title="Critical CVEs">
+                    ${org.alert_on_critical ? 'checked' : ''} title="Critical CVEs">
             </td>
             <td class="text-center">
                 <input type="checkbox" class="form-check-input org-rule-toggle" data-org-id="${org.id}" data-field="alert_on_high"
-                    ${org.alert_on_high ? 'checked' : ''} onchange="toggleOrgRule(this)" title="High CVEs">
+                    ${org.alert_on_high ? 'checked' : ''} title="High CVEs">
             </td>
             <td class="text-center">
                 <input type="checkbox" class="form-check-input org-rule-toggle" data-org-id="${org.id}" data-field="alert_on_new_cve"
-                    ${org.alert_on_new_cve ? 'checked' : ''} onchange="toggleOrgRule(this)" title="New CVEs">
+                    ${org.alert_on_new_cve ? 'checked' : ''} title="New CVEs">
             </td>
             <td class="text-center">
                 <input type="checkbox" class="form-check-input org-rule-toggle" data-org-id="${org.id}" data-field="alert_on_ransomware"
-                    ${org.alert_on_ransomware ? 'checked' : ''} onchange="toggleOrgRule(this)" title="Ransomware">
+                    ${org.alert_on_ransomware ? 'checked' : ''} title="Ransomware">
             </td>
             <td class="text-center">
-                <select class="form-select alert-mode-select" data-org-id="${org.id}" onchange="changeOrgAlertMode(this)">
+                <select class="form-select alert-mode-select" data-org-id="${org.id}">
                     ${defaultOption}
                     <option value="daily_reminder" ${modeValue === 'daily_reminder' ? 'selected' : ''}>Daily</option>
                     <option value="escalation" ${modeValue === 'escalation' ? 'selected' : ''}>Escalation</option>
@@ -991,7 +991,7 @@ function renderHistoryPagination(currentPage, totalPages) {
 
     // Previous
     html += `<li class="page-item ${currentPage <= 1 ? 'disabled' : ''}">
-        <a class="page-link" href="#" onclick="event.preventDefault();loadAlertHistory(${currentPage - 1})" aria-label="Previous">&laquo;</a>
+        <a class="page-link history-page" href="#" data-page="${currentPage - 1}" aria-label="Previous">&laquo;</a>
     </li>`;
 
     // Page numbers — show a window around the current page
@@ -1003,24 +1003,24 @@ function renderHistoryPagination(currentPage, totalPages) {
     }
 
     if (startPage > 1) {
-        html += `<li class="page-item"><a class="page-link" href="#" onclick="event.preventDefault();loadAlertHistory(1)">1</a></li>`;
+        html += `<li class="page-item"><a class="page-link history-page" href="#" data-page="1">1</a></li>`;
         if (startPage > 2) html += '<li class="page-item disabled"><span class="page-link">&hellip;</span></li>';
     }
 
     for (let p = startPage; p <= endPage; p++) {
         html += `<li class="page-item ${p === currentPage ? 'active' : ''}">
-            <a class="page-link" href="#" onclick="event.preventDefault();loadAlertHistory(${p})">${p}</a>
+            <a class="page-link history-page" href="#" data-page="${p}">${p}</a>
         </li>`;
     }
 
     if (endPage < totalPages) {
         if (endPage < totalPages - 1) html += '<li class="page-item disabled"><span class="page-link">&hellip;</span></li>';
-        html += `<li class="page-item"><a class="page-link" href="#" onclick="event.preventDefault();loadAlertHistory(${totalPages})">${totalPages}</a></li>`;
+        html += `<li class="page-item"><a class="page-link history-page" href="#" data-page="${totalPages}">${totalPages}</a></li>`;
     }
 
     // Next
     html += `<li class="page-item ${currentPage >= totalPages ? 'disabled' : ''}">
-        <a class="page-link" href="#" onclick="event.preventDefault();loadAlertHistory(${currentPage + 1})" aria-label="Next">&raquo;</a>
+        <a class="page-link history-page" href="#" data-page="${currentPage + 1}" aria-label="Next">&raquo;</a>
     </li>`;
 
     container.innerHTML = html;
@@ -1047,6 +1047,39 @@ function scheduleHistoryRefresh() {
 document.addEventListener('DOMContentLoaded', () => {
     loadAll();
     loadAlertHistory(1);
+});
+
+// CSP: wire former inline event handlers via addEventListener (M-7).
+document.getElementById('saveGlobalDefaultsBtn')?.addEventListener('click', saveGlobalDefaults);
+document.getElementById('saveDeliverySettingsBtn')?.addEventListener('click', saveDeliverySettings);
+document.getElementById('refreshHistoryBtn')?.addEventListener('click', function() { loadAlertHistory(1); });
+document.getElementById('clearHistoryFiltersBtn')?.addEventListener('click', clearHistoryFilters);
+document.getElementById('collapseAllDeliveryBtn')?.addEventListener('click', collapseAllDelivery);
+document.querySelectorAll('.reload-orgs-btn').forEach(function(btn) {
+    btn.addEventListener('click', loadOrgs);
+});
+document.querySelectorAll('.history-filter').forEach(function(el) {
+    el.addEventListener('change', function() { loadAlertHistory(1); });
+});
+document.addEventListener('click', function(ev) {
+    const pager = ev.target.closest('.history-page');
+    if (pager) {
+        ev.preventDefault();
+        loadAlertHistory(Number(pager.dataset.page));
+        return;
+    }
+    const act = ev.target.closest('.org-action');
+    if (act) {
+        const oid = Number(act.dataset.orgId);
+        if (act.dataset.action === 'delivery') openDeliveryModal(oid);
+        else if (act.dataset.action === 'reset') resetOrgDefaults(oid);
+    }
+});
+document.addEventListener('change', function(ev) {
+    const tog = ev.target.closest('.org-rule-toggle');
+    if (tog) toggleOrgRule(tog);
+    const sel = ev.target.closest('.alert-mode-select');
+    if (sel) changeOrgAlertMode(sel);
 });
 </script>
 {% endblock %}
