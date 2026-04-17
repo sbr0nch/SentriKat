@@ -8,7 +8,7 @@
 {% endblock %}
 
 {% block extra_css %}
-<style>
+<style nonce="{{ csp_nonce }}">
     .product-header { margin-bottom: 1.5rem; }
     .product-header h2 { margin-bottom: 0.25rem; }
     .info-card { border: 1px solid var(--border-color); border-radius: 0.5rem; padding: 1rem 1.25rem; background: var(--surface-color); }
@@ -268,7 +268,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ csp_nonce }}">
 (function() {
     const PRODUCT_ID = {{ product_id }};
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';

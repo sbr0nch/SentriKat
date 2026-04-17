@@ -68,6 +68,13 @@ param(
 # Use Stop so unexpected errors are visible; individual cmdlets use -ErrorAction SilentlyContinue where intended
 $ErrorActionPreference = "Stop"
 $AgentVersion = "1.5.0"
+
+# Offline agent-update signing key (audit finding H-4).
+# See docs/AGENT_SIGNING.md. Embedded at build time; never fetched from the
+# server. To skip verification during local development only, set
+# the environment variable SENTRIKAT_AGENT_SKIP_SIG_VERIFY=1.
+$SentrikatMinisignPubkey = $env:SENTRIKAT_MINISIGN_PUBKEY
+if (-not $SentrikatMinisignPubkey) { $SentrikatMinisignPubkey = "" }
 $LogFile = "$env:ProgramData\SentriKat\agent.log"
 $HeartbeatIntervalMinutes = 5
 
@@ -1592,6 +1599,47 @@ function Update-Agent {
             return
         }
         Write-Log "Checksum verified: $actualChecksum"
+
+        # Offline signature verification (H-4). The embedded minisign pubkey
+        # never round-trips through the server, so a compromised release
+        # server can't ship a trojanized agent that still validates.
+        $skipSigVerify = $env:SENTRIKAT_AGENT_SKIP_SIG_VERIFY
+        if ($SentrikatMinisignPubkey -and $skipSigVerify -ne "1") {
+            $minisignCmd = Get-Command minisign -ErrorAction SilentlyContinue
+            if (-not $minisignCmd) {
+                Write-Log "minisign.exe not on PATH but SentrikatMinisignPubkey is set - aborting update." -Level "ERROR"
+                Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
+                Report-UpdateStatus -Config $Config -Status "failed" -OldVersion $oldVersion -NewVersion $TargetVersion -ErrorMsg "minisign missing"
+                return
+            }
+
+            $sigFile = "$tmpFile.minisig"
+            $pubFile = "$tmpFile.pub"
+            try {
+                Invoke-WebRequest -Uri "$downloadUrl.minisig" -Headers $headers -OutFile $sigFile -TimeoutSec 30 | Out-Null
+            } catch {
+                Write-Log "Failed to download agent signature: $_ - aborting update." -Level "ERROR"
+                Remove-Item $tmpFile, $sigFile, $pubFile -Force -ErrorAction SilentlyContinue
+                Report-UpdateStatus -Config $Config -Status "failed" -OldVersion $oldVersion -NewVersion $TargetVersion -ErrorMsg "Signature download failed"
+                return
+            }
+
+            "untrusted comment: sentrikat embedded key`n$SentrikatMinisignPubkey" | Out-File -FilePath $pubFile -Encoding ascii -NoNewline
+
+            $minisignArgs = @('-V', '-p', $pubFile, '-m', $tmpFile, '-x', $sigFile)
+            $verifyResult = & minisign $minisignArgs 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Log "SIGNATURE VERIFICATION FAILED. Possible supply-chain attack. Update aborted. Output: $verifyResult" -Level "ERROR"
+                Remove-Item $tmpFile, $sigFile, $pubFile -Force -ErrorAction SilentlyContinue
+                Report-UpdateStatus -Config $Config -Status "failed" -OldVersion $oldVersion -NewVersion $TargetVersion -ErrorMsg "Signature verification failed"
+                return
+            }
+
+            Write-Log "Signature verified with embedded public key."
+            Remove-Item $sigFile, $pubFile -Force -ErrorAction SilentlyContinue
+        } else {
+            Write-Log "Offline signature verification SKIPPED (no embedded pubkey or explicitly disabled)." -Level "WARN"
+        }
 
         # Verify downloaded script is valid PowerShell (contains expected marker)
         $content = Get-Content $tmpFile -Raw

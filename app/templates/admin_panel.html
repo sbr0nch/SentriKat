@@ -3,7 +3,7 @@
 {% block title %}Admin Panel - SentriKat{% endblock %}
 
 {% block extra_css %}
-<style>
+<style nonce="{{ csp_nonce }}">
     /* ================================================================
        ADMIN PANEL — Visual Clarity Improvements
        ================================================================ */
@@ -4972,7 +4972,7 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/admin_panel.js') }}"></script>
-<script>
+<script nonce="{{ csp_nonce }}">
 // Hash-based navigation for admin panel sections
 // Supports compound hashes like #settings:auth or #integrations:pushAgents
 function activateTabFromHash() {

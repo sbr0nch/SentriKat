@@ -7,7 +7,7 @@
 {% endblock %}
 
 {% block extra_css %}
-<style>
+<style nonce="{{ csp_nonce }}">
     .report-card { border-left: 4px solid var(--primary-color); transition: all 0.2s; }
     .report-card.disabled { border-left-color: var(--text-muted); opacity: 0.7; }
     .report-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
@@ -24,7 +24,7 @@
         <small class="text-muted">Automated vulnerability reports delivered by email</small>
     </div>
     {% if has_scheduled_reports_feature %}
-    <button class="btn btn-primary btn-sm" onclick="showCreateModal()">
+    <button class="btn btn-primary btn-sm create-report-btn">
         <i class="bi bi-plus-lg me-1"></i>New Report
     </button>
     {% endif %}
@@ -37,7 +37,7 @@
     <i class="bi bi-calendar-check text-muted" style="font-size:3rem"></i>
     <h5 class="mt-3 text-muted">No scheduled reports</h5>
     <p class="text-muted">Create automated reports to keep your team informed about vulnerability status.</p>
-    <button class="btn btn-primary btn-sm" onclick="showCreateModal()"><i class="bi bi-plus-lg me-1"></i>Create First Report</button>
+    <button class="btn btn-primary btn-sm create-report-btn"><i class="bi bi-plus-lg me-1"></i>Create First Report</button>
 </div>
 {% else %}
 <div id="featureLockedState" class="card border-0 shadow-sm">
@@ -95,7 +95,7 @@
         <div class="row mb-3">
             <div class="col-4">
                 <label class="form-label">Frequency</label>
-                <select class="form-select form-select-sm" id="reportFreq" onchange="updateFreqFields()">
+                <select class="form-select form-select-sm" id="reportFreq">
                     <option value="daily">Daily</option>
                     <option value="weekly" selected>Weekly</option>
                     <option value="monthly">Monthly</option>
@@ -150,7 +150,7 @@
     </div>
     <div class="modal-footer">
         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary btn-sm" onclick="saveReport()">Save</button>
+        <button type="button" class="btn btn-primary btn-sm" id="saveReportBtn">Save</button>
     </div>
 </div>
 </div>
@@ -158,7 +158,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ csp_nonce }}">
 const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
 function updateFreqFields() {
@@ -202,12 +202,12 @@ async function loadReports() {
                                 <div class="next-run text-muted">Last: ${lastRun}</div>
                             </div>
                             <div class="btn-group btn-group-sm">
-                                <button class="btn btn-outline-primary" onclick="sendNow(${r.id})" title="Send now"><i class="bi bi-send"></i></button>
-                                <button class="btn btn-outline-secondary" onclick="editReport(${r.id})" title="Edit"><i class="bi bi-pencil"></i></button>
-                                <button class="btn btn-outline-${r.enabled ? 'warning' : 'success'}" onclick="toggleReport(${r.id}, ${!r.enabled})" title="${r.enabled ? 'Disable' : 'Enable'}">
+                                <button class="btn btn-outline-primary report-action" data-action="send" data-report-id="${r.id}" title="Send now"><i class="bi bi-send"></i></button>
+                                <button class="btn btn-outline-secondary report-action" data-action="edit" data-report-id="${r.id}" title="Edit"><i class="bi bi-pencil"></i></button>
+                                <button class="btn btn-outline-${r.enabled ? 'warning' : 'success'} report-action" data-action="toggle" data-report-id="${r.id}" data-target-enabled="${!r.enabled}" title="${r.enabled ? 'Disable' : 'Enable'}">
                                     <i class="bi bi-${r.enabled ? 'pause' : 'play'}"></i>
                                 </button>
-                                <button class="btn btn-outline-danger" onclick="deleteReport(${r.id})" title="Delete"><i class="bi bi-trash"></i></button>
+                                <button class="btn btn-outline-danger report-action" data-action="delete" data-report-id="${r.id}" title="Delete"><i class="bi bi-trash"></i></button>
                             </div>
                         </div>
                     </div>
@@ -342,5 +342,23 @@ function timeAgo(d) { const s=Math.floor((Date.now()-d.getTime())/1000); if(s<60
 if (document.getElementById('reportList')) {
     loadReports();
 }
+
+// CSP: wire former inline event handlers via addEventListener (M-7).
+document.querySelectorAll('.create-report-btn').forEach(function(btn) {
+    btn.addEventListener('click', showCreateModal);
+});
+document.getElementById('saveReportBtn')?.addEventListener('click', saveReport);
+document.getElementById('reportFreq')?.addEventListener('change', updateFreqFields);
+document.addEventListener('click', function(ev) {
+    const act = ev.target.closest('.report-action');
+    if (!act) return;
+    const rid = Number(act.dataset.reportId);
+    switch (act.dataset.action) {
+        case 'send': sendNow(rid); break;
+        case 'edit': editReport(rid); break;
+        case 'toggle': toggleReport(rid, act.dataset.targetEnabled === 'true'); break;
+        case 'delete': deleteReport(rid); break;
+    }
+});
 </script>
 {% endblock %}

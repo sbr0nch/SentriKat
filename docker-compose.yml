@@ -25,6 +25,32 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # One-shot Alembic migration job (M-2).
+  # Runs ``alembic upgrade head`` once, then exits. Application replicas
+  # below depend on ``service_completed_successfully`` so they only boot
+  # against an up-to-date schema. To keep this opt-in for existing
+  # single-container on-prem deployments, the SentriKat service still
+  # runs the legacy boot-time migrations unless
+  # ``SENTRIKAT_SKIP_BOOT_MIGRATIONS=1`` is set in .env.
+  migrations:
+    build:
+      context: .
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+    container_name: sentrikat-migrations
+    environment:
+      - DATABASE_URL=postgresql://sentrikat:${DB_PASSWORD:-sentrikat}@db:5432/sentrikat
+      - SECRET_KEY=${SECRET_KEY:-change-this-secret-key-in-production}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+    command: ["alembic", "-c", "migrations/alembic.ini", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    profiles: ["migrate"]
+
   # SentriKat Application
   sentrikat:
     build:

@@ -20,7 +20,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/static/images/favicon-32x32.png">
     <link rel="apple-touch-icon" sizes="192x192" href="/static/images/logo-192.png">
     <link rel="manifest" href="/static/manifest.json">
-    <style>
+    <style nonce="{{ csp_nonce }}">
         /* Professional Corporate Color Scheme */
         :root {
             /* Primary Brand Colors */
@@ -2880,7 +2880,7 @@
         <a href="/admin-panel#settings:subscription" class="ms-2 text-white fw-semibold text-decoration-underline">Upgrade Plan</a>
         <button type="button" class="btn-close btn-close-white btn-close-sm ms-3" style="font-size: 0.7rem; vertical-align: middle;" onclick="this.parentElement.style.display='none'" aria-label="Close"></button>
     </div>
-    <style>
+    <style nonce="{{ csp_nonce }}">
         .demo-banner ~ * { margin-top: 40px !important; }
         .demo-banner ~ .top-navbar { margin-top: 40px !important; }
     </style>
@@ -2892,7 +2892,7 @@
         <a href="/admin-panel#settings:subscription" class="ms-2 text-white fw-semibold text-decoration-underline">View Plan</a>
         <button type="button" class="btn-close btn-close-white btn-close-sm ms-3" style="font-size: 0.7rem; vertical-align: middle;" onclick="this.parentElement.style.display='none'" aria-label="Close"></button>
     </div>
-    <style>
+    <style nonce="{{ csp_nonce }}">
         .demo-banner ~ * { margin-top: 40px !important; }
         .demo-banner ~ .top-navbar { margin-top: 40px !important; }
     </style>
@@ -2906,7 +2906,7 @@
         <a href="https://sentrikat.com/contact-sales" target="_blank" class="ms-2 text-dark fw-semibold text-decoration-underline">Get a License</a>
         <button type="button" class="btn-close btn-close-sm ms-3" style="font-size: 0.7rem; vertical-align: middle;" onclick="this.parentElement.style.display='none'" aria-label="Close"></button>
     </div>
-    <style>
+    <style nonce="{{ csp_nonce }}">
         .demo-banner ~ * { margin-top: 40px !important; }
         .demo-banner ~ .top-navbar { margin-top: 40px !important; }
     </style>
@@ -2918,7 +2918,7 @@
         <strong>❌ {{ 'Suspended' if license_revoked_banner.level == 'suspended' else 'Revoked' }}</strong>
         — {{ license_revoked_banner.message }}
     </div>
-    <style>
+    <style nonce="{{ csp_nonce }}">
         .license-revoked-banner ~ * { margin-top: 40px !important; }
         .license-revoked-banner ~ .top-navbar { margin-top: 40px !important; }
     </style>
@@ -2930,14 +2930,14 @@
         via SSO from the admin portal (by <code>{{ impersonated_by or 'unknown' }}</code>).
         <a href="/admin/sso/exit" class="btn btn-sm btn-dark ms-2" style="padding: 1px 10px;">Exit impersonation</a>
     </div>
-    <style>
+    <style nonce="{{ csp_nonce }}">
         .impersonation-banner ~ * { margin-top: 44px !important; }
         .impersonation-banner ~ .top-navbar { margin-top: 44px !important; }
     </style>
     {% endif %}
 
     <!-- Clean license-reload param from URL after page load -->
-    <script>if(new URLSearchParams(location.search).has('_lrc')){var u=new URL(location);u.searchParams.delete('_lrc');history.replaceState(null,'',u)}</script>
+    <script nonce="{{ csp_nonce }}">if(new URLSearchParams(location.search).has('_lrc')){var u=new URL(location);u.searchParams.delete('_lrc');history.replaceState(null,'',u)}</script>
 
     <!-- Loading Overlay -->
     <div class="loading-overlay" id="loadingOverlay">
@@ -3457,7 +3457,7 @@
     <script src="{{ url_for('static', filename='js/sentrikat-core.js') }}"></script>
     <!-- SentriKat Modal Configurations -->
     <script src="{{ url_for('static', filename='js/sentrikat-modals.js') }}"></script>
-    <script>
+    <script nonce="{{ csp_nonce }}">
         /**
          * Page-specific utilities
          */
@@ -5370,7 +5370,7 @@
         </div>
     </div>
 
-    <script>
+    <script nonce="{{ csp_nonce }}">
         // Security Settings Functions
         let securityModal = null;
 
@@ -5717,7 +5717,7 @@
     </script>
 
     <!-- Session Timeout Handler -->
-    <script>
+    <script nonce="{{ csp_nonce }}">
     (function() {
         const SESSION_TIMEOUT_MINUTES = {{ session_timeout_minutes|default(480) }};
         const WARNING_BEFORE_MINUTES = 5; // Show warning 5 minutes before expiry

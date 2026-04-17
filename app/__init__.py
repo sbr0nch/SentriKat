@@ -25,7 +25,23 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["1000 per day", "
 
 
 def _apply_schema_migrations(logger, db_uri):
-    """Apply schema migrations for new columns (works for SQLite and PostgreSQL)"""
+    """Apply schema migrations for new columns (works for SQLite and PostgreSQL).
+
+    M-2: This boot-time approach races under multi-instance SaaS deployments
+    (two containers booting simultaneously try to ALTER the same tables).
+    For Kubernetes / multi-replica docker deploys, set the env var
+    ``SENTRIKAT_SKIP_BOOT_MIGRATIONS=1`` and run ``alembic upgrade head``
+    from a one-shot deploy job before starting the application replicas.
+    The on-prem single-container case continues to use the boot-time path
+    by default.
+    """
+    import os as _os
+    if _os.environ.get('SENTRIKAT_SKIP_BOOT_MIGRATIONS', '').lower() in ('1', 'true', 'yes'):
+        logger.info(
+            "SENTRIKAT_SKIP_BOOT_MIGRATIONS set — skipping boot-time schema "
+            "migrations. Run 'alembic upgrade head' from a deploy job."
+        )
+        return
     from sqlalchemy import text, create_engine
 
     # List of migrations to apply: (table_name, column_name, column_definition_sqlite, column_definition_pg)
@@ -484,8 +500,9 @@ def create_app(config_class=Config):
     from app.performance_middleware import setup_performance_middleware
     setup_performance_middleware(app)
 
-    from app import routes, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api, licensing, cpe_api, agent_api, integrations_api, saml_api, reports_api, api_docs, provision_api, metrics_api, gdpr_api
+    from app import routes, routes_products, models, ldap_models, shared_views, auth, setup, settings_api, ldap_api, ldap_group_api, shared_views_api, licensing, cpe_api, agent_api, integrations_api, saml_api, reports_api, api_docs, provision_api, metrics_api, gdpr_api
     app.register_blueprint(routes.bp)
+    app.register_blueprint(routes_products.products_bp)
     app.register_blueprint(auth.auth_bp)
     app.register_blueprint(setup.setup_bp)
     app.register_blueprint(settings_api.settings_bp)

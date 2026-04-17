@@ -99,7 +99,9 @@ class TestAlertsSettingsSingleOrgLayout:
     GLOBAL_CARD_HEADER = '<span><i class="bi bi-globe me-2"></i>Global Default Rules</span>'
     GLOBAL_CARD_BODY = 'defaults for newly created organizations'
     GLOBAL_CARD_BADGE = '>Defaults for new organizations<'
-    GLOBAL_CARD_SAVE_BUTTON = 'onclick="saveGlobalDefaults()"'
+    # After M-7 the button no longer has inline onclick; it's bound via
+    # addEventListener by id in the nonce'd script block.
+    GLOBAL_CARD_SAVE_BUTTON = 'id="saveGlobalDefaultsBtn"'
     RULE_CRITICAL_INPUT = 'id="ruleCritical"'
 
     MULTI_ORG_TABLE_HEADER = '<span><i class="bi bi-building me-2"></i>Per-Organization Alert Configuration</span>'
@@ -192,7 +194,9 @@ class TestAlertsSettingsMultiOrgLayout:
     GLOBAL_CARD_HEADER = '<span><i class="bi bi-globe me-2"></i>Global Default Rules</span>'
     GLOBAL_CARD_BODY = 'defaults for newly created organizations'
     GLOBAL_CARD_BADGE = '>Defaults for new organizations<'
-    GLOBAL_CARD_SAVE_BUTTON = 'onclick="saveGlobalDefaults()"'
+    # After M-7 the button no longer has inline onclick; it's bound via
+    # addEventListener by id in the nonce'd script block.
+    GLOBAL_CARD_SAVE_BUTTON = 'id="saveGlobalDefaultsBtn"'
     RULE_CRITICAL_INPUT = 'id="ruleCritical"'
     MULTI_ORG_TABLE_HEADER = '<span><i class="bi bi-building me-2"></i>Per-Organization Alert Configuration</span>'
 

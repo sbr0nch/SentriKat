@@ -7,7 +7,7 @@
 {% endblock %}
 
 {% block extra_css %}
-<style>
+<style nonce="{{ csp_nonce }}">
     /* Worker status card */
     .worker-status-card {
         border-left: 4px solid var(--success-color);
@@ -157,7 +157,7 @@
                 <i class="bi bi-arrow-clockwise me-1"></i>
                 <span id="refreshTimer">Auto-refresh: 10s</span>
             </span>
-            <button class="btn btn-outline-secondary btn-sm" onclick="refreshAll()" title="Refresh now">
+            <button class="btn btn-outline-secondary btn-sm" id="refreshAllBtn" title="Refresh now">
                 <i class="bi bi-arrow-repeat me-1"></i>Refresh
             </button>
         </div>
@@ -225,7 +225,7 @@
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span><i class="bi bi-list-task me-2"></i>Recent Jobs</span>
                     <div>
-                        <select class="form-select form-select-sm" id="jobStatusFilter" onchange="loadJobs()" style="width: auto; display: inline-block;">
+                        <select class="form-select form-select-sm" id="jobStatusFilter" style="width: auto; display: inline-block;">
                             <option value="">All statuses</option>
                             <option value="processing">Processing</option>
                             <option value="pending">Pending</option>
@@ -265,7 +265,7 @@
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span><i class="bi bi-clock-history me-2"></i>Agent Events</span>
-                    <select class="form-select form-select-sm" id="eventTypeFilter" onchange="loadEvents()" style="width: auto; display: inline-block;">
+                    <select class="form-select form-select-sm" id="eventTypeFilter" style="width: auto; display: inline-block;">
                         <option value="">All events</option>
                         <option value="registered">Registered</option>
                         <option value="inventory_reported">Inventory</option>
@@ -297,7 +297,7 @@
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span><i class="bi bi-journal-text me-2"></i>Agent Activity Log</span>
                     <div class="d-flex align-items-center gap-2">
-                        <select class="form-select form-select-sm" id="logEventTypeFilter" onchange="loadActivityLog()" style="width: auto;">
+                        <select class="form-select form-select-sm" id="logEventTypeFilter" style="width: auto;">
                             <option value="">All Types</option>
                             <option value="registered">Registered</option>
                             <option value="inventory_reported">Inventory</option>
@@ -310,14 +310,14 @@
                             <option value="ip_blocked">IP Blocked</option>
                             <option value="auth_failed">Auth Failed</option>
                         </select>
-                        <select class="form-select form-select-sm" id="logDaysFilter" onchange="loadActivityLog()" style="width: auto;">
+                        <select class="form-select form-select-sm" id="logDaysFilter" style="width: auto;">
                             <option value="1">Last 24h</option>
                             <option value="3">Last 3 days</option>
                             <option value="7" selected>Last 7 days</option>
                             <option value="14">Last 14 days</option>
                             <option value="30">Last 30 days</option>
                         </select>
-                        <button class="btn btn-outline-secondary btn-sm" onclick="loadActivityLog()" title="Refresh log">
+                        <button class="btn btn-outline-secondary btn-sm" id="refreshLogBtn" title="Refresh log">
                             <i class="bi bi-arrow-repeat"></i>
                         </button>
                     </div>
@@ -348,11 +348,11 @@
                 <div class="card-footer d-flex justify-content-between align-items-center py-2">
                     <small class="text-muted" id="logSummary">-</small>
                     <div class="d-flex align-items-center gap-2">
-                        <button class="btn btn-outline-secondary btn-sm py-0 px-2" id="logPrevPage" onclick="changeLogPage(-1)" disabled>
+                        <button class="btn btn-outline-secondary btn-sm py-0 px-2" id="logPrevPage" data-page-delta="-1" disabled>
                             <i class="bi bi-chevron-left"></i>
                         </button>
                         <small class="text-muted" id="logPageInfo">Page 1</small>
-                        <button class="btn btn-outline-secondary btn-sm py-0 px-2" id="logNextPage" onclick="changeLogPage(1)" disabled>
+                        <button class="btn btn-outline-secondary btn-sm py-0 px-2" id="logNextPage" data-page-delta="1" disabled>
                             <i class="bi bi-chevron-right"></i>
                         </button>
                     </div>
@@ -364,7 +364,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ csp_nonce }}">
 // Auto-refresh interval
 let refreshIntervalId = null;
 const REFRESH_INTERVAL = 10000; // 10 seconds
@@ -770,6 +770,21 @@ document.addEventListener('visibilitychange', () => {
     } else {
         startAutoRefresh();
     }
+});
+
+// CSP: wire former inline event handlers via addEventListener (M-7).
+document.getElementById('refreshAllBtn')?.addEventListener('click', refreshAll);
+document.getElementById('refreshLogBtn')?.addEventListener('click', loadActivityLog);
+document.getElementById('jobStatusFilter')?.addEventListener('change', loadJobs);
+document.getElementById('eventTypeFilter')?.addEventListener('change', loadEvents);
+['logEventTypeFilter', 'logDaysFilter'].forEach(function(id) {
+    document.getElementById(id)?.addEventListener('change', loadActivityLog);
+});
+['logPrevPage', 'logNextPage'].forEach(function(id) {
+    const btn = document.getElementById(id);
+    if (btn) btn.addEventListener('click', function() {
+        changeLogPage(Number(btn.dataset.pageDelta));
+    });
 });
 </script>
 {% endblock %}
