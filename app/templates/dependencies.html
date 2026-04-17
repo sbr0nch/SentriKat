@@ -61,16 +61,16 @@
         <small class="text-muted">Code libraries, extensions, and their vulnerability status</small>
     </div>
     <div class="d-flex gap-2 flex-wrap">
-        <input type="text" id="searchInput" class="form-control form-control-sm" placeholder="Search dependencies..." style="width: 200px;" oninput="debouncedLoad()">
-        <select id="sourceTypeFilter" class="form-select form-select-sm" style="width: 150px;" onchange="loadDeps()">
+        <input type="text" id="searchInput" class="form-control form-control-sm" placeholder="Search dependencies..." style="width: 200px;">
+        <select id="sourceTypeFilter" class="form-select form-select-sm" style="width: 150px;">
             <option value="">All types</option>
             <option value="code_library">Code Libraries</option>
             <option value="extension">Extensions</option>
         </select>
-        <select id="ecosystemFilter" class="form-select form-select-sm" style="width: 140px;" onchange="loadDeps()">
+        <select id="ecosystemFilter" class="form-select form-select-sm" style="width: 140px;">
             <option value="">All ecosystems</option>
         </select>
-        <select id="vulnFilter" class="form-select form-select-sm" style="width: 160px;" onchange="loadDeps()">
+        <select id="vulnFilter" class="form-select form-select-sm" style="width: 160px;">
             <option value="">All statuses</option>
             <option value="vulnerable">With vulnerabilities</option>
             <option value="clean">No vulnerabilities</option>
@@ -96,7 +96,7 @@
     <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
             <h6 class="mb-0" id="detailTitle">Dependency Details</h6>
-            <button class="btn btn-sm btn-outline-secondary" onclick="closeDetail()"><i class="bi bi-x-lg"></i></button>
+            <button class="btn btn-sm btn-outline-secondary" id="closeDetailBtn"><i class="bi bi-x-lg"></i></button>
         </div>
         <div class="card-body p-0">
             <div class="p-3 bg-light border-bottom" id="detailMeta"></div>
@@ -254,7 +254,7 @@ function renderDeps(deps) {
             if (sev.low) sevBadges += `<span class="badge bg-info severity-mini">${sev.low} LOW</span> `;
         }
 
-        return `<div class="card dep-card mb-2 ${borderClass}" onclick="showDetail(${dep.id})">
+        return `<div class="card dep-card mb-2 ${borderClass}" data-dep-id="${dep.id}">
             <div class="card-body py-2 px-3">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
@@ -400,5 +400,17 @@ function escHtml(s) {
 }
 
 loadDeps();
+
+// CSP: wire former inline event handlers via addEventListener (M-7).
+document.getElementById('searchInput')?.addEventListener('input', debouncedLoad);
+['sourceTypeFilter', 'ecosystemFilter', 'vulnFilter'].forEach(function(id) {
+    document.getElementById(id)?.addEventListener('change', loadDeps);
+});
+document.getElementById('closeDetailBtn')?.addEventListener('click', closeDetail);
+// Event delegation for dynamically-rendered dep cards.
+document.addEventListener('click', function(ev) {
+    const card = ev.target.closest('.dep-card[data-dep-id]');
+    if (card) showDetail(Number(card.dataset.depId));
+});
 </script>
 {% endblock %}

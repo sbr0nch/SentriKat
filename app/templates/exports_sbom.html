@@ -42,7 +42,7 @@
                         CycloneDX-aware SAST/DAST pipeline.
                     </p>
                     <div class="mt-auto">
-                        <button type="button" class="btn btn-primary w-100" onclick="downloadSbom('cyclonedx', this)">
+                        <button type="button" class="btn btn-primary w-100 sbom-download-btn" data-format="cyclonedx">
                             <i class="bi bi-download me-1"></i>Download JSON
                         </button>
                         <small class="text-muted d-block text-center mt-2">
@@ -67,7 +67,7 @@
                         for software license compliance (ISO/IEC 5962).
                     </p>
                     <div class="mt-auto">
-                        <button type="button" class="btn btn-success w-100" onclick="downloadSbom('spdx', this)">
+                        <button type="button" class="btn btn-success w-100 sbom-download-btn" data-format="spdx">
                             <i class="bi bi-download me-1"></i>Download JSON
                         </button>
                         <small class="text-muted d-block text-center mt-2">
@@ -92,7 +92,7 @@
                         AIS, and other threat-intel platforms.
                     </p>
                     <div class="mt-auto">
-                        <button type="button" class="btn btn-dark w-100" onclick="downloadSbom('stix21', this)">
+                        <button type="button" class="btn btn-dark w-100 sbom-download-btn" data-format="stix21">
                             <i class="bi bi-download me-1"></i>Download JSON
                         </button>
                         <small class="text-muted d-block text-center mt-2">
@@ -179,5 +179,12 @@ curl -sk -H "X-API-Key: $SENTRIKAT_API_KEY" \
             btn.innerHTML = originalHtml;
         }
     }
+
+    // CSP: wire former inline onclick handlers via addEventListener (M-7).
+    document.querySelectorAll('.sbom-download-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            downloadSbom(btn.dataset.format, btn);
+        });
+    });
 </script>
 {% endblock %}

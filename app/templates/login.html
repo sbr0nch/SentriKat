@@ -255,7 +255,7 @@
                     </span>
                 </button>
 
-                <button type="button" class="btn btn-secondary" onclick="backToLogin()">
+                <button type="button" class="btn btn-secondary" id="backToLoginBtn">
                     <i class="bi bi-arrow-left me-2"></i>Back to Login
                 </button>
             </form>
@@ -693,6 +693,10 @@
 
         // Check SAML on page load
         checkSamlStatus();
+
+        // CSP: wire former inline onclick handlers via addEventListener (M-7).
+        const _btnBack = document.getElementById('backToLoginBtn');
+        if (_btnBack) _btnBack.addEventListener('click', backToLogin);
     </script>
 </body>
 </html>

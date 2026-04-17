@@ -36,7 +36,7 @@
         <div class="d-flex gap-2 align-items-center flex-wrap">
             <span class="stat-pill">Total<span class="count" id="statTotal">–</span></span>
             <span class="stat-pill overdue"><i class="bi bi-exclamation-triangle me-1"></i>Overdue<span class="count" id="statOverdue">–</span></span>
-            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadAssignments()" title="Reload">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="reloadAssignmentsBtn" title="Reload">
                 <i class="bi bi-arrow-clockwise"></i>
             </button>
         </div>
@@ -51,7 +51,7 @@
     <!-- Filters -->
     <div class="card mb-3">
         <div class="card-body py-3">
-            <form id="filterForm" class="row g-2 align-items-end" onsubmit="return applyFilters(event)">
+            <form id="filterForm" class="row g-2 align-items-end">
                 <div class="col-md-3">
                     <label class="form-label small mb-1">Search</label>
                     <input type="text" class="form-control form-control-sm" id="fSearch"
@@ -251,7 +251,7 @@
             <td>${dueLabel}</td>
             <td>${trackerCell(a)}</td>
             <td class="text-end">
-              <button type="button" class="btn btn-sm btn-outline-primary" onclick="openDetail(${a.id})">
+              <button type="button" class="btn btn-sm btn-outline-primary assignment-action" data-action="detail" data-assignment-id="${a.id}">
                 <i class="bi bi-eye"></i>
               </button>
             </td>
@@ -323,18 +323,18 @@
         info.textContent = `${from}–${to} of ${data.total}`;
         let html = '';
         html += `<li class="page-item ${data.page <= 1 ? 'disabled' : ''}">
-            <a href="#" class="page-link" onclick="loadAssignments(${data.page - 1}); return false;">Prev</a>
+            <a href="#" class="page-link assignment-page" data-page="${data.page - 1}">Prev</a>
         </li>`;
         // Render up to 7 page buttons centered around current page
         const start = Math.max(1, data.page - 3);
         const end   = Math.min(totalPages, start + 6);
         for (let p = start; p <= end; p++) {
             html += `<li class="page-item ${p === data.page ? 'active' : ''}">
-                <a href="#" class="page-link" onclick="loadAssignments(${p}); return false;">${p}</a>
+                <a href="#" class="page-link assignment-page" data-page="${p}">${p}</a>
             </li>`;
         }
         html += `<li class="page-item ${data.page >= totalPages ? 'disabled' : ''}">
-            <a href="#" class="page-link" onclick="loadAssignments(${data.page + 1}); return false;">Next</a>
+            <a href="#" class="page-link assignment-page" data-page="${data.page + 1}">Next</a>
         </li>`;
         btns.innerHTML = html;
     }
@@ -445,19 +445,19 @@
                        reopening.
                      </span>`
                   : `<div class="btn-group btn-group-sm">
-                       <button class="btn btn-outline-primary" onclick="changeStatus(${a.id}, 'in_progress')" ${a.status === 'in_progress' ? 'disabled' : ''}>
+                       <button class="btn btn-outline-primary assignment-action" data-action="status" data-assignment-id="${a.id}" data-status="in_progress" ${a.status === 'in_progress' ? 'disabled' : ''}>
                          <i class="bi bi-play-circle me-1"></i>In progress
                        </button>
-                       <button class="btn btn-outline-success" onclick="changeStatus(${a.id}, 'resolved')">
+                       <button class="btn btn-outline-success assignment-action" data-action="status" data-assignment-id="${a.id}" data-status="resolved">
                          <i class="bi bi-check2-circle me-1"></i>Resolved
                        </button>
-                       <button class="btn btn-outline-secondary" onclick="changeStatus(${a.id}, 'accepted_risk')">
+                       <button class="btn btn-outline-secondary assignment-action" data-action="status" data-assignment-id="${a.id}" data-status="accepted_risk">
                          <i class="bi bi-shield-check me-1"></i>Accepted risk
                        </button>
                      </div>`
                 }
               </div>
-              <button class="btn btn-outline-danger btn-sm" onclick="deleteAssignment(${a.id})">
+              <button class="btn btn-outline-danger btn-sm assignment-action" data-action="delete" data-assignment-id="${a.id}">
                 <i class="bi bi-trash me-1"></i>Delete
               </button>
               <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
@@ -530,6 +530,27 @@
     document.addEventListener('DOMContentLoaded', async () => {
         await detectPermissions();
         loadAssignments(1);
+    });
+
+    // CSP: wire former inline event handlers via addEventListener (M-7).
+    document.getElementById('reloadAssignmentsBtn')?.addEventListener('click', function() {
+        loadAssignments();
+    });
+    document.getElementById('filterForm')?.addEventListener('submit', applyFilters);
+    document.addEventListener('click', function(ev) {
+        const pager = ev.target.closest('.assignment-page');
+        if (pager) {
+            ev.preventDefault();
+            loadAssignments(Number(pager.dataset.page));
+            return;
+        }
+        const act = ev.target.closest('.assignment-action');
+        if (!act) return;
+        const aid = Number(act.dataset.assignmentId);
+        const kind = act.dataset.action;
+        if (kind === 'detail') openDetail(aid);
+        else if (kind === 'status') changeStatus(aid, act.dataset.status);
+        else if (kind === 'delete') deleteAssignment(aid);
     });
 </script>
 {% endblock %}
