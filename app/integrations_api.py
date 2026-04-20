@@ -715,70 +715,75 @@ def get_cpe_versions(cpe_vendor, cpe_product):
 
 
 def create_product_from_queue(queue_item):
-    """Create a Product from an ImportQueue item and link it to the originating asset."""
+    """Create a Product from an ImportQueue item and link it to the originating asset.
+
+    Uses a SAVEPOINT (nested transaction) so a duplicate / integrity error on a
+    single queue item only rolls back that item — the surrounding batch in
+    approve_all_queue keeps the Product inserts and status='approved' updates
+    it already made for previous items.
+    """
     try:
-        # Prefer proper columns; fall back to source_data JSON for legacy items
-        source_data = queue_item.get_source_data() if hasattr(queue_item, 'get_source_data') else {}
-        source_type = getattr(queue_item, 'source_type', None) or (source_data.get('source_type') if source_data else None)
-        ecosystem = getattr(queue_item, 'ecosystem', None) or (source_data.get('ecosystem') if source_data else None)
-        key_type = source_data.get('key_type') if source_data else None
+        with db.session.begin_nested():
+            # Prefer proper columns; fall back to source_data JSON for legacy items
+            source_data = queue_item.get_source_data() if hasattr(queue_item, 'get_source_data') else {}
+            source_type = getattr(queue_item, 'source_type', None) or (source_data.get('source_type') if source_data else None)
+            ecosystem = getattr(queue_item, 'ecosystem', None) or (source_data.get('ecosystem') if source_data else None)
+            key_type = source_data.get('key_type') if source_data else None
 
-        product = Product(
-            vendor=queue_item.vendor,
-            product_name=queue_item.product_name,
-            version=queue_item.selected_version or queue_item.detected_version,
-            organization_id=queue_item.organization_id,
-            cpe_vendor=queue_item.cpe_vendor,
-            cpe_product=queue_item.cpe_product,
-            source_type=source_type,
-            ecosystem=ecosystem,
-            source='agent' if source_data and source_data.get('source') == 'push_agent' else None,
-            source_key_type=key_type,
-            active=True
-        )
-        db.session.add(product)
-        db.session.flush()  # Get the ID
+            product = Product(
+                vendor=queue_item.vendor,
+                product_name=queue_item.product_name,
+                version=queue_item.selected_version or queue_item.detected_version,
+                organization_id=queue_item.organization_id,
+                cpe_vendor=queue_item.cpe_vendor,
+                cpe_product=queue_item.cpe_product,
+                source_type=source_type,
+                ecosystem=ecosystem,
+                source='agent' if source_data and source_data.get('source') == 'push_agent' else None,
+                source_key_type=key_type,
+                active=True
+            )
+            db.session.add(product)
+            db.session.flush()  # Get the ID
 
-        # Add to product_organizations many-to-many table for proper org tracking
-        if queue_item.organization_id:
-            org = Organization.query.get(queue_item.organization_id)
-            if org and org not in product.organizations:
-                product.organizations.append(org)
+            # Add to product_organizations many-to-many table for proper org tracking
+            if queue_item.organization_id:
+                org = Organization.query.get(queue_item.organization_id)
+                if org and org not in product.organizations:
+                    product.organizations.append(org)
 
-        # Create ProductInstallation to link product to the originating asset
-        # This is critical for: endpoint detail view, platform display, affected VMs, etc.
-        hostname = source_data.get('hostname') if source_data else None
-        if hostname and queue_item.organization_id:
-            asset = Asset.query.filter_by(
-                hostname=hostname,
-                organization_id=queue_item.organization_id
-            ).first()
-            if asset:
-                # Determine the OS platform from the asset
-                detected_os = ProductInstallation.normalize_os_name(asset.os_name)
+            # Create ProductInstallation to link product to the originating asset
+            # This is critical for: endpoint detail view, platform display, affected VMs, etc.
+            hostname = source_data.get('hostname') if source_data else None
+            if hostname and queue_item.organization_id:
+                asset = Asset.query.filter_by(
+                    hostname=hostname,
+                    organization_id=queue_item.organization_id
+                ).first()
+                if asset:
+                    # Determine the OS platform from the asset
+                    detected_os = ProductInstallation.normalize_os_name(asset.os_name)
 
-                existing_install = ProductInstallation.query.filter_by(
-                    asset_id=asset.id,
-                    product_id=product.id
-                ).filter(ProductInstallation.removed_at.is_(None)).first()
-                if not existing_install:
-                    installation = ProductInstallation(
+                    existing_install = ProductInstallation.query.filter_by(
                         asset_id=asset.id,
-                        product_id=product.id,
-                        version=queue_item.selected_version or queue_item.detected_version,
-                        detected_by='agent',
-                        detected_on_os=detected_os,
-                    )
-                    db.session.add(installation)
-                    logger.info(f"Created ProductInstallation for product {product.id} on asset {asset.hostname}")
+                        product_id=product.id
+                    ).filter(ProductInstallation.removed_at.is_(None)).first()
+                    if not existing_install:
+                        installation = ProductInstallation(
+                            asset_id=asset.id,
+                            product_id=product.id,
+                            version=queue_item.selected_version or queue_item.detected_version,
+                            detected_by='agent',
+                            detected_on_os=detected_os,
+                        )
+                        db.session.add(installation)
+                        logger.info(f"Created ProductInstallation for product {product.id} on asset {asset.hostname}")
 
         return product
     except IntegrityError as e:
-        db.session.rollback()
         logger.warning(f"Duplicate product from queue: {queue_item.vendor} {queue_item.product_name}: {e}")
         return None
     except Exception as e:
-        db.session.rollback()
         logger.error(f"Failed to create product from queue item {queue_item.id}: {e}")
         return None
 
