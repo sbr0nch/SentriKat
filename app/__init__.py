@@ -456,17 +456,18 @@ def create_app(config_class=Config):
 
         @app.after_request
         def _attach_nonce_csp(response):
-            from flask import g
-            nonce = getattr(g, 'csp_nonce', '')
-            nonce_src = f"'nonce-{nonce}'" if nonce else ''
-            # Templates can use ``nonce="{{ csp_nonce }}"`` on inline
-            # <script>/<style>. ``'unsafe-inline'`` stays until every
-            # template has been migrated; see docs/OWASP-ASVS.md for
-            # tracking.
+            # CSP with 'unsafe-inline' only. Emitting a nonce alongside
+            # 'unsafe-inline' would cause modern browsers (CSP2+) to
+            # ignore 'unsafe-inline' and block the ~494 inline on* event
+            # handlers still present in admin_panel/admin/dashboard/base/
+            # product_detail/reset_password. Template nonce="{{ csp_nonce }}"
+            # attributes are harmless placeholders and will be enforced
+            # once the onclick->addEventListener migration (M-7) is
+            # complete; see docs/OWASP-ASVS.md for tracking.
             csp = (
                 "default-src 'self'; "
-                f"script-src 'self' cdn.jsdelivr.net {nonce_src} 'unsafe-inline'; "
-                f"style-src 'self' cdn.jsdelivr.net fonts.googleapis.com {nonce_src} 'unsafe-inline'; "
+                "script-src 'self' cdn.jsdelivr.net 'unsafe-inline'; "
+                "style-src 'self' cdn.jsdelivr.net fonts.googleapis.com 'unsafe-inline'; "
                 "img-src 'self' data: blob: https:; "
                 "font-src 'self' cdn.jsdelivr.net fonts.gstatic.com; "
                 "connect-src 'self' cdn.jsdelivr.net; "
