@@ -9580,6 +9580,52 @@ async function downloadNIS2Report(format) {
     }
 }
 
+async function _downloadGapAnalysis(endpointSlug, label, filenameStem, format) {
+    try {
+        const response = await fetch(`/api/reports/compliance/${endpointSlug}?format=${format}`);
+
+        if (response.status === 403) {
+            const error = await response.json().catch(() => ({}));
+            showToast(error.error || 'Compliance Pack subscription required', 'warning');
+            return;
+        }
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.error || `Failed to generate ${label} report`);
+        }
+
+        const filename = `${filenameStem}-gap-analysis-${new Date().toISOString().split('T')[0]}.${format}`;
+
+        if (format === 'pdf') {
+            const blob = await response.blob();
+            downloadBlob(blob, filename);
+        } else {
+            const data = await response.json();
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            downloadBlob(blob, filename);
+        }
+
+        showToast(`${label} report downloaded: ${filename}`, 'success');
+
+    } catch (error) {
+        console.error(`Error downloading ${label} report:`, error);
+        showToast(`Error: ${error.message}`, 'danger');
+    }
+}
+
+function downloadPciDssReport(format) {
+    return _downloadGapAnalysis('pci-dss', 'PCI-DSS', 'pci-dss', format);
+}
+
+function downloadIso27001Report(format) {
+    return _downloadGapAnalysis('iso-27001', 'ISO 27001', 'iso-27001', format);
+}
+
+function downloadSoc2Report(format) {
+    return _downloadGapAnalysis('soc2', 'SOC 2', 'soc2', format);
+}
+
 async function downloadExecutiveSummary(format) {
     try {
         const response = await fetch(`/api/reports/executive-summary?format=${format}`);

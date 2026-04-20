@@ -3010,6 +3010,71 @@
                                     </div>
                                 </div>
                             </div>
+                            <div class="row g-3 mb-4">
+                                <div class="col-md-4">
+                                    <div class="card h-100">
+                                        <div class="card-body">
+                                            <h6 class="card-title">
+                                                <i class="bi bi-credit-card-2-front me-2"></i>PCI-DSS v4.0 Gap Analysis
+                                            </h6>
+                                            <p class="card-text text-muted small">
+                                                Requirement 6.3 (vulnerability identification &amp; ranking) and 11.3
+                                                (internal/external scanning) coverage assessment.
+                                            </p>
+                                            <div class="btn-group">
+                                                <button class="btn btn-primary" onclick="downloadPciDssReport('json')">
+                                                    <i class="bi bi-filetype-json me-1"></i>JSON
+                                                </button>
+                                                <button class="btn btn-outline-primary" onclick="downloadPciDssReport('pdf')">
+                                                    <i class="bi bi-file-earmark-pdf me-1"></i>PDF
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="card h-100">
+                                        <div class="card-body">
+                                            <h6 class="card-title">
+                                                <i class="bi bi-shield-check me-2"></i>ISO 27001:2022 Gap Analysis
+                                            </h6>
+                                            <p class="card-text text-muted small">
+                                                Annex A vulnerability management controls (A.8.8, A.8.9, A.8.28)
+                                                mapped to your current posture.
+                                            </p>
+                                            <div class="btn-group">
+                                                <button class="btn btn-primary" onclick="downloadIso27001Report('json')">
+                                                    <i class="bi bi-filetype-json me-1"></i>JSON
+                                                </button>
+                                                <button class="btn btn-outline-primary" onclick="downloadIso27001Report('pdf')">
+                                                    <i class="bi bi-file-earmark-pdf me-1"></i>PDF
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="card h-100">
+                                        <div class="card-body">
+                                            <h6 class="card-title">
+                                                <i class="bi bi-award me-2"></i>SOC 2 Gap Analysis
+                                            </h6>
+                                            <p class="card-text text-muted small">
+                                                Trust Services Criteria (Security) — CC7.1 system monitoring and
+                                                CC7.2 vulnerability remediation.
+                                            </p>
+                                            <div class="btn-group">
+                                                <button class="btn btn-primary" onclick="downloadSoc2Report('json')">
+                                                    <i class="bi bi-filetype-json me-1"></i>JSON
+                                                </button>
+                                                <button class="btn btn-outline-primary" onclick="downloadSoc2Report('pdf')">
+                                                    <i class="bi bi-file-earmark-pdf me-1"></i>PDF
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
 
                             <!-- Severity Breakdown -->
                             <div class="card mb-4">
@@ -3250,9 +3315,9 @@
                                                     <i class="bi bi-gear me-1"></i>Manage
                                                 </button>
                                                 <ul class="dropdown-menu">
-                                                    <li><a class="dropdown-item" href="/admin#complianceReportsSection"><i class="bi bi-file-earmark-bar-graph me-2"></i>PCI-DSS Report</a></li>
-                                                    <li><a class="dropdown-item" href="/admin#complianceReportsSection"><i class="bi bi-file-earmark-bar-graph me-2"></i>ISO 27001 Report</a></li>
-                                                    <li><a class="dropdown-item" href="/admin#complianceReportsSection"><i class="bi bi-file-earmark-bar-graph me-2"></i>SOC 2 Report</a></li>
+                                                    <li><a class="dropdown-item" href="/admin-panel#settings:compliance"><i class="bi bi-file-earmark-bar-graph me-2"></i>PCI-DSS Report</a></li>
+                                                    <li><a class="dropdown-item" href="/admin-panel#settings:compliance"><i class="bi bi-file-earmark-bar-graph me-2"></i>ISO 27001 Report</a></li>
+                                                    <li><a class="dropdown-item" href="/admin-panel#settings:compliance"><i class="bi bi-file-earmark-bar-graph me-2"></i>SOC 2 Report</a></li>
                                                 </ul>
                                             </div>
                                             {% elif addon_eligible %}
