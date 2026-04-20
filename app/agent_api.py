@@ -3416,7 +3416,16 @@ def create_agent_key():
         created_by=user.id
     )
 
-    if data.get('expires_days'):
+    if data.get('expires_at'):
+        try:
+            expires_str = data['expires_at']
+            if 'T' in expires_str:
+                agent_key.expires_at = datetime.fromisoformat(expires_str.replace('Z', '+00:00'))
+            else:
+                agent_key.expires_at = datetime.strptime(expires_str, '%Y-%m-%d')
+        except (ValueError, TypeError) as e:
+            return jsonify({'error': f'Invalid expires_at format: {e}'}), 400
+    elif data.get('expires_days'):
         from datetime import timedelta
         agent_key.expires_at = datetime.utcnow() + timedelta(days=data['expires_days'])
 
