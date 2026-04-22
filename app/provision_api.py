@@ -1009,29 +1009,47 @@ def manage_addon():
     if not sub:
         return jsonify({'error': 'No subscription found for this organization'}), 404
 
+    # ------------------------------------------------------------------
+    # Toggle the flag and commit. Any failure HERE rolls back and 500s —
+    # the write is what matters.
+    # ------------------------------------------------------------------
     try:
         addons = sub.get_addons()
-        if action == 'enable':
-            addons[addon_name] = True
-        else:
-            addons[addon_name] = False
+        addons[addon_name] = (action == 'enable')
         sub.set_addons(addons)
         sub.updated_at = datetime.utcnow()
         db.session.commit()
-
-        logger.info(
-            "Addon %s %sd for org=%s",
-            addon_name, action, org_id,
-        )
-
-        return jsonify({
-            'success': True,
-            'addon_name': addon_name,
-            'action': action,
-            'subscription': sub.to_dict(),
-        })
-
     except Exception as e:
         db.session.rollback()
-        logger.exception(f"Failed to {action} addon {addon_name} for org {org_id}: {e}")
+        logger.exception(
+            "Addon commit failed for org=%s addon=%s action=%s: %s",
+            org_id, addon_name, action, e,
+        )
         return jsonify({'error': f'Failed to {action} addon'}), 500
+
+    logger.info("Addon %s %sd for org=%s", addon_name, action, org_id)
+
+    # ------------------------------------------------------------------
+    # Serialise the subscription AFTER the commit has landed. If this
+    # fails — e.g. a relationship can't be loaded or a downstream to_dict
+    # blows up on unexpected state — we must NOT return 500: the caller
+    # would assume the write did not apply, retry, and never observe
+    # success. The write already happened, so we report success and let
+    # the client re-fetch subscription state on its next poll.
+    # ------------------------------------------------------------------
+    response = {
+        'success': True,
+        'addon_name': addon_name,
+        'action': action,
+    }
+    try:
+        response['subscription'] = sub.to_dict()
+    except Exception as e:
+        logger.exception(
+            "Addon %s %sd but subscription serialisation failed for org=%s: %s",
+            addon_name, action, org_id, e,
+        )
+        response['subscription'] = None
+        response['subscription_serialization_error'] = str(e)
+
+    return jsonify(response)
