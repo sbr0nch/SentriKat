@@ -3814,6 +3814,9 @@ class SubscriptionPlan(db.Model):
                 'siem_integration': False,
                 'push_agents': True, 'backup_restore': False,
                 'audit_export': False, 'multi_org': False,
+                # SBOM Export (CycloneDX / SPDX / STIX) starts at Pro per
+                # the public pricing matrix (landing/src/components/Pricing.astro).
+                'sbom_export': False,
                 # compliance_pack is sold as a paid add-on on top of any
                 # plan; it is never part of a plan's base feature set.
                 'compliance_pack': False,
@@ -3838,6 +3841,8 @@ class SubscriptionPlan(db.Model):
                 'siem_integration': False,
                 'push_agents': True, 'backup_restore': False,
                 'audit_export': False, 'multi_org': False,
+                # Starter sits below the SBOM line on the pricing matrix.
+                'sbom_export': False,
                 'compliance_pack': False,
             }),
             'is_default': False, 'sort_order': 1,
@@ -3864,6 +3869,9 @@ class SubscriptionPlan(db.Model):
                 'siem_integration': True,
                 'push_agents': True, 'backup_restore': False,
                 'audit_export': True, 'multi_org': False,
+                # Pro is the first tier where SBOM Export is bundled
+                # (CycloneDX / SPDX / STIX) per the public pricing matrix.
+                'sbom_export': True,
                 # Pro does NOT include compliance_pack (PCI-DSS / ISO 27001 /
                 # SOC 2 gap analysis). That is sold as a separate add-on
                 # priced at €199/mo; see Subscription.addons.
@@ -3889,6 +3897,7 @@ class SubscriptionPlan(db.Model):
                 'siem_integration': True,
                 'push_agents': True, 'backup_restore': True,
                 'audit_export': True, 'multi_org': True,
+                'sbom_export': True,
                 # Compliance Pack is add-on on Business too — not bundled.
                 'compliance_pack': False,
             }),
@@ -3911,6 +3920,7 @@ class SubscriptionPlan(db.Model):
                 'siem_integration': True,
                 'push_agents': True, 'backup_restore': True,
                 'audit_export': True, 'multi_org': True,
+                'sbom_export': True,
                 # Compliance Pack is a paid add-on even for Enterprise —
                 # per marketing copy "on top of any Pro, Business or
                 # Enterprise plan". A concierge/sales flow can toggle the
