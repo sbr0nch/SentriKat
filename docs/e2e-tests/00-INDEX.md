@@ -160,5 +160,18 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 - 🟡 Warning: 6
 - 🔵 Info/UX: 27
 - 🟢 OK passati: 44
+- ⏸️ Test bloccati: 1
 
 *(aggiornati a mano ad ogni commit)*
+
+---
+
+## Backlog "Test bloccati da fix propedeutici" ⏸️
+
+Test che non sono eseguibili finché non viene risolto un bug a monte. Da riprendere dopo la fase di fix.
+
+| Test ID | Fase/Area | Sommario | Bloccato da |
+|---|---|---|---|
+| ⏸️ 03.11.2.9 | 03 / LDAP login | Login di un utente LDAP seedato non può essere testato significativamente finché non c'è la pagina admin per "accettare/invitare" l'utente LDAP prima del login | [03.11.2.3] Sidebar LDAP Users / LDAP Groups sparita |
+
+**Regola operativa**: quando un test fallisce ma è chiaro che dipende da un altro bug non ancora fixato, lo spostiamo qui invece di marcarlo come "bug autonomo" (evita falsi positivi sul conteggio bug). Riapriremo questi test in una seconda passata dopo la fase fix, in ordine di dipendenza (prima i fix bloccanti, poi i test sbloccati).

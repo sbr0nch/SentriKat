@@ -783,6 +783,35 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
   ```
 - **Discovered**: 2026-04-23
 
+#### [03.11.2.9] ⏸️ BLOCKED — Login LDAP `admin.user` → 401, test NON conclusivo finché [03.11.2.3] non è risolto
+
+- **Fase**: 03
+- **Area**: LDAP authentication / login flow
+- **Tipo**: ⏸️ Test bloccato (non un bug autonomo, ma test non eseguibile)
+- **Blocca-chi**: [03.11.2.3] (sidebar LDAP Users sparita) + [03.11.2.2] (form manca Group Mapping)
+- **Environment**: on-prem DEMO, beta.6
+- **Actual**:
+  - `POST /api/auth/login` 401 su `admin.user` / `password123`
+  - Backend log LDAP vuoto
+- **Interpretazione corretta (via chiarimento utente)**:
+  > "Questo user non è stato provisionato. LDAP è connesso ma io come admin non ho accettato l'user. Non posso testarlo se non ho le pagine vecchie di LDAP user control e accettare l'utente su SentriKat."
+  - Il flow LDAP **corretto** di SentriKat richiede che un admin, dalla pagina "LDAP Users" (bug 03.11.2.3 — **sparita**), selezioni gli utenti LDAP da **accettare/invitare** prima che possano loggare
+  - Un utente LDAP non ancora accettato che tenta login → 401 è **comportamento atteso**, non un bug
+  - Senza la pagina di accettazione in sidebar (sparita per regressione mode-gating), non c'è modo di accettare `admin.user` → quindi 401 resta bloccato
+  - Il log vuoto è **coerente** con questo: il backend vede un utente sconosciuto, ritorna 401 senza tentare LDAP (non c'è un record utente provisionato → niente da tentare)
+- **Non è una regressione di LDAP auth in sé**: è bloccato dalla regressione a monte [03.11.2.3]
+- **Riapertura del test (dopo fix di 03.11.2.3)**:
+  1. Admin va in `Users & Access → LDAP Users` (voce ripristinata)
+  2. Seleziona `admin.user` dalla lista utenti LDAP scoperti + clicca "Accept" / "Invite" / "Provision"
+  3. Verifica creazione record utente in "All Users"
+  4. Logout + login come `admin.user` / `password123` → **ALLORA** il test del login LDAP sarà significativo
+- **Cluster di regressioni LDAP in beta.6** (conferma):
+  - [03.11.2.2] (High) Form LDAP manca Group Mapping fields
+  - [03.11.2.3] (High) Sidebar Users & Access manca LDAP Users / LDAP Groups — **blocca questo test**
+  - [03.11.2.9] ⏸️ Login LDAP 401 → **non è bug autonomo, è conseguenza di 03.11.2.3**
+- **Status**: **BLOCKED** — spostato nel backlog "Test bloccati da fix propedeutici" nel 00-INDEX
+- **Discovered**: 2026-04-23
+
 #### [03.11.1.3] 🔁 Conferma bug [02.7.7] anche su on-prem: subtitle pagina "LDAP configuration, SMTP settings, and system options"
 
 - **Fase**: 03
