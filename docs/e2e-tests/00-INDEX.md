@@ -110,14 +110,15 @@ Ogni bug/osservazione va aggiunta con questo schema:
 | 2026-04-23 | 02 | 409 true duplicate + pricing + Subscription | 🟢 409 on same email + UI chiara; 🟢 /pricing OK; 🟡 02.7.6 "Billing Monthly / Renews 23 May" su EA gratuito; 🔵 4 info su Subscription (subtitle LDAP hardcoded, breadcrumb Administration, no EA badge, no usage quota, SBOM Export mismatch sidebar vs feature list) — **FASE 02 chiusa al 90%** |
 | 2026-04-23 | 03 | Install beta.6 on Windows + first-boot | 🟢 build OK (~2min), 3 container healthy; 🔴 03.5.3 VERSION file inchiodato a beta.2 nel tag beta.6 (health+header dicono versione sbagliata); 🟡 03.5.4 Flask-Limiter in-memory storage (no Redis); 🟡 03.5.5 ERROR log per metrics key assente (dovrebbe essere WARN/INFO); 🔵 03.5.6 APScheduler missed jobs in catch-up; 🟢 wizard /setup visibile 6-step; 🔵 03.6.2 Multi-Tenancy listata in welcome anche su DEMO |
 | 2026-04-23 | 03 | Setup wizard walk + first login | 🔴 **03.6.3 HIGH** wizard auto-locka dopo step 3, `POST /api/setup/seed-services` → 403 "Setup already completed", step 5-6 mai visibili; 🔴 03.6.6 sezione "Platform Operations" (SaaS) visibile in sidebar on-prem; 🔵 03.6.5 label "Create →" su step intermedi (ambiguo), 03.6.7 debug log JS in production, 03.6.8 nessun 302 su /setup post-lock; 🟢 password validation client-side, org+admin+login OK; 🔁 VERSION bug [03.5.3] CONFERMATO su 3 canali (VERSION file, /api/health, footer UI) + JS core hardcoded "v1.0.0" |
+| 2026-04-23 | 03 | Sidebar map + Platform Operations probing | 🟢 mappa sidebar on-prem documentata (confronto vs SaaS Starter); 🔴 03.7.2 pagina Webhook Events mostra copy "upstream SentriKat-web license server" con concetti SaaS-only (plan change/revocation); 🔴 03.7.3 typo `/ap1/license/events` (dovrebbe essere `/api/`); 🔴 03.7.4 pagina Usage Uploads dice "this SaaS" + espone comando Python in UI customer-facing (privacy/trust issue per on-prem); 🔵 03.7.5 `system_settings` senza chiavi setup (flag altrove); 🟢 03.7.6 empty-state banner actionable ("Run CISA sync", "Add Products"); 🔵 03.7.7 nessun errore console → rafforza severity 03.6.6 (non cosmetic, funzionale) |
 
 ---
 
 ## Bug counter globale
 
-- 🔴 Bug: 8
+- 🔴 Bug: 11
 - 🟡 Warning: 5
-- 🔵 Info/UX: 17
-- 🟢 OK passati: 40
+- 🔵 Info/UX: 20
+- 🟢 OK passati: 42
 
 *(aggiornati a mano ad ogni commit)*

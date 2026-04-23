@@ -325,3 +325,181 @@
 ---
 
 *(aggiornamento incrementale — dashboard post-login + esplorazione menu "Platform Operations" da confermare, poi configurazione integrazioni testlab, poi deploy agent)*
+
+---
+
+## 03.7 — Mapping sidebar post-login + approfondimento "Platform Operations"
+
+### [03.7.1] Sidebar on-prem DEMO (super_admin) — mappa completa ✅
+
+- **Fase**: 03
+- **Area**: Post-setup / navigation
+- **Tipo**: 🟢 OK (mapping)
+- **Mappa completa sidebar osservata** (on-prem, primo admin auto-promosso super_admin, edition DEMO):
+
+```
+OVERVIEW
+  - Dashboard
+  - Assignments
+
+INVENTORY
+  - Products ▼
+    - Products List
+    - Endpoints
+    - Containers
+    - Dependencies
+    - Import Queue
+    - SBOM Export
+    - Exclusions
+
+MANAGEMENT
+  - Users & Access ▼
+    - All Users
+  - Organizations
+
+INTEGRATIONS
+  - Integrations ▼
+    - Agent Keys
+    - Agent Activity
+    - Scheduled Reports
+    - Issue Trackers
+
+SYSTEM
+  - Settings ▼
+    - Authentication
+    - Alert Management
+    - Email (SMTP)
+    - SIEM / Syslog
+    - System
+    - Compliance
+    - Appearance
+    - License
+    - Health Checks
+    - System Logs
+    - Admin Guide
+
+PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
+  - Cross-Repo Integration ▼
+    - Webhook Events
+    - Usage Uploads
+```
+
+- **Confronto con SaaS Starter (fase 02 [02.7.3])**:
+  - On-prem aggiunge: `Organizations` (multi-tenant), `Scheduled Reports`, `Issue Trackers`, 11 voci in `Settings` (Auth, SIEM/Syslog, System, Compliance, Appearance, License, Health Checks, System Logs, Admin Guide); **manca** `Subscription` (corretto, è SaaS-only); più sezione **PLATFORM OPERATIONS** non prevista.
+  - SaaS Starter ha solo `Alert Management / Email & Notifications / Subscription` sotto Settings (3 voci) — feature gating coerente.
+- **Discovered**: 2026-04-23
+
+### [03.7.2] 🔴 HIGH — `Webhook Events` page: contenuto 100% SaaS-specific esposto in on-prem
+
+- **Fase**: 03
+- **Area**: Platform Operations / mode gating
+- **Tipo**: 🔴 Bug
+- **Severity**: **High** (consolida [03.6.6]: non è solo menu cosmetic, la pagina è funzionalmente accessibile e mostra copy SaaS-only)
+- **URL visitato**: cliccando `Platform Operations → Cross-Repo Integration → Webhook Events`
+- **Network**: nessun errore console, endpoint risponde OK
+- **Actual — contenuto pagina**:
+  ```
+  License Webhook Events Received
+  Events pushed by the upstream SentriKat-web license server to POST /ap1/license/events.
+  Shows the last 0 entries from the idempotency cache (max 200, retention 24h).
+  [Back to Super Admin]
+
+  No webhook events received yet. When the upstream license server sends its
+  first event (plan change, revocation, suspension, etc.), it will appear here.
+  ```
+- **Note**: parla esplicitamente di "upstream SentriKat-web license server" che gestisce "plan change, revocation, suspension" — concetti SaaS puri. Su on-prem DEMO/PRO non c'è un upstream license server che manda questi eventi.
+- **Discovered**: 2026-04-23
+
+### [03.7.3] 🔴 HIGH — Typo nell'endpoint documentato: `POST /ap1/license/events`
+
+- **Fase**: 03
+- **Area**: Platform Operations / Webhook Events / documentazione inline
+- **Tipo**: 🔴 Bug
+- **Severity**: **Medium** (chiunque copi-incolli questo path per debug/configurazione lo troverà broken; degrada fiducia nel prodotto)
+- **Actual**: il testo descrittivo della pagina Webhook Events dice:
+  `"Events pushed by the upstream SentriKat-web license server to POST /ap1/license/events"`
+  Il path `/ap1/` è evidentemente un **typo** (`ap1` vs `api`).
+- **Expected**: `POST /api/v1/license/events` o `POST /api/license/events` (da confermare nel codice)
+- **Impatto**:
+  - Se questa stringa è solo descrittiva hardcoded → typo da correggere nel template
+  - Se è il path effettivo dell'endpoint → funzione probabilmente rotta (ma l'utente non può testare perché è on-prem, non riceve mai webhook dal license server)
+- **Fix candidato**: grep `'/ap1/'` nel repo — se appare solo nel template descrittivo è cosmetic; se appare anche in una `@app.route` è broken functionally
+- **File sospetto**: `app/templates/super_admin_webhook_events.html` (nome template visto nel mapping originale)
+- **Discovered**: 2026-04-23
+
+### [03.7.4] 🔴 HIGH — `Usage Uploads` page: copy parla di "this SaaS" su installazione on-prem
+
+- **Fase**: 03
+- **Area**: Platform Operations / mode gating
+- **Tipo**: 🔴 Bug
+- **Severity**: **Medium-High** (copy hardcoded senza mode detection; confonde/allarmante per customer on-prem che leggono "upstream license server" e pensano che i loro dati siano inviati fuori)
+- **URL**: `Platform Operations → Usage Uploads`
+- **Network**: nessun errore, pagina carica regolarmente
+- **Actual — contenuto pagina**:
+  ```
+  Usage Metering Uploads
+  Hourly usage rollups pushed from this SaaS to the upstream license server at /v1/metrics/usage.
+  Runs at minute :05 of every hour under the scheduler leader lock.
+
+  No usage uploads have been performed yet. The metering job runs hourly at minute :05.
+  You can trigger it manually with:
+
+      docker compose exec sentrikat python -c "
+      from app import create_app
+      from app.scheduler import usage_metering_upload_job
+      usage_metering_upload_job(create_app())
+      "
+  ```
+- **Issue multipli** in questa singola pagina:
+  1. Dice "**from this SaaS**" — ma siamo in `SENTRIKAT_MODE=onpremise`. Copy hardcoded senza detection
+  2. Una installazione on-prem DEMO/PRO **non deve** mandare usage rollups "upstream" (privacy/compliance): cosa succede se il job parte? (teoricamente fail perché manca `SENTRIKAT_METRICS_KEY`, ma la pagina suggerisce comunque di lanciarlo)
+  3. La pagina **espone comandi tecnici di debug Python** a un super_admin UI. Non è una console: è una feature page. Suggerisce all'utente di eseguire `docker compose exec ... python -c "..."` che richiede shell host access — info da runbook, non da UI customer-facing
+- **Privacy concern**: un customer on-prem sensibile (healthcare/finance/classified) leggendo questa pagina potrebbe legittimamente chiedersi: "i miei dati vengono caricati ovunque?" La presenza della voce + copy "pushed to upstream" → problema di trust
+- **Fix candidato**:
+  - Intero menu `Platform Operations` nascosto quando `SENTRIKAT_MODE != 'saas'` (risolve anche [03.6.6] in un colpo)
+  - Se mantenuto, il copy deve distinguere on-prem vs SaaS
+  - Il comando CLI debug va in docs/runbook, non in UI
+- **Discovered**: 2026-04-23
+
+### [03.7.5] 🔵 Info — `system_settings` table NON contiene chiavi `%setup%`
+
+- **Fase**: 03
+- **Area**: Setup state storage / investigation [03.6.3]
+- **Tipo**: 🔵 Info
+- **Actual**:
+  ```sql
+  SELECT key, value FROM system_settings WHERE key LIKE '%setup%';
+  → (0 rows)
+  ```
+- **Interpretazione**: il flag `setup_complete` non è in `system_settings`. Potrebbe essere:
+  - in un'altra tabella (candidati: `system_state`, `app_state`, `bootstrap`)
+  - derivato dall'esistenza di `User` con `role=super_admin` (se esiste almeno 1 → setup considered done)
+  - una colonna in `Organization` o un singleton `SetupState`
+- **Rilevante per [03.6.3]**: senza conoscere dove risiede il flag, non c'è workaround user-level per sbloccare il wizard. Se è derivato dalla presenza admin → unica via è wipe volumi + re-install.
+- **Follow-up TODO (solo lettura, nessun fix)**: quando investigheremo il codice per il report finale, cercare `setup_complete` o `is_setup_done` in `app/models.py` e `app/setup.py` per mappare la sorgente di truth.
+- **Discovered**: 2026-04-23
+
+### [03.7.6] Dashboard empty state: banner actionable ben fatti ✅
+
+- **Fase**: 03
+- **Area**: Dashboard / empty state
+- **Tipo**: 🟢 OK
+- **Actual**: in cima alle pagine (presumibilmente globale, non solo dashboard) appaiono 2 banner:
+  - **Rosso** (critical): `"No vulnerability data loaded. Run an initial CISA KEV sync to start matching."`
+  - **Azzurro** (info): `"No products configured yet. Add products to start vulnerability tracking."` + link cliccabile "Add Products"
+- **Valutazione UX**: chiaro, actionable, guida l'utente verso i primi step. Migliore dell'onboarding SaaS che è muto ([02.7.4]).
+- **Follow-up TODO**: verificare se i banner sono globali (visibili su ogni pagina finché vero) o solo in dashboard; verificare se il bottone "Run CISA sync" esiste e se `Add Products` porta alla pagina corretta (`/products`?).
+- **Discovered**: 2026-04-23
+
+### [03.7.7] 🔵 Nessun errore console su click delle pagine Platform Operations
+
+- **Fase**: 03
+- **Area**: Frontend / JS error hygiene
+- **Tipo**: 🔵 Info
+- **Actual**: utente conferma che cliccando `Webhook Events` e `Usage Uploads` NON ci sono errori in console del browser; le pagine caricano pulite, endpoint risponde 200
+- **Note**: è una buona notizia tecnicamente, ma **aggrava [03.6.6]** perché il bug non è solo cosmetico (voce visibile ma endpoint bloccato) — le pagine sono davvero funzionanti e accessibili
+- **Discovered**: 2026-04-23
+
+---
+
+*(next: dashboard screenshot attesa dall'utente — poi configurazione integrazioni testlab)*
