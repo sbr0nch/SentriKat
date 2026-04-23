@@ -34,7 +34,7 @@ Ogni fase ha un proprio file `NN-nome.md` (creato al momento, non tutti in antic
 | # | File | Area | Status |
 |---|---|---|---|
 | 01 | `01-landing-site.md` | Landing `sentrikat.com`: nav, CTA, pagine marketing, blog, vs/*, compliance, pricing, legal, sitemap, RSS, cookie banner | ✅ completata (3 bug, 1 warn, 3 info, 18 OK — follow-up non bloccanti aperti) |
-| 02 | `02-signup-saas.md` | Signup SaaS: form Early Access, capacity check, `/api/v1/provision/trial`, Stripe checkout, webhook, bridge provisioning → `app.sentrikat.com` | ⬜ |
+| 02 | `02-signup-saas.md` | Signup SaaS: form Early Access, capacity check, `/api/v1/provision/trial`, Stripe checkout, webhook, bridge provisioning → `app.sentrikat.com` | 🟡 in corso |
 | 03 | `03-signup-onprem.md` | Signup on-prem: lead/contact sales, acquisto license, download binario, install Docker, setup wizard, attivazione RSA, hardware lock | ⬜ |
 | 04 | `04-portal-customer.md` | `portal.sentrikat.com` customer: OTP login, dashboard, account, licenze, downloads, support/feedback, checkout, upgrade, logout | ⬜ |
 | 05 | `05-portal-admin.md` | `portal.sentrikat.com` admin: 25 pagine admin (customers, licenses, plans, leads, demo-requests, feedback, audit, logs, usage-metrics, ecc.) | ⬜ |
