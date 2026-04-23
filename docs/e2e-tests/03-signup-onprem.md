@@ -1018,6 +1018,73 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 - **Valutazione**: coerente col workaround applicato (prima host.docker.internal fallisce, dopo XML paste con localhost funziona). Rafforza [03.11.3.2]
 - **Discovered**: 2026-04-23
 
+#### [03.11.3.12] Role→Sidebar matrix on-prem DEMO completa ✅ + osservazione `manager == org_admin`
+
+- **Fase**: 03
+- **Area**: Role-based access / sidebar gating / dim 4
+- **Tipo**: 🟢 OK (matrix raccolta) + 🔵 Info (osservazione manager vs org_admin)
+- **Matrix raccolta** (on-prem DEMO beta.6, stesso utente SAML con role diversi):
+
+| Role | OVERVIEW (Dashboard, Assignments) | INVENTORY ► Products (full submenu) | INTEGRATIONS ► (Agent Keys, Agent Activity) | MANAGEMENT ► (Users & Access, Organizations) | SYSTEM ► (Settings, License, Logs, ecc.) | PLATFORM OPERATIONS (Cross-Repo) |
+|---|---|---|---|---|---|---|
+| **user / viewer** | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **manager** | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **org_admin** | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **super_admin** (local first-install) | ✅ | ✅ | ✅ (+ Scheduled Reports + Issue Trackers) | ✅ | ✅ (11 voci) | ✅ (bug [03.6.6]) |
+
+- **Osservazione #1 — `manager == org_admin` identico in sidebar**:
+  - Nessuna differenza visibile in sidebar tra i due role. Se c'è differenza tra `manager` e `org_admin` deve essere solo **permissions dentro le stesse pagine** (es. bottone "Create Product" visibile a org_admin ma non a manager? da verificare)
+  - Potenziale UX confusion: se l'admin promuove un utente da manager a org_admin e la sidebar non cambia, l'utente non percepisce l'upgrade
+  - Follow-up TODO: testare azioni CRUD dentro `/products` con role=manager vs role=org_admin per verificare differenziazione effettiva
+- **Osservazione #2 🔵 — `org_admin` non vede MANAGEMENT né SYSTEM**:
+  - Un "organization admin" teoricamente dovrebbe poter gestire almeno gli utenti della propria org (MANAGEMENT → Users & Access) e alcune settings org-scoped (SMTP per-org, branding per-org)
+  - Su on-prem la scelta di nascondere tutto a org_admin è legittima perché tutto è gestito dal super_admin; ma in **SaaS mode** dove ogni tenant è gestito dal proprio org_admin, questo diventa un blocker: l'org_admin non può invitare utenti
+  - Da cross-verificare in fase 14 (SaaS-specific)
+- **Discovered**: 2026-04-23
+
+#### [03.11.3.13] SAML user state transitions: Disable / Delete funzionano ✅
+
+- **Fase**: 03
+- **Area**: Users & Access / dim 5 state transitions su SAML user
+- **Tipo**: 🟢 OK
+- **Actual**:
+  - Azioni disponibili per utente SAML in All Users: **Delete** e **Block/Disable** (toggle enabled/disabled)
+  - Entrambe testate dall'utente e funzionanti ("funzionano entrambe")
+  - NON presente azione "Force password change" → **corretto** (password gestita da Keycloak, SentriKat non può forzare change — UI la nasconde invece di esporre azione non funzionante)
+  - NON presenti azioni più avanzate (ban, quarantena, force 2FA) → ragionevole subset
+- **Implicit confirmation**: dopo disable l'utente non può più loggare (atteso, confermato dall'utente "tutto il resto sembra configurato correttamente")
+- **Differenza intelligente vs utente locale**: per un utente locale SentriKat mostra anche "Force password change" + reset email; per SAML user queste azioni sono correttamente nascoste → design role-aware
+- **Follow-up TODO**: test esplicito che login SSO di un utente disabled sia rifiutato con messaggio chiaro (non silent failure) + verificare che il DB abbia `is_active=False` o flag equivalente
+- **Discovered**: 2026-04-23
+
+#### [03.11.3.15] 🔵 UX — Popup di conferma "Permanent deletion user" con stile testo non formattato
+
+- **Fase**: 03
+- **Area**: Users & Access / confirmation dialog / UX polish
+- **Tipo**: 🔵 Info (UX)
+- **Severity**: Low (funziona ma visivamente scadente)
+- **Actual**: durante il delete dell'utente SAML, il popup di conferma "permanent deletion" mostra testo **non formattato / stile grezzo** (probabilmente `window.confirm()` browser-native o modal con CSS non applicato)
+- **Atteso**: modal branded SentriKat con stile coerente (bordi, typography Inter, colori palette, bottone rosso "Delete" / grigio "Cancel")
+- **Fix candidato**:
+  - Sostituire `window.confirm()` con modal Bootstrap (già presente nei vendor assets `/app/static/vendor/bootstrap/`)
+  - O componente React/Vanilla custom con stile brand
+- **Discovered**: 2026-04-23
+
+#### [03.11.3.14] SAML complete (dim 1+3+4+5) ✅ — passaggio a Jira
+
+- **Tipo**: 🟢 OK (area conclusa)
+- **Dims chiuse**:
+  - ✅ dim 1 Happy path — 03.11.3.7 login SSO OK
+  - ✅ dim 2 Persistence — config SAML sopravvive (implicito)
+  - ✅ dim 3 CRUD parziale — auto-provision 03.11.3.8, role change 03.11.3.10, delete 03.11.3.13
+  - ✅ dim 4 Role-based — matrix 03.11.3.12
+  - ✅ dim 5 State transitions parziale — 03.11.3.13
+- **Dim non ancora testate (follow-up opzionale)**:
+  - ⬜ dim 6 Negative — wrong password (lato Keycloak), missing SAML attribute, expired assertion, replay attack, invalid signature
+  - ⬜ dim 7 Integration — audit log evento `user.login.saml`, email digest include SAML users, webhook outbound per login, scheduled report audit del SAML
+- **Valutazione area SAML**: **funziona** dopo workaround `[03.11.3.2]`. 1 High (docker network trap) + 4 Info config testlab. **Zero** regressioni strutturali (vs LDAP che ne ha 4). Architetturalmente l'area SAML è sana
+- **Discovered**: 2026-04-23
+
 ---
 
 ### 03.13 — CISA / NVD sync (osservazioni di resilience)
