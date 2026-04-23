@@ -921,6 +921,103 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 - **Actual**: il realm Keycloak `sentrikat-test` ha gli stessi 5 utenti dell'OpenLDAP (admin.user, disabled.user [Disabled badge], it.manager, sec.analyst, viewer). Stessa email per user. Parity utile: potremo testare lo stesso utente via LDAP login vs SAML login per confrontare role mapping e user provisioning
 - **Discovered**: 2026-04-23
 
+#### [03.11.3.7] SAML login SSO happy path funziona (con workaround XML-paste per 03.11.3.2) ✅
+
+- **Fase**: 03
+- **Area**: SAML login flow / dim 1 happy path
+- **Tipo**: 🟢 OK
+- **Actual**:
+  - Utente scarica metadata XML dal browser su `http://localhost:8180/realms/sentrikat-test/protocol/saml/descriptor` (tutti gli URL dentro sono `localhost:8180`, non `host.docker.internal`)
+  - Paste XML nel form IdP Metadata di SentriKat, Save + Test → verde
+  - Logout + click "Login with SSO"
+  - Browser rediretto correttamente a Keycloak login `http://localhost:8180/realms/sentrikat-test/protocol/saml`
+  - Login con utente Keycloak (password pre-configurata)
+  - Redirect a SentriKat dashboard → login completo
+- **Evidence XML metadata rilevante**:
+  - `entityID="http://localhost:8180/realms/sentrikat-test"`
+  - `SingleSignOnService Location="http://localhost:8180/realms/sentrikat-test/protocol/saml"` (HTTP-POST + HTTP-Redirect)
+  - X509 certificate embedded
+  - NameID formats supportati: persistent, transient, unspecified, emailAddress
+- **Discovered**: 2026-04-23
+
+#### [03.11.3.8] Auto-provision new user at first SAML login ✅
+
+- **Fase**: 03
+- **Area**: SAML / user provisioning / dim 3 CRUD
+- **Tipo**: 🟢 OK
+- **Actual**: utente SAML sconosciuto al primo login viene **creato automaticamente** nel DB SentriKat. Verificato:
+  - Admin locale va in `Users & Access → All Users` e vede il nuovo utente presente (nome + email dall'assertion SAML)
+  - Role default = "user" (ruolo minimo, coerente con il toggle "Auto-provision new users: ON" salvato)
+- **Differenza marcata con LDAP**:
+  - SAML: user auto-created, admin può poi promuoverlo post-login
+  - LDAP: user NON auto-created fino a invite/accept (03.11.2.9), e la UI per inviting è sparita (03.11.2.3)
+  - Stessa backend logic esiste (`provisioning.py`), ma esposizione UI asimmetrica → un'altra evidenza che la regressione ha colpito LDAP più pesantemente di SAML
+- **Discovered**: 2026-04-23
+
+#### [03.11.3.9] 🔵 Info — Sidebar utente SAML con role default ("user") = menu minimo
+
+- **Fase**: 03
+- **Area**: Post-login / role-based sidebar / dim 4 role-based access
+- **Tipo**: 🔵 Info (prima parte della mappatura sidebar per role)
+- **Actual** (screenshot 2 utente):
+  ```
+  OVERVIEW
+    - Dashboard
+    - Assignments
+  INVENTORY
+    - Products ▼
+      - Products List
+      - Endpoints
+      - Containers
+      - Dependencies
+      - Import Queue
+      - SBOM Export
+      - Exclusions
+  (no MANAGEMENT, no INTEGRATIONS, no SYSTEM, no PLATFORM OPERATIONS)
+  ```
+- **Valutazione vs super_admin sidebar [03.7.1]** (che ha TUTTE le sezioni):
+  - ✅ Un utente "user" non vede `MANAGEMENT` (niente "Users & Access", niente "Organizations") → corretto
+  - ✅ Non vede `INTEGRATIONS` (Agent Keys, Agent Activity, Scheduled Reports, Issue Trackers) → corretto
+  - ✅ Non vede `SYSTEM` (Settings tab → Auth, Alerts, License, ecc.) → corretto
+  - ✅ Non vede `PLATFORM OPERATIONS` → corretto (bug [03.6.6] viene automaticamente mitigato per non-super-admin — buono!)
+  - ❓ Vede completo `INVENTORY → Products` (tutte le sub-voci) → coerente con role "user read-only" solo se poi le azioni CRUD sono gated lato pulsanti/endpoint (da verificare cliccando su Products List se appare "Create Product" button)
+- **Discovered**: 2026-04-23
+
+#### [03.11.3.10] Admin cambio ruolo utente SAML → sidebar si espande (role-based gating funziona) ✅
+
+- **Fase**: 03
+- **Area**: Users & Access / role update / dim 3 CRUD + dim 4 Role-based
+- **Tipo**: 🟢 OK
+- **Actual**: admin locale modifica ruolo dell'utente SAML appena creato da "user" a "org_admin":
+  - Sidebar dopo promotion (screenshot 3) aggiunge sezione:
+    ```
+    INTEGRATIONS
+      - Integrations ▼
+        - Agent Keys
+        - Agent Activity
+    ```
+  - Le voci `Products` (tutte le sub) sono sempre visibili — quindi sono "base" a ogni role ≥ user
+  - Dopo promotion org_admin, l'utente dovrebbe vedere anche `Users & Access`, `Organizations`, `Settings` submenus → **da verificare** nel next test (utente non ha screenshot delle sezioni sotto)
+- **Inference sulla matrix role→menu**:
+  - `user` → OVERVIEW + INVENTORY
+  - `manager` → + ??? (da scoprire)
+  - `org_admin` → + INTEGRATIONS (parziale, forse di più)
+  - `super_admin` → + MANAGEMENT + INTEGRATIONS completi + SYSTEM + PLATFORM OPERATIONS (bug)
+- **Follow-up TODO**: dopo aver cambiato role a `org_admin`, fare refresh completo e catturare sidebar intera; ripetere con `manager`; completare matrix
+- **Discovered**: 2026-04-23
+
+#### [03.11.3.11] 🔵 Info — Sequence network SAML login con errori iniziali poi successi
+
+- **Fase**: 03
+- **Area**: SAML login / network trace
+- **Tipo**: 🔵 Info
+- **Actual** (dal first screenshot): durante i tentativi di login SSO sono visibili:
+  - Prima richiesta `saml?SAMLRequest=...` → `(failed)` 0.0 kB, 6.91 s — coerente con tentativo verso `host.docker.internal` che il browser non risolve → timeout
+  - Richieste successive `saml?SAMLRequest=...` → `(cancel...)` / `(failed)`
+  - Altre `saml?SAMLRequest=...` successivo a paste XML metadata → riuscite (non evidenziate in rosso)
+- **Valutazione**: coerente col workaround applicato (prima host.docker.internal fallisce, dopo XML paste con localhost funziona). Rafforza [03.11.3.2]
+- **Discovered**: 2026-04-23
+
 ---
 
 ### 03.13 — CISA / NVD sync (osservazioni di resilience)
