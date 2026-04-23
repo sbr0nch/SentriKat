@@ -1137,6 +1137,51 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 - **Azione correttiva richiesta prima di procedere**: cambiare Project Key da `SEC` a `VULN`, poi procedere a fetch fields + save + test
 - **Discovered**: 2026-04-23
 
+#### [03.11.4.5] 🔴 HIGH — Validation SSRF su `jira_url` NON rispetta il flag `ALLOW_PRIVATE_URLS=true` (inconsistenza con SMTP/LDAP/SAML)
+
+- **Fase**: 03
+- **Area**: Settings / Issue Trackers / SSRF protection / config consistency
+- **Tipo**: 🔴 Bug
+- **Severity**: **High** (impedisce completamente il testing di Jira con docker-compose testlab; inconsistenza tra moduli sulla stessa security policy)
+- **Environment**: on-prem DEMO beta.6, `ALLOW_PRIVATE_URLS=true` nel `.env`
+- **Steps to reproduce**:
+  1. `.env` contiene `ALLOW_PRIVATE_URLS=true` (configurato all'install dallo script setup-beta6.ps1)
+  2. Settings → Issue Trackers → abilita Jira
+  3. Compila form con `Jira URL = http://host.docker.internal:8080`, username, PAT, project key VULN
+  4. Click Save Settings
+- **Expected**: save OK. Il flag `ALLOW_PRIVATE_URLS=true` autorizza URL su reti private/interne in ambienti di test. Coerente con il comportamento già osservato per:
+  - [03.11.1.1] SMTP `host.docker.internal:1025` → accettato ✅
+  - [03.11.2.1] LDAP `host.docker.internal:389` → accettato ✅
+  - [03.11.3.1] SAML `host.docker.internal:8180` (iniziale, prima di scoprire 03.11.3.2) → accettato lato form save
+- **Actual**:
+  - Toast rosso in alto a destra: `"Error saving settings: Setting "jira_url" targets a private/internal network address. External URLs are required."`
+  - Console: `Failed to load resource: the server responded with a status of 400 (BAD REQUEST)`
+  - Il save del form Jira è **rifiutato** → impossibile procedere con test Jira integration nel nostro env docker
+- **Root cause hypothesis**:
+  - La validation SSRF è implementata **per-endpoint** e quella dell'endpoint `/api/integrations/jira` (o `/api/settings/jira`) non controlla il flag `ALLOW_PRIVATE_URLS` prima di applicare il rifiuto
+  - Oppure il flag è considerato solo per URL "outbound webhook/email/ldap/saml" e non per "URL di integrazione issue tracker" — in tal caso: inconsistenza di design
+  - Oppure la validation è più stretta perché Jira integration prevede anche PAT token trasmesso (potrebbe finire su un honeypot interno) — security-rationale plausibile ma dovrebbe essere documentato nel help text
+- **Impatto**:
+  - **Test bloccato** per Jira integration su testlab locale
+  - **Nessun impatto production** (in prod gli admin puntano a Jira Cloud pubblico o Jira Server su domini pubblici)
+  - Inconsistenza tra moduli genera confusione: "perché SMTP accetta host.docker.internal ma Jira no?"
+- **Fix candidato (per fase fix)**:
+  - Unificare la logica SSRF in `app/network_security.py` (modulo esistente da mappatura originale) e far leggere il flag `ALLOW_PRIVATE_URLS` a TUTTI gli endpoint che validano URL di integrazione
+  - Oppure: permettere un whitelist esplicito per-hostname (es. `ALLOW_PRIVATE_URL_HOSTS=host.docker.internal,docker-host`) per granularità fine
+- **Workaround operativo (per continuare testing senza fix)**:
+  - Opzione A: usare IP pubblico della macchina host al posto di `host.docker.internal` (se la macchina ha IP pubblico raggiungibile dal container — Docker Desktop Windows potrebbe NON permetterlo)
+  - Opzione B: tunnel via ngrok / localtunnel verso jira-mock port 8080 → URL pubblico `xxx.ngrok.io` → accettato dalla validation SSRF → ma jira-mock accetta host header arbitrario? (da verificare)
+  - Opzione C: **saltare il test funzionale Jira** in questa sessione, marcare bug, passare a webhook/syslog
+- **Decisione**: scelta Opzione C — passiamo avanti e torniamo su Jira dopo fase fix
+- **Status test**: ⏸️ **BLOCKED** da questo bug per l'ambiente locale docker-compose. Spostato nel backlog test bloccati
+- **Log evidence (confermato)**:
+  ```
+  WARNI [app.network_security] SSRF blocked: Jira tracker setup attempted request to internal URL: http://host.docker.internal:8080
+  ```
+  → log esplicito dal modulo `app/network_security.py`, con contesto "Jira tracker setup" → **la policy è scritta specificatamente per Jira**, non è un behavior ereditato generico
+- **Confermata specificità per Jira**: la stringa "Jira tracker setup" nel log conferma che la validation ha un code path dedicato per Jira separato dagli altri moduli. SMTP/LDAP/SAML usano un code path che rispetta `ALLOW_PRIVATE_URLS`, Jira no. Bug di design consolidato
+- **Discovered**: 2026-04-23
+
 - **Tipo**: 🟢 OK (area conclusa)
 - **Dims chiuse**:
   - ✅ dim 1 Happy path — 03.11.3.7 login SSO OK
