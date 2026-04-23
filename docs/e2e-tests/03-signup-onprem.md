@@ -2156,6 +2156,175 @@ Obiettivo di questo mini-test: determinare se la policy SSRF (`ALLOW_PRIVATE_URL
 
 ---
 
+#### [03.14.13] Settings → System → `General` sub-tab ✅
+
+- **Fase**: 03 · **Area**: Settings / System / General
+- **Deployment scope**: 🏢☁️ both
+- **Tipo**: 🟢 OK (rendering)
+- **Content**:
+  - **Date & Time Display**: Display Timezone dropdown (default `UTC`), Date Format dropdown (default `2024-01-15 14:30 (ISO)`)
+  - **Network & Proxy**: Verify SSL Certificates toggle (OFF, "Disable if behind corporate proxy with SSL inspection (not recommended for production)"), HTTP Proxy (`http://proxy.company.com:3128` placeholder), HTTPS Proxy, No Proxy Bypass (default `localhost,127.0.0.1,db`)
+  - Bottoni: Save Proxy Settings | Test Connection
+- **Discovered**: 2026-04-23
+
+#### [03.14.14] Settings → System → `Security` sub-tab ✅ + observations
+
+- **Fase**: 03 · **Area**: Settings / System / Security
+- **Deployment scope**: 🏢☁️ both
+- **Tipo**: 🟢 OK
+- **Content**:
+  - **Session Settings**: Session Timeout (default 480 min = 8h, range 5 min – 7 days documentato)
+  - **Login Protection**: Max Failed Login Attempts (default 5), Lockout Duration (default 30 min) — match con [02.6.1] docs
+  - **Password Policy (local users)**: Min Length 8, Require uppercase (✅), Require lowercase (✅), Require number (✅), Require special char (☐ OFF by default)
+  - **Password Expiration**: Password Expiry days (0 = disabled by default)
+  - **Two-Factor Authentication**: "Require 2FA for all users" toggle (OFF by default)
+- **Valutazione**:
+  - ✅ Policy password configurabile e visibile (risolve il dubbio di [02.6.3]: **requires upper+lower+number di default, non solo min 8**)
+  - ✅ Account lockout implementato + configurabile
+  - ✅ 2FA opt-in, feature disponibile ma non forzata
+  - ⚠️ Password Expiry 0 (= no expiry) come default è lato security borderline: NIST SP 800-63B raccomanda di NON forzare expiry, ma SOC 2 / ISO 27001 ne richiedono uno → compliance audit failing di default
+- **Follow-up TODO 03.14.14a**: testare effettivamente che le 5 failed-login attivino il lockout di 30 min
+- **Discovered**: 2026-04-23
+
+#### [03.14.15] Settings → System → `Data Retention` sub-tab ✅
+
+- **Fase**: 03 · **Area**: Settings / System / Data Retention
+- **Deployment scope**: 🏢☁️ both
+- **Tipo**: 🟢 OK
+- **Content**:
+  - Caution banner giallo: "Data older than the retention period will be permanently deleted during cleanup tasks."
+  - Audit Log Retention: 365 days (default)
+  - Sync History Retention: 90 days
+  - Session Log Retention: 30 days
+  - Auto-acknowledge vulnerabilities when software is removed: toggle ON di default
+  - Bottoni: Save Retention Settings | Run Auto-Acknowledge Now
+- **Valutazione**: 1 anno audit log retention compliance-friendly (PCI-DSS 1 year min, ISO 27001 audit trail). Auto-ack feature riduce alert fatigue
+- **Discovered**: 2026-04-23
+
+#### [03.14.16] Settings → Appearance: branding + white-label ✅
+
+- **Fase**: 03 · **Area**: Settings / Appearance
+- **Deployment scope**: 🏢☁️ both
+- **Tipo**: 🟢 OK
+- **Content**:
+  - Application Name (default "SentriKat", configurable — compare in browser title + header)
+  - Support Email (default "support@company.com" placeholder, mostrato sui login errors)
+  - Login Page Message textarea (messaggio libero login page)
+  - Show Version in Footer toggle (ON di default) — **link con bug [03.5.3]**: se la versione è sbagliata e l'admin vuole nasconderla può OFF qui
+  - Show Branding in Compliance Reports toggle (ON) — "Disable for fully white-labeled reports" → feature white-label esplicita
+  - Custom Logo section: Current Logo (mascotte SentriKat default), Upload New Logo (Max 2MB, 128x128 PNG raccomandato)
+- **Valutazione**: white-label feature complete, resellers e enterprise con proprio branding supportati
+- **Discovered**: 2026-04-23
+
+#### [03.14.17] 🔵 i18n — File picker "Datei auswählen / Keine ausgewählt" in tedesco sul logo upload
+
+- **Fase**: 03 · **Area**: Settings / Appearance / i18n browser native
+- **Deployment scope**: 🏢☁️ both (native browser input)
+- **Tipo**: 🔵 Info
+- **Actual**: il pulsante `<input type="file">` nella sezione Upload New Logo mostra `Datei auswählen` / `Keine ausgewählt` (tedesco per "Choose file" / "No file selected")
+- **Pattern consolidato cluster i18n browser-native**:
+  - [02.2.1] tooltip validation DE
+  - [03.12.3] date picker DE
+  - [03.14.4] audit logs date format DE
+  - [03.14.17] file picker DE ← new
+- **Discovered**: 2026-04-23
+
+#### [03.14.18] Settings → Logs (System Logs) ✅
+
+- **Fase**: 03 · **Area**: Settings / Logs / log viewer
+- **Deployment scope**: 🏢☁️ both
+- **Tipo**: 🟢 OK
+- **Content**:
+  - Filtro "Application" (dropdown log file, permette switch tra: application/error/access/ldap/security/audit/performance — atteso)
+  - "All Levels" dropdown (log level filter: INFO/WARN/ERROR)
+  - Search logs text
+  - "200 lines" (count display visibile)
+  - "Showing 6 of 6 lines | File size: 681 B"
+  - Righe mostrate (application.log, ambiente fresco):
+    ```
+    [2026-04-23 14:29:47] INFO in migration ... Will assume transactional DDL
+    [2026-04-23 14:29:47] INFO in migration ... Context impl PostgresqlImpl
+    [2026-04-23 14:29:45] INFO in __init__ (create_app:937): Applying schema migrations for PostgreSQL
+    [2026-04-23 14:29:45] INFO in performance_middleware: Performance middleware enabled
+    [2026-04-23 14:29:45] INFO in logging_config: Log files: application/error/access/ldap/security/audit/performance
+    [2026-04-23 14:29:45] INFO in logging_config: Logging configured. Log directory: /var/log/sentrikat
+    ```
+- **Valutazione**:
+  - ✅ Log viewer in-app accessibile (no shell access needed per troubleshoot basic)
+  - ✅ Switch tra 7 file log possibile
+  - ✅ Filtro level + search
+  - 🔵 Nessun download/export visible — TODO follow-up verifica presenza button Export
+- **Follow-up TODO 03.14.18a**: dopo un po' di attività (es. qualche click) verificare che l'application.log cresca e che lo switch a `security.log` / `ldap.log` mostri contenuto rilevante (ricorda [03.11.2.8] e [03.12.13] che accusavano silence su stdout)
+- **Discovered**: 2026-04-23
+
+#### [03.14.19] 🔵 Admin Guide pagina (non verificata)
+
+- **Fase**: 03 · **Area**: Settings / Admin Guide / documentazione
+- **Deployment scope**: 🏢☁️ both (probabilmente) + 📚 docs
+- **Tipo**: 🔵 Info
+- **Actual** (utente non ha verificato a video): pagina presente, "sono solo dati corretti e funzionano"
+- **Follow-up TODO 03.14.19a**: verificare che il contenuto dell'Admin Guide sia **coerente con entrambe le modalità** (SaaS e on-prem). Se le istruzioni sono scritte per SaaS super-admin ma l'utente on-prem legge le stesse info → confusione. Mapping richiesto pagina per pagina
+- **Follow-up TODO 03.14.19b**: verificare link esterni nella guida (docs.sentrikat.com, sentrikat.com/docs/...) per rotture
+- **Discovered**: 2026-04-23
+
+#### [03.14.20] 🔴 HIGH — Error message **"Demo version limit"** = TERZO nome per lo stesso tier (cluster [03.14.10.expand])
+
+- **Fase**: 03 · **Area**: License error messages / terminology
+- **Deployment scope**: 🏢 on-prem (Community backend)
+- **Tipo**: 🔴 Bug
+- **Severity**: High (aggrava drammaticamente il cluster terminology)
+- **Evidence**:
+  - Tentativo invite user 2: `"Error: Demo version limit: 1 users. Upgrade to Professional for unlimited."`
+  - Tentativo create org 2: `"Error: Demo version limit: 1 organizations. Upgrade to Professional for unlimited."`
+- **Inconsistenza TERMINOLOGY — 3 nomi diversi per lo stesso tier**:
+
+| Sorgente | Nome usato |
+|---|---|
+| Handbook / README fase 0 | "DEMO Edition" |
+| UI License page | "COMMUNITY EDITION" |
+| Health Check | "COMMUNITY" |
+| Error messages (invite/org create) | **"Demo version"** ← terzo nome! |
+| Agent error | "Push Agents require a Professional license" |
+
+- **Impatto aggravato su [03.14.10.expand]**: un customer legge docs "DEMO", UI dice "COMMUNITY", errore dice "Demo version", email marketing forse "Free tier". Confusione totale
+- **Fix candidato**: grep audit su tutto il repo per stringhe `Demo`, `DEMO`, `Community`, `COMMUNITY`, `Free tier`, `Personal use` e uniformare a UN termine ufficiale prima del prossimo release
+- **Discovered**: 2026-04-23
+
+#### [03.14.21] 🔴 HIGH — License limit applicato a **invite manuale** ma **bypassato** da SAML auto-provision
+
+- **Fase**: 03 · **Area**: License limits / user provisioning / feature gating
+- **Deployment scope**: 🏢 on-prem (Community backend) — potenzialmente anche ☁️ SaaS con piano Starter
+- **Tipo**: 🔴 Bug
+- **Severity**: **High** (bypass del limiti commerciali → loss of revenue / compliance licensing)
+- **Environment**: Community Edition, Users 1/1 al limite
+- **Evidence**:
+  - Invite di un secondo user via UI `Users & Access → All Users → Invite` → **bloccato** con "Demo version limit: 1 users"
+  - MA **il SAML auto-provision [03.11.3.8] ha creato con successo un secondo user** (admin SAML dal Keycloak) **senza** triggerare il limit
+  - Utente osserva: `"però se non ricordo male da keycloak sono entrato e l'ha creato l'user"`
+- **Conseguenza**:
+  - Un admin malevolo / creative customer può:
+    1. Setup SentriKat Community (free, 1 user limit)
+    2. Configurare SAML con Keycloak/Azure AD (gratis/esistente)
+    3. Fare login con N utenti diversi via SSO → N users auto-provisioned in SentriKat senza license Pro
+  - **Risultato**: bypass totale del gating 1 user, resa inutile la protezione commerciale
+- **Fix candidato**: il check `user count < tier_limit` deve essere applicato anche nel flow `auto_provision_saml_user()` e `auto_provision_ldap_user()`. Se limit raggiunto: rifiutare il SAML login con messaggio "Tier limit reached. Upgrade or contact admin to delete inactive users"
+- **Cross-ref**: dopo fix di [03.11.2.3] LDAP provisioning tornerà attivo → bug 03.14.21 si estende a LDAP se non fixato uniformemente
+- **Discovered**: 2026-04-23
+
+#### [03.14.22] 🟢 Demo limits enforced CORRECTLY (invite user / create org) ✅ (con caveat [03.14.21])
+
+- **Fase**: 03 · **Area**: License limits enforcement
+- **Deployment scope**: 🏢 on-prem Community
+- **Tipo**: 🟢 OK (il gating funziona, almeno sul flow invite manuale)
+- **Actual**:
+  - Invite second user → rifiutato con messaggio chiaro "Demo version limit: 1 users. Upgrade to Professional for unlimited."
+  - Create second org → rifiutato identico: "Demo version limit: 1 organizations. Upgrade to Professional for unlimited."
+- **Valutazione**: il messaggio d'errore è **chiaro e actionable** (dice il limit esatto + CTA upgrade). Meglio del messaggio fuorviante dell'agent [03.12.14]
+- **Caveat**: messaggio usa "Demo version" = terzo nome [03.14.20]
+- **Discovered**: 2026-04-23
+
+---
+
 #### [03.14.5] Settings → Compliance: UI molto ricca ✅
 
 - **Fase**: 03
