@@ -1863,6 +1863,335 @@ Obiettivo di questo mini-test: determinare se la policy SSRF (`ALLOW_PRIVATE_URL
 
 ---
 
+### 03.14 — System Settings tabs (giro veloce)
+
+#### [03.14.1] Settings → System → `Sync & Updates` tab: feature-rich ✅
+
+- **Fase**: 03
+- **Area**: Settings / System / Sync
+- **URL**: `Settings → System` tab (sub-tab `Sync & Updates`)
+- **Tipo**: 🟢 OK
+- **Content mappato**:
+  - **CISA KEV Sync Schedule**: Enable Automatic Sync (toggle), Sync Interval (Daily/Weekly dropdown), Preferred Time UTC (02:00 default), NVD API Key field, CISA KEV URL (pre-compilato `cisa.gov/.../known_exploited_vulnerabilities.json`)
+  - **NVD Connection Status**: ✅ `Connected` + "Rate limit: 5 req/30s" + badge rosso `NO API KEY` (trasparente sul limite)
+  - **Last Sync**: Never · **Next Scheduled**: Not scheduled · **Total Vulnerabilities**: 639
+  - **Manual Alert Triggers**: `Send Email Alerts Now` + `Send Webhook Alerts Now` buttons (test on-demand dei canali alert configurati)
+  - **EPSS Scoring**: 0 CVEs with EPSS, 0 High Risk, 0% Coverage, Last EPSS Sync: Never, Sync Now button
+  - **CPE Dictionary (Offline)**: 0 Total Entries, 0 With Aliases, 0 Used for Matching, 0% Product Coverage, Last Bulk Download: Never, Sync CPE Dictionary Now / Rebuild from Vulnerabilities buttons
+  - **SentriKat Knowledge Base (KB Sync)**: Human Mappings 0, Auto-Verified 0, Auto-Discovered 0, Community 0, Last Pull: Never
+    - **KB Server: `https://license.sentrikat.com/api`** ← endpoint upstream configurato
+- **Valutazione**: pannello admin completo con controllo granulare sulle 5 sync streams (CISA KEV, NVD, EPSS, CPE Dictionary, KB). UX pulita
+- **Discovered**: 2026-04-23
+
+#### [03.14.2] 🟡 Warning — Auto-sync CISA KEV è OFF di default dopo setup
+
+- **Fase**: 03
+- **Area**: Settings / Sync / defaults
+- **Tipo**: 🟡 Warning
+- **Severity**: Medium (security posture)
+- **Actual**:
+  - Toggle `Enable Automatic Sync`: OFF
+  - `Next Scheduled`: Not scheduled
+  - Significa che senza interazione esplicita dell'admin, SentriKat **non aggiorna mai** il KEV catalog
+- **Impatto**:
+  - Un customer che installa DEMO e non naviga questa pagina resta con CVE data statici
+  - Rischio: nuove vulnerabilità critiche in CISA KEV non vengono tracciate
+  - Aggravante: vulnerability mgmt product che non sincronizza di default contraddice il suo scopo primario
+- **Fix candidato (per fase fix)**:
+  - Default `Enable Automatic Sync = ON` post setup wizard
+  - Oppure: setup wizard step 4 (Seed Catalog, attualmente bloccato [03.6.3]) dovrebbe abilitarlo
+  - Oppure: banner dashboard "Auto-sync not configured — enable?" con CTA
+- **Discovered**: 2026-04-23
+
+#### [03.14.3] 🔵 Info — Discrepanza metrica: `Total Vulnerabilities: 639` qui vs `KEV Catalog: 13,978` in dashboard
+
+- **Fase**: 03
+- **Area**: Metrics consistency / data reporting
+- **Tipo**: 🔵 Info (da chiarire)
+- **Actual**:
+  - Dashboard widget "KEV Catalog": **13,978**
+  - Settings System Sync "Total Vulnerabilities": **639**
+- **Ipotesi**:
+  - 13,978 = aggregato multi-sorgente (CVE.org + NVD + fallback) importato al primo boot
+  - 639 = solo CISA KEV-specific dopo un sync parziale / limitato (CISA KEV attuali sono ~1400+)
+  - Naming confusion: "Total Vulnerabilities" in Sync tab dovrebbe essere "CISA KEV count" per coerenza con il widget dashboard
+- **Fix candidato**: uniformare nomi metrica tra dashboard e pannello admin, oppure affiancare su entrambi tutti i counter (Total CVE, CISA KEV, EPSS, CPE)
+- **Discovered**: 2026-04-23
+
+#### [03.14.4] 🔵 i18n — Audit Logs filtri data `tt.mm.jjjj` (DE placeholder) su sito EN-only
+
+- **Fase**: 03
+- **Area**: i18n / native browser date input
+- **Tipo**: 🔵 Info (3ª occorrenza)
+- **Actual**: i due filtri date range degli Audit Logs (`da...a...`) mostrano placeholder nel formato tedesco `tt.mm.jjjj`. Stesso pattern di [02.2.1], [03.12.3]. Consolidato
+- **Discovered**: 2026-04-23
+
+#### [03.13.2] 🎯 Root cause agent 403/401 DEFINITIVO: Community Edition non include "Push Agents"
+
+- **Fase**: 03
+- **Area**: Agent flow / feature gating / root cause
+- **Tipo**: 🎯 DIAGNOSIS COMPLETE (cross-ref 03.12.6 / 03.12.9 / 03.12.14 / 03.12.15)
+- **Environment**: Agent Activity page (`INTEGRATIONS → Integrations → Agent Activity`)
+- **Actual (smoking gun)**:
+  ```
+  Agent Events:
+    Unknown (172.22.0.1) — License limit exceeded: Push Agents require a Professional license. (18m ago)
+    Unknown (172.22.0.1) — License limit exceeded: Push Agents require a Professional license. (25m ago)
+
+  Agent Activity Log:
+    2026-04-23 21:00:33  LICENSE  License limit exceeded: Push Agents require a Professional license.  172.22.0.1
+    2026-04-23 20:54:01  LICENSE  License limit exceeded: Push Agents require a Professional license.  172.22.0.1
+  ```
+- **Interpretazione**:
+  - ❌ NON è self-revoke (ipotesi 03.12.9 **confutata**, come già da `active=true` in DB)
+  - ❌ NON è DEMO 5-agent limit (erano 0 agenti attivi)
+  - ❌ NON è network / SSL / payload
+  - ✅ **È feature gating: "Push Agents" è un feature Pro-only**. Community Edition può creare la key, scaricare lo script, installarlo, ma il backend `/api/agent/inventory` endpoint rifiuta per license gate
+- **Conferma finale di [03.12.14]**: il messaggio client `"Invalid or missing API key"` è **completamente fuorviante**. Il backend conosce il vero motivo (`License limit exceeded: Push Agents require a Professional license.`), lo logga correttamente nell'Agent Activity, ma restituisce al client una stringa d'errore ingannevole. Bug 03.12.14 rimane HIGH/CRITICAL, confermato con maggiore forza
+- **Ipotesi bloccaggio test agent per Community mode**:
+  - Per vedere inventory/products/matching funzionanti dobbiamo **attivare una license Professional** (via activation code o offline license key da SentriKat sales)
+  - O **bypassare gating** forzando un test con license mock (richiederebbe modifica backend)
+  - O testare soltanto dopo fase fix
+- **Stato agent test**: **⏸️ BLOCKED** confermato, ma **root cause ora completamente noto**
+- **Discovered**: 2026-04-23 (breakthrough definitivo via Agent Activity log)
+
+#### [03.13.3] Agent Activity page features ✅
+
+- **Fase**: 03
+- **Area**: Agent Activity / monitoring UI
+- **Tipo**: 🟢 OK
+- **Content mappato**:
+  - **Background Worker card**: 🟢 `Running` (Check interval: 2s, Async threshold: 750 products, Max per request: 10,000)
+  - **Job Queue card**: 0 Pending · 0 Processing · 0 Completed today · 0 Failed today
+  - **Recent Jobs**: empty "No jobs found" + filter "All statuses"
+  - **Agent Events**: 2 eventi `License limit exceeded` con IP source + timestamp relativo ("18m ago")
+  - **Agent Activity Log**: tabella con Timestamp, Type (badge `LICENSE` rosso), Hostname, Details, Source IP. Filtri: All Types, Last 7 days, refresh
+  - Auto-refresh ogni 3s (header top-right)
+- **Valutazione**: observability page ben progettata. Separa worker status / job queue / events / activity log in modo chiaro
+- **Inconsistenza con Health Checks [03.14.7]**:
+  - Health Checks `Worker Pool: STOPPED` 🟡
+  - Agent Activity `Background Worker: Running` 🟢
+  - **Contraddizione** → i due pannelli leggono due metriche diverse? "Worker Pool" in Health è differente da "Background Worker" in Agent Activity? Terminology/source mismatch
+- **Follow-up TODO 03.13.3a**: chiarire differenza tra "Worker Pool" (health) e "Background Worker" (agent activity)
+- **Discovered**: 2026-04-23
+
+---
+
+#### [03.14.6] Settings → Health Checks: 12 check in 2 gruppi, UI completa ✅
+
+- **Fase**: 03
+- **Area**: Settings / Health Checks
+- **URL**: `Settings → Health Checks`
+- **Tipo**: 🟢 OK
+- **Controls**: `Run Now` button + toggle `Enabled` (ON). Notification Email field (default `admin@example.com`), `Send alerts via webhooks` toggle (OFF)
+- **Description**: "SentriKat runs background health checks every 30 minutes to monitor system components. Problems and warnings are reported via email notifications and shown here."
+- **SYSTEM group (8 check)**:
+  - ✅ Database Connectivity `1MS` — healthy (1ms)
+  - ✅ Disk Space `92.4%` — 930.3 GB free
+  - 🟡 **Worker Pool `STOPPED`** — "Worker pool is not running (no pending jobs)"
+  - ✅ Stuck Inventory Jobs `0 PENDING`
+  - ✅ Queue Throughput `0 PROCESSED`
+  - ✅ License Status `COMMUNITY` — Running in community mode
+  - ✅ SMTP Connectivity `REACHABLE` — `SMTP server host.docker.internal:1025 is reachable` ← conferma [03.11.1.2]
+  - 🟡 Server Configuration `1 WARNING(S)` — `"1 config warning(s): CISA KEV sync has never run"`
+- **DATA SYNC group (4 check)**:
+  - 🟡 CVE Sync Freshness `NEVER SYNCED` — "No successful CVE sync found. Run initial sync."
+  - ✅ CPE Coverage `0 PRODUCTS`
+  - ✅ API Source Status `NVD PRIMARY` — All CVSS scores from NVD
+  - ✅ Sync Retry Status `OK`
+- **Tutti i check hanno timestamp**: `23.4.2026, 18:59:48` — formato IT/DE (punto separatore data)
+- **Valutazione**: feature piena, 12 check discreti, toggles per attivare/disattivare ogni check, integrazione email+webhook per alerting
+- **Discovered**: 2026-04-23
+
+#### [03.14.7] 🟡 Worker Pool `STOPPED` — warning, possibile regressione
+
+- **Fase**: 03
+- **Area**: Health Checks / Worker Pool
+- **Tipo**: 🟡 Warning
+- **Severity**: Medium (se il worker pool è effettivamente down, inventory job processing e altri job async non funzionerebbero — ma attualmente nessun job pending)
+- **Actual**: check `Worker Pool` mostra status `STOPPED` con descrizione "Worker pool is not running (no pending jobs)"
+- **Interpretazione ambigua**:
+  - Scenario A: il worker pool si spegne quando non c'è lavoro e si riavvia on-demand — pattern valido (lazy worker)
+  - Scenario B: il worker pool è crashed e non si è riavviato — bug grave che si manifesterà quando arriva inventory
+  - Scenario C: the check ha logica buggy che reporta STOPPED anche quando il pool è idle ma disponibile
+- **Collegamento con [03.12.9/15]**: se il pool non è running, l'inventory POST anche se passasse l'auth non verrebbe processato → KEV catalog vuoto, products vuoti, dashboard vuota. **Ipotesi aggiuntiva per agent 403**: il backend potrebbe rifiutare agent inventory se capisce che il worker pool non è disponibile (non ha senso accettare se non può processare)
+- **Follow-up TODO 03.14.7a**: dopo un force sync CISA KEV (→ crea lavoro per il pool) verificare se worker pool passa a RUNNING
+- **Discovered**: 2026-04-23
+
+#### [03.14.8] Settings → License: UX completa, installation ID, activate online/offline ✅
+
+- **Fase**: 03
+- **Area**: Settings / License
+- **URL**: `Settings → License`
+- **Tipo**: 🟢 OK (UX complete) + 🔴 bug [03.14.9] sul version check
+- **Content mappato**:
+  - **Badge top-right**: `COMMUNITY`
+  - **Current License card**:
+    - Edition: `COMMUNITY EDITION`
+    - "Free for personal and small team use."
+    - `Upgrade to Professional` link
+    - Version info: `SentriKat v1.0.0 beta.2` + `Up to date (v1.0.0 beta.2)` ← **bug [03.14.9]**
+    - `Check` button per update
+  - **Usage card**:
+    - Users: **1/1** (al limite!)
+    - Organizations: **1/1** (al limite!)
+    - Products: 0/50
+    - Agents: Total 0/5 · Servers 0 · Workstations 0 · Weighted Units 0.0
+    - Banner giallo: "You've reached Community limits. Upgrade to Professional for unlimited usage."
+  - **To request a license** section:
+    - Installation ID: `SK-INST-F53C2C721D3BE18FD67DC850392105B9` (matcha `.env` ✅)
+    - Copy button
+    - "This ID is unique to your installation and cannot be changed."
+  - **Activate Online**: Activation Code field (placeholder `SK-XXXX-XXXX-XXXX-XXXX`) + button. "Requires HTTPS connectivity to `license.sentrikat.com`"
+  - **Activate Offline**: License Key textarea per paste del file license generato offline
+- **Positivi**:
+  - Sia online che offline activation supported
+  - Installation ID visible + copyable (UX good)
+  - Usage meter con limiti chiari
+- **Discovered**: 2026-04-23
+
+#### [03.14.9] 🔴 HIGH — License page dice "Up to date (v1.0.0 beta.2)" MA beta.6 è la release corrente (bug update-check)
+
+- **Fase**: 03
+- **Area**: License / version check
+- **Tipo**: 🔴 Bug
+- **Severity**: **High** (customer ignora aggiornamenti critici, inclusi security fix)
+- **Actual**:
+  - License page mostra: `SentriKat v1.0.0 beta.2` + `Up to date (v1.0.0 beta.2)` (green checkmark)
+  - **Ma la release più recente è `v1.0.0-beta.6`** (taggata da noi oggi)
+  - Le release intermedie beta.3, beta.4, beta.5 erano già pubblicate prima
+- **Root cause ipotesi (dual):**
+  1. **Il VERSION file locale dice `beta.2` ([03.5.3])** → l'update-check compara `current=beta.2` vs `latest=???` e se latest è pure beta.2 dice "up to date". Se il server license (`license.sentrikat.com`) risponde con `latest=beta.2` (stale/cached), **entrambi i canali dicono beta.2** e l'utente non vede novità
+  2. **Il Check button non parte effettivamente** verso `license.sentrikat.com` → fallback a local version → "up to date" perché non ha nulla da confrontare
+- **Impatto gravissimo**:
+  - Se un customer on-prem esegue `git pull` del tag beta.6 ma VERSION file resta beta.2 (bug [03.5.3]), **la license page dice "sei aggiornato" mentre NON lo è**
+  - Update critici di sicurezza vengono ignorati → rischio CVE-exposure per customer
+  - Product su cui si fa vulnerability management che non si aggiorna = ironico ed inaccettabile
+- **Dipendenza con bug precedenti**: stesso root cause di [03.5.3] VERSION file hardcoded
+- **Fix candidato**:
+  - Il Check button deve chiamare esplicitamente `https://license.sentrikat.com/api/releases/latest` e mostrare **banner rosso** se latest > current
+  - Fallback: GitHub Releases API se license server non raggiungibile
+  - Obbligare update check weekly automatico
+  - Quando nuova versione disponibile → banner dashboard + email notification
+- **Discovered**: 2026-04-23
+
+#### [03.14.10.expand] 🔴 HIGH — Mismatch edition: "DEMO" (docs) vs "COMMUNITY" (UI) — serve clarification ufficiale su tier, promises, limits
+
+- **Fase**: 03
+- **Area**: Product edition / tier / documentation consistency
+- **Tipo**: 🔴 Bug (documentation + product behavior mismatch)
+- **Severity**: **High** (business-critical: un potenziale customer non sa cosa sta comprando / cosa sta provando)
+- **Domanda aperta dell'utente**: "Community Edition esiste, dovrebbe esistere. E una demo? La demo cosa promette? C'è un mismatch di qualcosa."
+- **Evidence del mismatch**:
+
+| Sorgente | Tier name | Promise | Agent limit | User limit | Org limit | Prod limit | Push Agents |
+|---|---|---|---|---|---|---|---|
+| **README/handbook** (mappa originale fase 0) | "DEMO Edition" | "FREE, no license needed, 5 agent limit, 50 products" | 5 | ??? | ??? | 50 | ??? |
+| **UI License page** (nostra install) | "COMMUNITY EDITION" | "Free for personal and small team use" | 0/5 | 1/1 | 1/1 | 0/50 | ❌ Pro only |
+| **UI Health Checks** | "License Status: COMMUNITY · Running in community mode" | — | — | — | — | — | — |
+| **Agent Activity log** | "Push Agents require a Professional license" | — | — | — | — | — | gated |
+| **handbook** ($4,999/year PRO) | "Unlimited agents/users/orgs, all features" | all | ∞ | ∞ | ∞ | ∞ | ✅ |
+
+- **Questioni aperte**:
+  1. **"DEMO"** e **"Community"** sono lo stesso tier rinominato? Oppure 2 tier distinti?
+     - Se stesso rinominato → doc obsoleta, refactor terminology
+     - Se diversi → quale stiamo testando? Dove sono le differenze?
+  2. **"Personal and small team use"** — cosa include "small team"? 1 user 1 org è "small team" di 1 persona. Terminologia ingannevole
+  3. **Push Agents gated**: atteso? La promessa "5 agent limit" della doc suggerirebbe che gli agent sono inclusi fino a 5. Invece qui anche 1 agent è bloccato
+  4. **Weighted Units** metric non documentata [03.14.12]
+  5. **Community promises**: quali feature sono davvero disponibili out-of-the-box senza license? Dal health check: `License Status: COMMUNITY` e molte pagine funzionano. Ma agent no, e forse compliance reports PDF no, ecc. **Map to be built**
+- **Impatto**:
+  - Sales pipeline: potenziale cliente non sa che prodotto scaricare o comprare
+  - Support burden: "Ho installato il DEMO ma dice COMMUNITY e non funziona l'agent" — ore di triage inutile
+  - Marketing website [mappa fase 01] promette "Free for personal use" ma se il cliente installa e trova 1 user/1 org + no push agent, esperienza frustrante
+- **Fix candidato (per fase fix, non ora)**:
+  - Decidere UN nome ufficiale per il tier free (es. "Community"), aggiornare README, handbook, marketing, email welcome, UI license page, health checks → uniformità
+  - Pagina `/pricing` con matrice comparativa ESPLICITA (Community vs Professional vs Enterprise)
+  - In-app help / modal "What's included in Community?" con elenco features attive/gated
+  - Evitare messaggi come "Invalid API key" quando il motivo reale è "feature gated" → riunire in response consistente "Feature X requires Professional license"
+- **Discovered**: 2026-04-23 (domanda dell'utente che ha smascherato un problema di product messaging coerente)
+
+#### [03.14.10] 🔵 Info — Terminology mismatch: "DEMO Edition" (handbook/README) vs "COMMUNITY EDITION" (UI)
+
+- **Fase**: 03
+- **Area**: License / terminology
+- **Tipo**: 🔵 Info
+- **Actual**:
+  - Handbook originale / README / mappa architettura: `"DEMO Edition"`
+  - UI License page: `"COMMUNITY EDITION"` (anche nel health check "License Status: COMMUNITY")
+- **Issue**: terminologia inconsistente tra docs e prodotto. Customer/support confusion
+- **Fix candidato**: decidere un unico nome ufficiale ("Community" probabilmente è più friendly che "Demo") e uniformare docs, handbook, marketing, UI
+- **Discovered**: 2026-04-23
+
+#### [03.14.11] 🟡 Community limits: Users 1/1 + Organizations 1/1 già al MAX out-of-the-box
+
+- **Fase**: 03
+- **Area**: License / Community tier limits
+- **Tipo**: 🟡 Warning
+- **Severity**: Medium (onboarding UX: primo utente vuole invitare il collega → bloccato subito)
+- **Actual**:
+  - Users: 1/1 — "You've reached Community limits"
+  - Organizations: 1/1 — stessa cosa
+  - Banner: "Upgrade to Professional for unlimited usage"
+- **Issue**: il primo admin creato al setup wizard è **L'UNICO** utente ammesso in Community. Appena un admin vuole creare un secondo user (es. per SAML/LDAP login o invite team member), arriva al banner "reached limits" subito.
+- **Impatto**:
+  - DEMO/Community doveva essere "5 agents, 50 products" come da handbook — ma "1 user" è molto più restrittivo
+  - Qualsiasi test realistico enterprise blocked da questo limit senza upgrade
+- **Inconsistenza con handbook**: handbook parlava di "5 agent" limit ma non di "1 user" — la UI è più stretta di quanto atteso. Terminologia+limiti cambiati silenziosamente?
+- **Follow-up TODO 03.14.11a**: provare a invitare un secondo user via `Users & Access → All Users → Invite` → vedere se blocca con errore user-friendly ("Upgrade required") o tecnicamente rotto
+- **Discovered**: 2026-04-23
+
+#### [03.14.12] 🔵 Info — "Weighted Units: 0.0" metric non documentato
+
+- **Fase**: 03
+- **Area**: License / usage metric
+- **Tipo**: 🔵 Info (UX)
+- **Actual**: nella Usage card, dopo "Agents: Total 0/5 · Servers 0 · Workstations 0" appare `Weighted Units: 0.0`
+- **Issue**: "Weighted Units" non è spiegato in tooltip / helper. Customer non sa cosa siano:
+  - Score complessivo di utilizzo?
+  - Risorse CPU/memory equivalenti?
+  - Metric di billing per pricing variabile?
+- **Fix candidato**: tooltip "?" accanto al label con definizione
+- **Discovered**: 2026-04-23
+
+---
+
+#### [03.14.5] Settings → Compliance: UI molto ricca ✅
+
+- **Fase**: 03
+- **Area**: Settings / Compliance
+- **Tipo**: 🟢 OK
+- **Content mappato**:
+  - **Audit Logs** con:
+    - Search box + 4 filtri (All Actions, All Resources, Date from/to)
+    - Dropdown 50 per page, Sort by Time, Newest First
+    - Columns: TIMESTAMP, ACTION, RESOURCE, USER, IP ADDRESS, DETAILS
+    - Export button (JSON/CSV presumibile)
+    - Empty state: "No audit logs found matching your criteria"
+  - **Compliance Reports** section con:
+    - Header: "CISA BOD 22-01 Compliance" + link a directive ufficiale
+    - 4 metric cards colored (Total KEV Matches, Acknowledged verde, Pending Review giallo, Overdue rosso) — tutte con valore `-` in empty state
+    - Overall Compliance Rate progress bar (vuota)
+    - **7 report types disponibili**:
+      1. BOD 22-01 Compliance Report (JSON, CSV)
+      2. NIS2 Compliance Report (JSON, CSV, PDF)
+      3. Overdue Items Report (Download Overdue Report)
+      4. Executive Summary (PDF, JSON)
+      5. PCI-DSS v4.0 Gap Analysis (JSON, PDF)
+      6. ISO 27001:2022 Gap Analysis (JSON, PDF)
+      7. SOC 2 Gap Analysis (JSON, PDF)
+  - **Pending by Severity** breakdown (Critical/High/Medium/Low/Unknown)
+  - **Ransomware Exposure**: "Click 'Refresh Data' to load compliance statistics"
+- **Valutazione**:
+  - ✅ Audit log infrastruttura completa (search, filter, export)
+  - ✅ 7 compliance frameworks coperti, 3 formati di export (JSON/CSV/PDF per la maggior parte)
+  - ✅ Empty state chiaro con CTA "Refresh Data"
+- **Feature gating**: **strano — visibile su DEMO?** Dalla mappa originale "NIS2/DORA + BOD 22-01 Reports" era gated Pro+, come anche PCI-DSS/ISO/SOC 2 via Compliance Pack paid add-on. **Su on-prem DEMO**, questa pagina mostra TUTTI i report tipi con bottoni attivi. Da verificare cliccando se il download produce un PDF valido o un error 403 "upgrade required"
+- **Follow-up TODO 03.14.5a**: cliccare ciascun bottone JSON/CSV/PDF di un report (anche con dati vuoti) per verificare che il download venga generato e non blocchi per feature gate
+- **Discovered**: 2026-04-23
+
+---
+
 ### 03.13 — CISA / NVD sync (osservazioni di resilience)
 
 #### [03.13.1] NVD online/offline recovery automatico ✅

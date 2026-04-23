@@ -156,10 +156,10 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 ## Bug counter globale
 
-- 🔴 Bug: 18
-- 🟡 Warning: 8
-- 🔵 Info/UX: 48
-- 🟢 OK passati: 66
+- 🔴 Bug: 20
+- 🟡 Warning: 10
+- 🔵 Info/UX: 52
+- 🟢 OK passati: 70
 - ⏸️ Test bloccati: 6
 
 *(aggiornati a mano ad ogni commit)*
@@ -180,3 +180,117 @@ Test che non sono eseguibili finché non viene risolto un bug a monte. Da ripren
 | ⏸️ 03.12.6–15 | 03 / Agent inventory | Agent install OK ma initial scan 403/401 con messaggio fuorviante "Invalid API key". Key attiva nel DB (`active=t`, usage_count=3). Root cause vero nascosto da messaggio generico | [03.12.14] + possibilmente license-server-upstream validation in DEMO |
 
 **Regola operativa**: quando un test fallisce ma è chiaro che dipende da un altro bug non ancora fixato, lo spostiamo qui invece di marcarlo come "bug autonomo" (evita falsi positivi sul conteggio bug). Riapriremo questi test in una seconda passata dopo la fase fix, in ordine di dipendenza (prima i fix bloccanti, poi i test sbloccati).
+
+---
+
+## Follow-up TODO list (da testare esplicitamente in un secondo giro)
+
+Raccolta delle cose che **vanno provate** ma che non abbiamo testato funzionalmente durante il primo giro (o perché bloccate, o perché è bastato il rendering per il primo pass). Lista ordinata per fase/area.
+
+### Fase 01 — Landing
+- 01.3.2 Security headers via DevTools Network → verificare HSTS, X-Frame-Options, CSP, Referrer-Policy
+- 01.4.2 Conferma `href` esatti link navbar
+- 01.12.x Blog: tutti i 14 post aperti, code blocks, tabelle, OG image share, canonical link
+- 01.13 vs/* — verificare contenuto unico (no duplicate content SEO)
+- 01.14 Legal — `terms_version` coerente `/terms` vs `/ea-terms`, link mutuali, last-updated, `/impressum` escluso da sitemap
+- 01.15 Form Contact/Demo/Contact-Sales/Feedback — submit reale con validazione campi, Turnstile failure, 422 validation, rate limit
+- 01.16.1a Contenuto `sitemap-0.xml` (esclusione `/impressum`, presenza di tutti URL)
+- 01.16.3 `rss.xml` — tutti 14 post presenti, `pubDate`, `description`, `category`
+
+### Fase 02 — SaaS Signup
+- 02.4.5-4.8 SPF/DKIM/DMARC, reply-to, tracking, List-Unsubscribe welcome email
+- 02.6.3 Password policy: `password`, `12345678`, `aaaaaaaa` testati per breached-list check
+- 02.8.2 True duplicate email (stesso email già registrato senza alias) → 409 + UI message chiaro
+- 02.9 Edge 503 `EA_CAPACITY_FULL` (serve admin capacity = `active`)
+- 02.10 Edge 422 validation server-side (fetch/curl malformed payload)
+- 02.11 Provisioning bridge cross-ref via `/admin/webhook-outbox` + `/admin/saas-tenants` (fase 05)
+- 02.13 Terms tracking (`terms_accepted_at`, `terms_version`) verifica in `/admin/customers/<id>` (fase 05)
+- 02.14.2 Pricing page: sconti multi-anno 10%/15%, listino agent packs, add-on Compliance Pack/Priority Support, toggle monthly/annual
+
+### Fase 03 — On-Prem
+
+#### Setup wizard
+- 03.5.6a `misfire_grace_time` + `coalesce=True` su APScheduler jobs
+- 03.7.5 Codice sorgente flag `setup_complete` dopo fix [03.6.3]
+
+#### System Settings → Sync & Updates
+- 03.14.x click **Sync CISA Now** manualmente + verifica Total Vulnerabilities cresce
+- 03.14.x Enable Automatic Sync + verifica Next Scheduled si popola + dopo prossimo run verifica Last Sync
+- 03.14.x click **Sync EPSS Scores Now** + verifica CVEs with EPSS cresce
+- 03.14.x click **Sync CPE Dictionary Now** + verifica Total Entries ~50K
+- 03.14.x click **Rebuild from Vulnerabilities** CPE + differenze vs Sync Now
+- 03.14.x click **Send Email Alerts Now** + verifica arrivo in Mailpit
+- 03.14.x click **Send Webhook Alerts Now** (una volta sbloccato SSRF)
+- 03.14.x NVD API Key inserita → verifica rate limit cresce a 10K/day
+- 03.14.x Sync Interval cambio (Daily → Weekly → Custom) + verifica next run
+
+#### System Settings → General / Security / Data Retention (sub-tabs non ancora aperti)
+- 03.14.x aprire tab **General** → mappare tutti i campi (timezone, language, org branding, logo, ecc.)
+- 03.14.x aprire tab **Security** → password policy, session timeout, 2FA enforce, account lockout
+- 03.14.x aprire tab **Data Retention** → retention policy vuln data/audit log/alerts/snapshots
+
+#### Settings → Compliance
+- 03.14.5a click JSON/CSV/PDF di **ogni** report type (7 totali) anche con dati vuoti — verificare download ok, nessun 403 feature-gated
+- 03.14.5a Audit Log: test search + filter (date range, action, resource, user, IP) anche se empty
+- 03.14.5a Export Audit Log (JSON/CSV) → verificare file generato
+- 03.14.5a Report scheduling: create scheduled report (ogni frequenza) + verifica delivery email
+
+#### Settings → Health Checks
+- 03.14.6a click **Run Now** → verificare timestamp aggiornati
+- 03.14.7a investigare **Worker Pool STOPPED** → cliccare dettaglio, correlare con [03.13.3] Background Worker Running
+- 03.14.x Disabilitare singoli check via toggle + verifica che check sparisca
+- 03.14.x Configurare Notification Email + Send alerts via webhooks → forzare fail (es. stoppare DB) + verificare email/webhook ricevuti
+
+#### Settings → License
+- 03.14.x click **Check** button → osserva request a `license.sentrikat.com` (Network tab) + risposta
+- 03.14.11a Invitare un secondo user (Users & Access → Invite) → verifica "License limit exceeded" con messaggio chiaro
+- 03.14.x Creare una seconda Organization → verifica "1/1 → limit" blocca
+- 03.14.x Activate Online con code invalido → verifica errore UI
+- 03.14.x Copy Installation ID button → verifica clipboard
+- 03.14.x Upgrade flow end-to-end con license PRO (quando disponibile)
+
+#### Settings → Appearance / Logs / Admin Guide (non ancora aperti)
+- 03.14.x aprire tab **Appearance** → logo upload, theme picker, white-label options
+- 03.14.x aprire tab **Logs** → verificare accesso file log (application, error, access, security, audit, sync, jobs)
+- 03.14.x aprire tab **Admin Guide** → verificare contenuto documentazione
+
+#### Fase 03.11 integrazioni — dims aperti
+- 03.11.1 SMTP dim 2/3/4/5/6/7 — persistence post-restart, disable+rewire, role-based access, test con host invalido/port out-of-range, audit log evento, webhook forwarding dei fallimenti
+- 03.11.2 LDAP dims 4/5/6/7 + [03.11.2.9] dopo fix 03.11.2.3 (admin accept page)
+- 03.11.3 SAML dims 6/7 — assertion replay, expired, invalid signature, audit log, webhook outbound per login
+- 03.11.4-6 Jira/Webhook/GitLab/YouTrack dopo fix SSRF policy: CRUD config, test connection, create issue reale, status sync, priority mapping
+- 03.11.6.8 YouTrack esplicito test (SSRF uniformity confirm)
+- 03.11.7 Syslog dims 2/3/5/6/7 — persistence, CRUD destination, host invalido/port out-of-range, format CEF vs JSON vs RFC5424, eventi reali (login, CVE match, remediation)
+- 03.12 Agent dopo fix license gate [03.13.2] — full test inventory, matching, asset CRUD, disable, ban, force scan, scheduler 240min actually fires
+
+#### Sezioni non ancora toccate
+- `/admin-panel` admin tabbed UI con 25 pagine (fase 05 sidebar portal admin + cross-ref fase 03 admin locale)
+- `Platform Operations → Cross-Repo Integration` + Webhook Events + Usage Uploads (che abbiamo visto essere bug in [03.6.6]/[03.7.x])
+- `Organizations` page (crea/modifica/elimina org, con e senza limite 1/1 Community)
+- `Assignments` page vuota — CRUD remediation assignments
+- `/assignments` test con dati reali quando inventory popolato
+- `/reports/scheduled` page
+- `/exports/sbom` SBOM export UI
+- `/shared/<token>` shareable views
+- Dashboard filtri (All/Servers/Clients/Containers/Dependencies) + widget interattività (Take Snapshot, Set up SLA)
+
+### Fase 04 — Portal Customer
+- Tutto da testare: login OTP, dashboard, licenze, downloads, support, checkout, upgrade, logout
+
+### Fase 05 — Portal Admin
+- Tutto da testare: 25 pagine admin
+
+### Fase 06+
+- Fase 06 App core auth/RBAC/2FA
+- Fase 07 Agent+inventory (blocked da [03.13.2] license gate)
+- Fase 08 Scanning/matching (blocked dal fatto di non avere ancora inventory data)
+- Fase 09 Remediation/SLA
+- Fase 10 Compliance/SBOM (UI testata, download da verificare)
+- Fase 11 Integrations (3 bloccate da SSRF)
+- Fase 12 Alerts/Notifications
+- Fase 13 Admin ops / backup-restore / scheduler
+- Fase 14 SaaS-specific
+- Fase 15 Security/edge
+- Fase 16 Extras (community, docs, n8n, nginx)
+
+**Razionale**: questa lista sostiene l'istruzione utente `"ogni cosa deve essere testata e funzionante, facciamo tutto piano piano"`. Non è ancora eseguita, serve da memoria per il secondo giro e per il code reading finale post-fix.
