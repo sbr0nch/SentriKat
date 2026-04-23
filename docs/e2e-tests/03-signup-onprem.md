@@ -1078,6 +1078,83 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 
 ---
 
+### 03.11.5 — Custom Webhook → webhook-tester (testlab)
+
+#### [03.11.5.1] Webhook form rendering OK ✅
+
+- **Fase**: 03
+- **Area**: Settings / Issue Trackers / Custom Webhook
+- **URL**: `Settings → Issue Trackers → Custom Webhook` (stessa pagina di Jira — è parte del tab multi-tracker)
+- **Tipo**: 🟢 OK (rendering)
+- **Actual**:
+  - Enabled Issue Trackers: ✅ Custom Webhook
+  - Tip: "Use webhooks to integrate with Linear, Asana, Monday.com, or any system that accepts HTTP requests."
+  - Campi:
+    - Webhook URL: `http://host.docker.internal:8800/b300300c-553d-49c2-a0d9-f045e32cbc57` (generato da webhook-tester)
+    - HTTP Method: dropdown `POST` (default)
+    - Authentication: dropdown `None`
+    - Auth Value: (disabled se Authentication=None)
+  - Helper text: "Payload includes: title, description, priority, labels, vulnerability details, and product info."
+  - Buttons: Save Settings | Test Connection
+- **Discovered**: 2026-04-23
+
+#### [03.11.5.2] ⏸️ BLOCKED — Webhook save/test bloccati dalla stessa policy SSRF di Jira [03.11.4.5]
+
+- **Fase**: 03
+- **Area**: Custom Webhook / save test
+- **Tipo**: ⏸️ Test bloccato (stessa causa di 03.11.4.5)
+- **Environment**: `FLASK_ENV=production`, `ALLOW_PRIVATE_URLS=true` (ignorato in prod)
+- **Actual**:
+  - `POST /api/settings/batch 400 (BAD REQUEST)` al Save
+  - `POST /api/integrations/issue-tracker/test 500 (INTERNAL SERVER ERROR)` al Test Connection (vedi bug separato [03.11.5.3])
+  - Log backend ripete messaggio SSRF hardening in production
+- **Conferma**: la policy SSRF si applica uniformemente a TUTTI gli integration HTTP outbound (Jira + Webhook + presumibilmente anche GitHub/GitLab/YouTrack da testare). Non è bug specifico Jira — è system-wide
+- **Status**: bloccato come 03.11.4.5, stesso workaround (switch a `FLASK_ENV=development`)
+- **Discovered**: 2026-04-23
+
+#### [03.11.5.3] 🔴 HIGH — Test Connection webhook risponde `500 INTERNAL SERVER ERROR` (should be 4xx con errore strutturato)
+
+- **Fase**: 03
+- **Area**: Integrations / test connection / error handling
+- **Tipo**: 🔴 Bug
+- **Severity**: **High** (500 = eccezione non gestita lato server, non errore atteso; esposizione potenziale di stack trace o dettagli interni)
+- **Environment**: on-prem DEMO prod beta.6
+- **Steps to reproduce**:
+  1. Config webhook con URL privato `http://host.docker.internal:8800/...`
+  2. Click "Test Connection"
+- **Expected**: response HTTP **4xx** (es. 400 con `{"error":"private_url_blocked","message":"Target URL is on private network..."}`) — error handling strutturato, coerente con la validation che al save ritorna 400
+- **Actual**:
+  - Console: `POST http://localhost/api/integrations/issue-tracker/test 500 (INTERNAL SERVER ERROR)`
+  - Nessun messaggio chiaro all'utente lato UI (o messaggio generico)
+- **Issue**: mentre il Save ritorna correttamente 400 + toast con messaggio, il Test ritorna 500 senza messaggio. Significa che l'endpoint `/test` lancia l'eccezione SSRF ma **non la cattura** come fa l'endpoint di save. Error handling inconsistente tra endpoint dello stesso modulo
+- **Impatto**:
+  - UX: utente clicca Test e vede errore generico / solo in console → non capisce perché
+  - Security: un 500 può esporre stack trace in dev mode; in prod idealmente dovrebbe loggare e ritornare 400 / 500 generico con `Sentry ID` per debug
+- **Fix candidato**: wrap di `/api/integrations/issue-tracker/test` con try/except che catturi `SSRFError` (o equivalente) e restituisca 400 strutturato
+- **Discovered**: 2026-04-23
+
+#### [03.11.5.4] 🟡 Warning — log CRITI ripetuto per richiesta invece di 1 volta al boot
+
+- **Fase**: 03
+- **Area**: Logging hygiene
+- **Tipo**: 🟡 Warning
+- **Severity**: Low-Medium (log noise, potenziale alert fatigue su SIEM)
+- **Actual** (dai log):
+  ```
+  CRITI [app.network_security] SECURITY WARNING: ALLOW_PRIVATE_URLS is enabled in production! This disables SSRF protection. Ignoring the setting.
+  CRITI [app.network_security] SECURITY WARNING: ALLOW_PRIVATE_URLS is enabled in production! This disables SSRF protection. Ignoring the setting.
+  CRITI [app.network_security] SECURITY WARNING: ALLOW_PRIVATE_URLS is enabled in production! This disables SSRF protection. Ignoring the setting.
+  ...  (8 volte, probabilmente 1 per ogni chiamata validate_url)
+  ```
+- **Issue**: il warning è loggato a CRITI level ogni volta che viene invocata la validation, invece che **una volta sola al boot** come stato di config
+- **Impatto**:
+  - SIEM forwarding genera 1 alert per ogni integration test → alert storm
+  - Log files saturi di righe identiche → mascherano altri eventi
+- **Fix candidato**: log al boot (in `create_app()`) se config contradditoria, poi silent in runtime — oppure usare logging rate-limiter interno
+- **Discovered**: 2026-04-23
+
+---
+
 ### 03.11.4 — Jira → jira-mock (MockServer)
 
 #### [03.11.4.1] Mock Jira testlab raggiungibile solo via `/mockserver/dashboard` ✅
@@ -1178,8 +1255,23 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
   ```
   WARNI [app.network_security] SSRF blocked: Jira tracker setup attempted request to internal URL: http://host.docker.internal:8080
   ```
-  → log esplicito dal modulo `app/network_security.py`, con contesto "Jira tracker setup" → **la policy è scritta specificatamente per Jira**, non è un behavior ereditato generico
-- **Confermata specificità per Jira**: la stringa "Jira tracker setup" nel log conferma che la validation ha un code path dedicato per Jira separato dagli altri moduli. SMTP/LDAP/SAML usano un code path che rispetta `ALLOW_PRIVATE_URLS`, Jira no. Bug di design consolidato
+- **⚠️ RECLASSIFY — root cause reale (scoperta su 03.11.5)**: inizialmente avevo attribuito a "Jira non rispetta il flag" mentre SMTP/LDAP/SAML lo rispettano. **Rettifica**:
+  - Il log ulteriore durante il test webhook ha rivelato il messaggio CRITI:
+    ```
+    CRITI [app.network_security] SECURITY WARNING: ALLOW_PRIVATE_URLS is enabled in production! This disables SSRF protection. Ignoring the setting.
+    ```
+  - → in `FLASK_ENV=production` (attuale), il flag `ALLOW_PRIVATE_URLS` viene **volutamente ignorato come hardening** (prevenzione di abuse admin). Solo in `FLASK_ENV=development` il flag funziona
+  - → SMTP/LDAP/SAML hanno accettato `host.docker.internal` non perché "rispettano il flag" ma perché **NON passano dalla SSRF validation** (usano protocolli dedicati SMTP/LDAP, o fetching trusted in modo diverso)
+  - → Jira e Webhook passano da SSRF validation per HTTP outbound, correttamente bloccati in prod
+- **Bug rivisto**: il comportamento è coerente con una policy security ragionevole. Ma rimane un bug **di UX / configurazione**:
+  1. `.env.example` dichiara `ALLOW_PRIVATE_URLS` come opzione reale; setup guide per testing docker usa `ALLOW_PRIVATE_URLS=true` → l'utente si aspetta che funzioni
+  2. Il flag viene silenziosamente ignorato e loggato solo server-side come CRITI — l'admin che configura Jira non sa dai messaggi d'errore UI che è questione di `FLASK_ENV`
+  3. **Fix candidato (per fase fix)**:
+     - Se `FLASK_ENV=production` + `ALLOW_PRIVATE_URLS=true` → fail-fast all'avvio con messaggio "Configuration error: ALLOW_PRIVATE_URLS cannot be true in production mode"
+     - Oppure: l'errore UI 400 dovrebbe dire "Private URL rejected. If you're testing, set FLASK_ENV=development"
+     - Oppure: rimuovere `ALLOW_PRIVATE_URLS` dal `.env.example` se non è realmente usabile su setup production-default
+- **Severity rimane High**: per l'utente finale il risultato è lo stesso — impossibile configurare Jira/Webhook localmente senza capire la trappola env
+- **Workaround disponibile (non fix)**: cambiare `.env` → `FLASK_ENV=development`, restart container. Da discutere con utente
 - **Discovered**: 2026-04-23
 
 - **Tipo**: 🟢 OK (area conclusa)

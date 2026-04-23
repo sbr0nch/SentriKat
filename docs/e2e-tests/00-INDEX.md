@@ -156,11 +156,11 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 ## Bug counter globale
 
-- 🔴 Bug: 13
-- 🟡 Warning: 7
+- 🔴 Bug: 14
+- 🟡 Warning: 8
 - 🔵 Info/UX: 38
-- 🟢 OK passati: 57
-- ⏸️ Test bloccati: 2
+- 🟢 OK passati: 58
+- ⏸️ Test bloccati: 3
 
 *(aggiornati a mano ad ogni commit)*
 
@@ -173,6 +173,7 @@ Test che non sono eseguibili finché non viene risolto un bug a monte. Da ripren
 | Test ID | Fase/Area | Sommario | Bloccato da |
 |---|---|---|---|
 | ⏸️ 03.11.2.9 | 03 / LDAP login | Login di un utente LDAP seedato non può essere testato significativamente finché non c'è la pagina admin per "accettare/invitare" l'utente LDAP prima del login | [03.11.2.3] Sidebar LDAP Users / LDAP Groups sparita |
-| ⏸️ 03.11.4 (all) | 03 / Jira integration | Test funzionali Jira (save config, fetch projects, create issue) non eseguibili su docker-compose locale perché la validation SSRF rifiuta `host.docker.internal` anche con `ALLOW_PRIVATE_URLS=true` | [03.11.4.5] SSRF Jira ignora `ALLOW_PRIVATE_URLS` |
+| ⏸️ 03.11.4 (all) | 03 / Jira integration | Test funzionali Jira non eseguibili con testlab docker in `FLASK_ENV=production` (policy SSRF hardening ignora `ALLOW_PRIVATE_URLS`) | [03.11.4.5] + hardening policy in production mode |
+| ⏸️ 03.11.5 (all) | 03 / Webhook | Test funzionali Webhook out bloccati dalla stessa policy SSRF | [03.11.5.2] stesso root cause di 03.11.4.5 |
 
 **Regola operativa**: quando un test fallisce ma è chiaro che dipende da un altro bug non ancora fixato, lo spostiamo qui invece di marcarlo come "bug autonomo" (evita falsi positivi sul conteggio bug). Riapriremo questi test in una seconda passata dopo la fase fix, in ordine di dipendenza (prima i fix bloccanti, poi i test sbloccati).
