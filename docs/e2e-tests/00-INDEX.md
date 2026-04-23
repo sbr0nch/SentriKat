@@ -320,6 +320,204 @@ Raccolta delle cose che **vanno provate** ma che non abbiamo testato funzionalme
 
 ---
 
+## Strategie per testare feature time-based / scheduled / asincrone
+
+Utente ha giustamente osservato: *"tipo quando metto alert ogni mattina alle 9 come faccio a testarlo? pensa a una soluzione. veramente dobbiamo testare TUTTO."* — questa sezione dichiara **come** testiamo le feature che non producono feedback immediato.
+
+### Classificazione delle feature time-based
+
+| Categoria | Esempio | Come testare |
+|---|---|---|
+| **Interval jobs** | CISA KEV sync daily 02:00 UTC, EPSS daily, critical email digest daily 09:00 UTC, maintenance 04:00 UTC | Strategia A (trigger manuale) o B (cambio interval) o D (docker date) |
+| **Event-driven** | Alert su nuovo CVE match, webhook su assignment overdue, audit log on user.login, lockout dopo 5 failed login | Strategia E (trigger l'evento) o F (DB insert fake) |
+| **Retention cleanup** | Audit log >365d eliminato, session log >30d, sync history >90d | Strategia F (DB insert con data futura) o D (docker date forward) |
+| **Background workers** | APScheduler (14 jobs noti), inventory job processor, stuck job recovery (ogni 10 min) | Strategia A (Run Now) o C (Python one-shot) |
+| **Expirations** | License expiry, agent API key expires_at, password expiry, session timeout, trial end date | Strategia D (docker date forward) o F (DB update expires_at nel passato) |
+| **External scheduled** | Patch Tuesday (2nd Wed of month), weekly CPE dictionary (lunedi 05:00) | Strategia A (trigger manuale se bottone c'è) o D (docker date a 2nd Wed mese successivo) |
+| **Delivery delays** | Email throttling, webhook retry backoff, SMTP queue | Strategia E (forza trigger multipli rapidi) |
+| **Async processing** | Inventory queue processing, CPE matching batch, snapshot creation | Strategia A (Run Now) + D (wait for timer) |
+
+### Strategie di testing (catalogo)
+
+#### **Strategia A — Trigger manuali "Run Now" / "Sync Now" / "Test Now"**
+Molte feature hanno un bottone che bypassa lo scheduler. Preferita perché veloce e isolata.
+
+Bottoni `Run Now` / `Sync Now` / `Send Now` **già osservati** nell'UI:
+- `Settings → System → Sync & Updates`: Sync CISA Now, Sync EPSS Scores Now, Sync CPE Dictionary Now, Rebuild from Vulnerabilities, Send Email Alerts Now, Send Webhook Alerts Now
+- `Settings → Email & Alerts`: Send Test Email
+- `Settings → Authentication → LDAP`: Test Connection
+- `Settings → Authentication → SAML`: Test Configuration
+- `Settings → SIEM / Syslog`: Send Test Event
+- `Settings → System → Data Retention`: Run Auto-Acknowledge Now
+- `Settings → Health Checks`: Run Now (tutti i check)
+- `Settings → License`: Check (update check)
+
+**Quando usarla**: sempre quando possibile. Evita time-travel/system date change, mantiene ambiente pulito.
+
+#### **Strategia B — Cambio intervallo schedule a valore basso**
+Cambiare "Sync Interval: Daily" → "Every N minutes" nel form (se il dropdown lo supporta), aspettare il prossimo run.
+
+Limiti: alcune UI hanno dropdown enumerato (Daily/Weekly/Monthly), non custom. In quel caso non si può usare.
+
+**Quando usarla**: quando Strategia A non è disponibile e vogliamo testare l'automatism (non solo il codice del job).
+
+#### **Strategia C — Python one-shot nel container**
+Invocare direttamente la funzione del job via Python exec:
+```powershell
+docker compose -p v100-beta6 exec sentrikat python -c "
+from app import create_app
+from app.scheduler import <job_name>
+<job_name>(create_app())
+"
+```
+La pagina Usage Uploads già suggerisce questo pattern ([03.7.4]).
+
+**Quando usarla**: per job APScheduler che non hanno UI button (es. `stuck_job_recovery`, `asset_type_auto_detect`, `vulnerability_snapshots`).
+
+#### **Strategia D — Time-travel container (docker date change o libfaketime)**
+Spostare in avanti l'orologio del container per attivare scheduler + trigger date-based:
+```powershell
+# Opzione D1 — cambiare system date (richiede container privileged)
+docker compose -p v100-beta6 exec sentrikat date -s "2026-05-13 09:05:00"
+
+# Opzione D2 — libfaketime override (non invasivo, richiede pacchetto nel container)
+# LD_PRELOAD=/usr/lib/faketime/libfaketime.so.1 FAKETIME="+30d" python ...
+
+# Opzione D3 — restart container con env var custom per data offset
+# (serve feature nel prodotto per supportare SENTRIKAT_TIME_OFFSET=+30d)
+```
+
+**Quando usarla**: per testare Patch Tuesday (2nd Wednesday), retention cleanup, license expiry, trial end date, password expiry.
+
+**Attenzione**: cambiando data tutti i container la vedono diversamente rispetto al host → aspettare dopo restart per sincronizzazione. Possibile confusione. Usa sandbox dedicata.
+
+#### **Strategia E — Forzare l'evento che triggera il flow**
+Per event-driven feature, generare l'evento stesso invece di aspettare:
+- **Lockout**: fare 6 login falliti consecutivi → verificare account locked per 30 min
+- **Alert su CVE critico**: inserire manualmente un product + CVE critical match via DB
+- **Webhook su assignment overdue**: creare assignment con `due_date` nel passato
+- **Email digest**: Sync CISA manual + verificare se digest viene trigger (o combo con B/D)
+- **Session timeout**: settare `SESSION_TIMEOUT_MINUTES=1`, aspettare 1 min, verificare logout
+- **Sessione inattiva**: logout + aspettare N min + verificare token invalido
+
+**Quando usarla**: per policy-based feature (lockout, timeout, rate limit).
+
+#### **Strategia F — Inserimento dati test direttamente in DB**
+Per testare flow che richiedono dati preesistenti (inventory, CVE match, products) quando Push Agents è bloccato dalla license:
+```powershell
+# Inserisci fake product
+docker compose exec db psql -U sentrikat sentrikat -c "
+  INSERT INTO products (vendor, product_name, version, ...) VALUES ('Microsoft', 'Office', '16.0.0.0', ...);
+"
+
+# Inserisci fake vulnerability match
+docker compose exec db psql -U sentrikat sentrikat -c "
+  INSERT INTO vulnerability_matches (product_id, vulnerability_id, confidence, ...) VALUES (1, 1, 'HIGH', ...);
+"
+
+# Setta expires_at nel passato per trigger expiration
+docker compose exec db psql -U sentrikat sentrikat -c "
+  UPDATE agent_api_keys SET expires_at = NOW() - INTERVAL '1 day' WHERE id = 1;
+"
+```
+
+**Quando usarla**: per popolare il prodotto e testare dashboard, remediation, compliance reports, SLA, trending — senza dipendere da agent Push bloccato.
+
+**Rischi**: può corrompere lo stato DB. Sempre dump del DB prima di fare test invasivi su DB. Meglio su un'istanza dedicata "testing".
+
+#### **Strategia G — Configurazione condizionale**
+Alcune feature hanno env var o setting per abbreviare il tempo:
+- `SMTP_QUEUE_RETRY_DELAY=5s` invece del default 60s
+- `WEBHOOK_RETRY_BACKOFF=1,2,4` invece di `30,60,120`
+- `AGENT_HEARTBEAT_INTERVAL=10s` invece di 5 min
+
+**Quando usarla**: se il prodotto supporta override configurabili. Altrimenti richiede code patch (non nel nostro scope "no fix").
+
+---
+
+### Catalogo completo scheduler jobs + test strategy per ciascuno
+
+14 jobs APScheduler noti dalla mappatura originale. Stato test per ognuno:
+
+| Job | Schedule default | Strategy applicable | Test status |
+|---|---|---|---|
+| cisa_kev_sync | Daily 02:00 UTC | A (Sync CISA Now btn) / B (change interval) | ⬜ da testare (button visto in UI) |
+| vendor_advisory_sync | Daily 03:00 UTC | A (forse esiste) / C (python one-shot) | ⬜ |
+| nvd_cpe_dictionary_sync | Weekly Sun 04:00 | A (Sync CPE Dictionary Now) | ⬜ |
+| cve_known_products_refresh | Every 12h | C (python) | ⬜ |
+| epss_score_sync | Daily | A (Sync EPSS Scores Now) | ⬜ |
+| critical_email_digest | Daily 09:00 UTC | A (Send Email Alerts Now) / D (time travel) | ⬜ |
+| maintenance_job | Daily 04:00 UTC | A (probabile) / C | ⬜ |
+| stuck_job_recovery | Every 10 min | C / D (aspetta 10min+1s) | ⬜ |
+| asset_type_auto_detect | Daily 06:00 UTC | C | ⬜ |
+| unmapped_cpe_retry | Weekly Mon 05:00 | C | ⬜ |
+| kb_sync | Every 12h | C | ⬜ |
+| license_heartbeat | Every 12h | C | ⬜ (bloccato se license server upstream) |
+| vulnerability_snapshots | Daily 02:00 UTC | C | ⬜ (richiede dati tramite Strategia F) |
+| patch_tuesday_digest | 2nd Wed 09:00 UTC | D (time travel a 2nd Wed) / A se ha button | ⬜ |
+
+### Time-based feature da testare (non coperte da 14 jobs)
+
+| Feature | Trigger | Strategy |
+|---|---|---|
+| Account lockout dopo 5 failed login | 5 POST /login con password sbagliata | E |
+| Session timeout dopo 480 min idle | Logout automatico dopo idle | E + G (setta 1 min) |
+| Password expiry (disabled default 0) | Cambia a 1 day, aspetta 1 day | G + D |
+| Trial end date SaaS | 14 giorni default | D (time travel) |
+| Audit log retention > 365d | Insert fake audit log con timestamp 400 giorni fa → run cleanup | F + A |
+| Sync history retention > 90d | stesso pattern | F + A |
+| Session log retention > 30d | stesso | F + A |
+| Email throttling (max 10 identical vulns/day) | Send 11 email identiche rapidamente | E (11 trigger consecutivi) |
+| Webhook retry backoff | Webhook verso endpoint intenzionalmente down → osservare retry | E + stop testlab-webhooks |
+| Agent offline detection (ogni 5 min) | Stop agent → aspetta 5 min → status change | D/E |
+| Alert on new CVE match | Insert CVE + product match via DB | F + E |
+| SLA escalation su assignment overdue | Insert assignment con due_date passata | F |
+| License expiry warnings | Update license expires_at a 7 gg | F |
+| API key expires_at | Update key expires_at | F |
+| 2FA setup + verify | Setup flow + QR scan | E |
+| Force password change | Admin mark user as must-change → login | E |
+| Breached password check (NIST) | Test con password notoriamente compromesse ("password", "12345678") | E |
+| CAPTCHA Turnstile failure | Submit form con token fake | E |
+
+### Download / Export feature da testare
+
+Trigger immediato ma validation è sul file generato. Feature:
+
+| Feature | File generato | Test |
+|---|---|---|
+| CSV vulnerability export | `GET /api/reports/export/csv` | Apri CSV, verifica headers + data |
+| BOD 22-01 JSON | `GET /api/reports/compliance/bod-22-01?format=json` | Parse JSON, verifica schema |
+| BOD 22-01 PDF | stesso `?format=pdf` | Apri PDF, verifica branding/contenuto |
+| NIS2 JSON/CSV/PDF | `GET /api/reports/compliance/nis2` | 3 formati |
+| PCI-DSS PDF | `GET /api/reports/compliance/pci-dss` | PDF branded |
+| ISO 27001 PDF | stesso | |
+| SOC 2 PDF | stesso | |
+| Executive Summary PDF | `GET /api/reports/executive-summary` | One-pager |
+| Overdue Items PDF | `Download Overdue Report` btn | Lista CVE overdue |
+| SBOM CycloneDX | `GET /api/sbom/export/cyclonedx` | Valid JSON CycloneDX 1.5 schema |
+| SBOM SPDX | `GET /api/sbom/export/spdx` | Valid JSON SPDX 2.3 |
+| SBOM STIX 2.1 | `GET /api/sbom/export/stix21` | Valid bundle |
+| Audit Log export | Export btn in Audit Logs page | CSV/JSON |
+| GDPR Export | `GET /api/gdpr/export` | Full user data export |
+| DB Backup | `POST /api/settings/backup` (on-prem only) | SQL dump |
+| Agent script download | `GET /api/agent/download/<platform>` | PowerShell/.sh file |
+| License activation (offline) | Paste key → validate | |
+
+### Regola operativa
+
+Quando troviamo una feature time-based / async che non possiamo testare immediatamente, invece di skipparla:
+1. Documentiamola nella "Follow-up TODO list" sopra
+2. Annotiamo la **Strategia** (A/B/C/D/E/F/G) che useremo nel secondo giro
+3. Se richiede setup test data (Strategia F) → flag `requires-db-seed`
+4. Se richiede time travel (D) → flag `requires-time-travel`
+5. Nel secondo giro eseguiamo la strategy e catturiamo il risultato
+
+Questo dà copertura completa a "testare TUTTO di TUTTO" senza dover aspettare giorni reali per ogni evento.
+
+---
+
+---
+
 ## Scope map — retroactive (tutti i bug/osservazioni registrati finora)
 
 Tabella che classifica i bug per **deployment scope** così quando si fixa sappiamo dove intervenire e cosa non compromettere. Le etichette usano i label di `Deployment scope labels` sopra.
