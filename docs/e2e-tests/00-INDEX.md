@@ -54,6 +54,27 @@ Ogni fase ha un proprio file `NN-nome.md` (creato al momento, non tutti in antic
 
 ---
 
+## Deployment scope labels (sempre obbligatorio su ogni bug)
+
+Ogni bug deve dichiarare esplicitamente **dove vive** per evitare che un fix su un side comprometta l'altro. Usare uno o più di questi label:
+
+| Label | Significato | Repo / Path |
+|---|---|---|
+| 🏢 **on-prem only** | Bug si manifesta solo su installazione on-prem Docker self-hosted. `SENTRIKAT_MODE=onpremise` | `sbr0nch/SentriKat` (`app/`) |
+| ☁️ **SaaS only** | Bug si manifesta solo su `app.sentrikat.com`. `SENTRIKAT_MODE=saas` | `sbr0nch/SentriKat` (`app/`) |
+| 🏢☁️ **both (shared core)** | Bug in codice condiviso, manifesto in entrambi i mode. **Fix richiede test su both** | `sbr0nch/SentriKat` (`app/`) |
+| 🌐 **landing** | Bug sul sito marketing `sentrikat.com` (Astro static) | `sbr0nch/SentriKat-web` (`landing/`) |
+| 🏛 **portal** | Bug sul portal clienti/admin `portal.sentrikat.com` (Astro + API calls) | `sbr0nch/SentriKat-web` (`portal/`) |
+| 🔐 **license-server** | Bug sull'API FastAPI `api.sentrikat.com` / provisioning | `sbr0nch/SentriKat-web` (`license-server/`) |
+| 📚 **docs** | Bug sulla documentazione `docs.sentrikat.com` (MkDocs) | `sbr0nch/SentriKat-web` (`docs/`) |
+| 🚀 **release** | Bug nel release process (GitHub Actions, VERSION file, Docker image build) | `sbr0nch/SentriKat` (`.github/`) + `packaging/` |
+| 📦 **agent** | Bug specifico dello script agent (PowerShell/bash) | `sbr0nch/SentriKat` (`agents/`) |
+| 🔄 **cross-repo** | Bug che tocca più repo/scope insieme | — |
+
+**Regola d'oro**: se un bug è `🏢☁️ both`, il fix DEVE essere testato nei 2 mode separatamente PRIMA del merge. Un fix cieco può compromettere l'altro.
+
+---
+
 ## Formato bug (da usare in ogni file fase)
 
 Ogni bug/osservazione va aggiunta con questo schema:
@@ -63,6 +84,7 @@ Ogni bug/osservazione va aggiunta con questo schema:
 
 - **Fase**: 01 — Landing site
 - **Area**: Form Trial Signup
+- **Deployment scope**: 🌐 landing          ← NUOVO OBBLIGATORIO
 - **URL/Endpoint**: `https://sentrikat.com/#trial` → `POST /api/v1/provision/trial`
 - **Tipo**: 🔴 Bug | 🟡 Warning | 🔵 Info/UX | 🟢 OK (test passato)
 - **Severity**: Critical | High | Medium | Low | Info
@@ -75,6 +97,7 @@ Ogni bug/osservazione va aggiunta con questo schema:
 - **Actual**: ...
 - **Evidence**: screenshot path / console log / response JSON
 - **Note**: ipotesi causa, file sorgente sospetto, workaround
+- **Impact on other scope**: ... (es. "Nessun impatto su SaaS; solo landing" / "Fix su core condiviso — testare entrambi i mode")
 - **Discovered**: 2026-04-23
 ```
 
@@ -294,3 +317,101 @@ Raccolta delle cose che **vanno provate** ma che non abbiamo testato funzionalme
 - Fase 16 Extras (community, docs, n8n, nginx)
 
 **Razionale**: questa lista sostiene l'istruzione utente `"ogni cosa deve essere testata e funzionante, facciamo tutto piano piano"`. Non è ancora eseguita, serve da memoria per il secondo giro e per il code reading finale post-fix.
+
+---
+
+## Scope map — retroactive (tutti i bug/osservazioni registrati finora)
+
+Tabella che classifica i bug per **deployment scope** così quando si fixa sappiamo dove intervenire e cosa non compromettere. Le etichette usano i label di `Deployment scope labels` sopra.
+
+| ID | Tipo | Scope | Sommario breve |
+|---|---|---|---|
+| 01.2.1 | 🔴 | 🌐 landing | CSP `style-src` blocca Google Fonts |
+| 01.8.1 | 🔴 | 🌐 landing | Cookie banner non renderizzato al first load |
+| 01.9.1 | 🟡 | 🌐 landing + 📚 docs | Post IT in sito EN-only senza switcher i18n |
+| 01.12.3 | 🔵 | 🌐 landing | Blog index manca badge lingua sul post IT |
+| 01.16.1 | 🔵 | 🌐 landing | Sitemap-0 contenuto da verificare |
+| 01.16.4 | 🔵 | 🌐 landing | `security.txt` dichiara IT+DE su sito EN |
+| 01.17.1 | 🔴 | 🌐 landing + nginx | 404 redireziona a / con 200 invece di servire 404.html |
+| 02.2.1 | 🔴 | 🌐 landing | Validation checkbox terms in DE (browser locale native) |
+| 02.3.2 | 🔵 | 🔐 license-server | Alias Gmail `+tag` bloccati con 409 (feature voluta, UX review) |
+| 02.4.1 | 🔴 | ☁️ SaaS + 🔐 license-server | Temp password in plaintext nel welcome email |
+| 02.4.2 | 🟡 | ☁️ SaaS + 🔐 license-server | Email template usa `$` USD invece di `€` EUR |
+| 02.4.5–4.8 | 🔵 | 🔐 license-server | Email SPF/DKIM/DMARC, reply-to, tracking, List-Unsubscribe da verificare |
+| 02.6.3 | 🔵 | ☁️ SaaS (core app) | Password policy complexity oltre min-length da verificare |
+| 02.6.4 | 🔵 | 🏢☁️ both | Copy "admin asked to renew" su SaaS first-login |
+| 02.7.2 | 🔵 | ☁️ SaaS | Badge company uppercase CSS |
+| 02.7.3 | 🔵 | ☁️ SaaS | Feature gating Starter: sidebar include SBOM ma Features Included no |
+| 02.7.4 | 🔵 | ☁️ SaaS | No onboarding wizard/tour al primo login |
+| 02.7.6 | 🟡 | ☁️ SaaS | Billing "Monthly / Renews" su Early Access gratuito |
+| 02.7.7 | 🔵 | 🏢☁️ both | Subtitle "LDAP config" hardcoded anche dove LDAP non attivo |
+| 02.7.8 | 🔵 | 🏢☁️ both | Breadcrumb "Home / Administration" inconsistente |
+| 02.7.9 | 🔵 | ☁️ SaaS | Manca label "Early Access" su Current Plan card |
+| 02.7.10 | 🔵 | 🏢☁️ both | Manca usage/quota attuale (x/max con %) |
+| 02.7.11 | 🔵 | 🏢☁️ both | SBOM Export mismatch sidebar vs Features Included |
+| 03.5.3 | 🔴 | 🚀 release + 🏢☁️ both | VERSION file inchiodato a beta.2 su tag beta.6 (health/header/footer tutti dicono beta.2) |
+| 03.5.4 | 🟡 | 🏢☁️ both | Flask-Limiter usa in-memory storage (no Redis) |
+| 03.5.5 | 🟡 | 🏢☁️ both | `send_usage_to_license_server` logga ERROR invece di WARN/INFO |
+| 03.6.3 | 🔴 | 🏢 on-prem only | Setup wizard auto-lock dopo step 3 (step 4-6 irraggiungibili) |
+| 03.6.5 | 🔵 | 🏢 on-prem | Label "Create →" su step intermedi wizard |
+| 03.6.6 | 🔴 | 🏢 on-prem only | Sidebar "Platform Operations" section esposta anche in on-prem |
+| 03.6.7 | 🔵 | 🏢☁️ both | Console debug `[SentriKat]` visibile in production mode |
+| 03.6.8 | 🔵 | 🏢 on-prem | `/setup` non redirige a /login dopo completamento |
+| 03.7.2 | 🔴 | 🏢 on-prem only | Webhook Events page: copy SaaS-only renderizzata in on-prem |
+| 03.7.3 | 🔴 | 🏢 on-prem only | Typo `/ap1/license/events` invece di `/api/` |
+| 03.7.4 | 🔴 | 🏢 on-prem only | Usage Uploads page dice "this SaaS" + espone comando Python in UI |
+| 03.7.5 | 🔵 | 🏢 on-prem | `system_settings` non ha chiavi `%setup%` (flag altrove) |
+| 03.7.7 | 🔵 | 🏢 on-prem | Voci Platform Operations funzionanti (non solo cosmetiche) |
+| 03.11.1.3 | 🔵 | 🏢☁️ both | Cross-ref [02.7.7] anche su on-prem |
+| 03.11.1.4 | 🔵 | 🏢☁️ both | Inconsistency "Email (SMTP)" sidebar vs tab "Email & Alerts" |
+| 03.11.1.5 | 🟡 | 🏢☁️ both | Password SMTP mostra `••••••••` senza password salvata |
+| 03.11.1.9 | 🔵 | 🏢☁️ both | Nessun throttle su Send Test Email |
+| 03.11.1.10 | 🔵 | 🏢☁️ both | Test email espone host+port SMTP in plaintext |
+| 03.11.2.2 | 🔴 | 🏢☁️ both | Form LDAP manca Group Mapping fields |
+| 03.11.2.3 | 🔴 | 🏢☁️ both | Sidebar Users&Access manca voci LDAP Users/Groups (regressione refactor mode-gating) |
+| 03.11.2.4 | 🟡 | 🏢☁️ both | LDAP Test Connection richiede Save prima |
+| 03.11.2.5 | 🔵 | 🏢☁️ both | LDAP Server URL ambiguity URL+Port |
+| 03.11.2.6 | 🔵 | 🏢☁️ both | Form LDAP manca Display Name Attr / Default Role / Auto-create toggle |
+| 03.11.2.7 | 🔵 | 🏢☁️ both | Banner "LDAP Setup" implica auto-create senza controllo esplicito |
+| 03.11.2.8 | 🔵 | 🏢☁️ both | `ldap.log` non su stdout container |
+| 03.11.2.10 | 🟡 | 🏢☁️ both | Sezione LDAP nascosta dopo save, workaround refresh+tab |
+| 03.11.3.2 | 🔴 | 🏢 on-prem (scenario docker) | SAML docker network trap: single URL field per metadata |
+| 03.11.3.3 | 🔵 | test setup | Keycloak testlab client usa `RSA_SHA1` (deprecato) |
+| 03.11.3.5 | 🔵 | test setup | Realm signing key `RS256` documentata |
+| 03.11.3.12 | 🔵 | 🏢☁️ both | `manager == org_admin` sidebar identica; org_admin non vede MANAGEMENT/SYSTEM |
+| 03.11.3.15 | 🔵 | 🏢☁️ both | Popup delete user con stile testo grezzo (probabile `window.confirm()`) |
+| 03.11.4.5 | 🔴 | 🏢☁️ both | SSRF `ALLOW_PRIVATE_URLS` ignorato in prod; dev mode richiesto per test locale |
+| 03.11.5.3 | 🔴 | 🏢☁️ both | Test Connection webhook → 500 invece di 400 strutturato |
+| 03.11.5.4 | 🟡 | 🏢☁️ both | Log CRITI SSRF spam (1 per request invece di 1 al boot) |
+| 03.11.6.1 | 🔵 | 🏢☁️ both | GitHub Issues form manca Base URL (no Enterprise Server support) |
+| 03.11.6.3 | 🔵 | 🏢☁️ both | Error handling inconsistente tra `/test` endpoint dei tracker (GitHub clear, webhook 500) |
+| 03.11.6.5 | 🔵 | 🏢☁️ both | GitLab: UI mostra 2 messaggi di errore contraddittori simultaneamente |
+| 03.11.6.7 | 🔵 | 🏢☁️ both | Log SSRF label hardcoded "Jira tracker setup" anche per GitLab |
+| 03.11.7.4 | 🔵 | 🏢☁️ both | Syslog: singolo Send Test produce "un sacco di contenuto" (flood o multi-line?) |
+| 03.12.3 | 🔵 | 🏢 on-prem (UI) | Date picker "Expires" placeholder in DE (i18n browser native) |
+| 03.12.6 | 🔴 | 📦 agent + 🏢☁️ both | "Initial scan failed" silent fail senza dettaglio (root cause poi: 03.13.2) |
+| 03.12.7 | 🔴 | 📦 agent | No local `agent.log` per debug post-failure |
+| 03.12.10 | 🔵 | 📦 agent | Scheduled task punta a path user Downloads invece di %PROGRAMDATA% |
+| 03.12.13 | 🔴 | 🏢☁️ both | 403 agent non loggato in stdout sentrikat (solo nginx access log) |
+| 03.12.14 | 🔴 | 🏢☁️ both CRITICAL | Response `"Invalid or missing API key"` FUORVIANTE (real reason: license gate) |
+| 03.12.15 | 🔴 | meta | Diagnostic dead-end senza code reading — risolto poi con [03.13.2] |
+| 03.13.2 | 🎯 | 🏢 on-prem (Community tier) | Root cause agent: Push Agents require Professional — Community non include |
+| 03.13.3 | 🔵 | 🏢☁️ both | Terminology mismatch: "Worker Pool" (health) vs "Background Worker" (agent activity) |
+| 03.14.2 | 🟡 | 🏢 on-prem | Auto-sync CISA KEV OFF default (DEMO no telemetria) |
+| 03.14.3 | 🔵 | 🏢☁️ both | Metric discrepancy `Total Vulnerabilities 639` vs `KEV Catalog 13,978` |
+| 03.14.4 | 🔵 | 🏢☁️ both | Audit Logs filtri date in `tt.mm.jjjj` (DE) |
+| 03.14.7 | 🟡 | 🏢☁️ both | Health Check "Worker Pool STOPPED" vs Agent Activity "Running" contraddizione |
+| 03.14.9 | 🔴 | 🏢☁️ both + 🚀 release | License page dice "Up to date beta.2" mentre beta.6 disponibile (update-check rotto) |
+| 03.14.10 | 🔵 | 📚 docs + 🏢 on-prem | Terminology mismatch "DEMO" (handbook) vs "COMMUNITY" (UI) |
+| 03.14.10.expand | 🔴 | 🔄 cross-repo | Edition tier mismatch HIGH: docs, UI, marketing, email tutti dicono cose diverse |
+| 03.14.11 | 🟡 | 🏢 on-prem (Community) | Community limits 1/1 user + 1/1 org al max out-of-the-box |
+| 03.14.12 | 🔵 | 🏢☁️ both | "Weighted Units: 0.0" metric non documentato |
+
+**Note importanti sul fix planning**:
+- Bug marcati `🏢☁️ both` vanno testati in **entrambi i mode** dopo fix. Non basta verificare che funzioni on-prem — potrebbe rompere SaaS (o viceversa)
+- Bug `🌐 landing` sono isolati in repo separato (`SentriKat-web/landing`) — fix non impatta prodotto core
+- Bug `🚀 release` sono nel workflow CI — fix in `.github/workflows/release.yml` può impattare tutti i tag futuri
+- Bug `🔐 license-server` vivono in `SentriKat-web/license-server` (FastAPI), separato dal Flask core — fix isolato
+- Bug `📦 agent` vivono nel client-side PowerShell/bash — fix impatta customer host ma non server
+
+---
