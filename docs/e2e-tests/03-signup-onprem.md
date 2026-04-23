@@ -503,3 +503,116 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 ---
 
 *(next: dashboard screenshot attesa dall'utente — poi configurazione integrazioni testlab)*
+
+---
+
+## 03.11 — Integrazioni testlab
+
+### 03.11.1 — SMTP → Mailpit
+
+#### [03.11.1.1] SMTP save + test → feedback verde UI ✅ (pending delivery verification)
+
+- **Fase**: 03
+- **Area**: Settings → Email & Alerts → Global SMTP Configuration
+- **URL**: `http://localhost/admin/settings` (tab "Email & Alerts")
+- **Tipo**: 🟢 OK (UI level) / ⏳ pending verifica consegna
+- **Values configured**:
+  - SMTP Server: `host.docker.internal`
+  - Port: `1025`
+  - Username: (empty)
+  - Password: (empty — ma UI mostra 8 bullet, vedi [03.11.1.5])
+  - From Email: `noreply@sentrikat.local`
+  - From Name: `SentriKat Local`
+  - Use TLS/STARTTLS: OFF
+  - Use SSL: OFF
+- **UI feedback**:
+  - `Send Test Email` → toast verde (success) in alto a destra, zero errori console
+  - `Save SMTP Settings` → toast verde, config persistente dopo navigation (cambiare tab + tornare → valori rimangono)
+- **⚠️ Da verificare (ATTENZIONE)**: l'assenza di errori UI NON garantisce che l'email sia arrivata nel Mailpit locale. Possibili esiti:
+  - ✅ Email in Mailpit inbox → testlab pipeline funzionante (happy path)
+  - ❌ Nessuna email in Mailpit, ma forse `noreply@sentrikat.local` → routata via DNS pubblico e persa (mail server inesistente per quel dominio)
+  - ❌ Email partita verso l'inbox reale (`sotadenis94@gmail.com`) → il client SMTP non ha rispettato la config e ha usato fallback (problema di config)
+- **Follow-up**: aprire `http://localhost:8025` (Mailpit Web UI) e confermare (→ 03.11.1.2)
+- **Discovered**: 2026-04-23
+
+#### [03.11.1.2] ⏳ Verifica consegna su Mailpit (pending utente)
+
+- **Tipo**: ⏳ Pending
+- **Action required**: aprire `http://localhost:8025` nel browser → inbox dovrebbe contenere una email di test da SentriKat al `FROM=noreply@sentrikat.local`
+- **Discovered**: 2026-04-23
+
+#### [03.11.1.3] 🔁 Conferma bug [02.7.7] anche su on-prem: subtitle pagina "LDAP configuration, SMTP settings, and system options"
+
+- **Fase**: 03
+- **Area**: Copy / System Settings header
+- **Tipo**: 🔵 Info (cross-ref)
+- **Actual**: la pagina System Settings ha titolo `"System Settings"` con sottotitolo hardcoded `"LDAP configuration, SMTP settings, and system options"`, **identico** al SaaS ([02.7.7]).
+- **Valutazione on-prem**: sul on-prem DEMO, LDAP, SMTP e system options **sono effettivamente disponibili** → copy meno inappropriato che in SaaS Starter. Comunque resta copy hardcoded non dinamico.
+- **Discovered**: 2026-04-23
+
+#### [03.11.1.4] 🔵 Inconsistency nome voce: sidebar dice "Email (SMTP)", tab dice "Email & Alerts"
+
+- **Fase**: 03
+- **Area**: Navigation consistency
+- **Tipo**: 🔵 Info
+- **Severity**: Low (navigation clarity)
+- **Actual**:
+  - Sidebar: `Settings → Email (SMTP)`
+  - Tab bar interno alla pagina: `Email & Alerts`
+- **Issue**: lo stesso link porta a due label diverse, l'utente non è sicuro di essere nella sezione giusta
+- **Fix candidato**: uniformare a `Email & Alerts` (più accurato perché la pagina probabilmente include anche template alert/digest, non solo SMTP server config)
+- **Discovered**: 2026-04-23
+
+#### [03.11.1.5] 🟡 Campo Password SMTP mostra `••••••••` (8 bullet) senza password reale salvata
+
+- **Fase**: 03
+- **Area**: Settings / SMTP / UI state
+- **Tipo**: 🟡 Warning
+- **Severity**: Medium (ingannevole: l'utente pensa di avere una password salvata quando non c'è)
+- **Environment**: on-prem DEMO, primo utilizzo della pagina SMTP
+- **Steps to reproduce**:
+  1. First-time install (nessuna config SMTP precedente, env `SMTP_PASSWORD` vuoto)
+  2. Apri Settings → Email & Alerts
+- **Expected**: il campo Password è **vuoto** (placeholder "Leave blank to keep existing password" visibile se c'è uno storico, altrimenti vuoto pulito)
+- **Actual**: il campo mostra 8 bullet `••••••••` pre-popolati, suggerendo l'esistenza di una password salvata che non c'è. Accanto: helper text "Leave blank to keep existing password. Passwords are encrypted and not shown for security."
+- **Root cause ipotesi**:
+  - L'input type=password renderizza placeholder come bullet in alcuni browser
+  - Oppure il backend restituisce un valore maschera (8 bullet letterali) come sentinel per dire "c'è qualcosa" anche quando non c'è
+- **Impatto**:
+  - UX: utente potrebbe pensare che password sia configurata da default e non inserire la propria → connessione SMTP fallisce silenziosamente (l'helper text salva, ma è facile da ignorare)
+  - Debug confuso: "ho lasciato vuoto, vedo 8 bullet, quindi è salvato qualcosa?"
+- **Fix candidato**:
+  - Placeholder text che si vede se campo vuoto, non bullet pre-popolati
+  - Oppure: distinguere visivamente "no password saved" (campo vuoto) vs "password saved, hidden" (bullet + helper text)
+- **File sospetto**: template della pagina Email & Alerts + endpoint GET settings (forse restituisce `"password": "********"` come masked)
+- **Discovered**: 2026-04-23
+
+#### [03.11.1.6] 🔵 Nessun campo "Reply-To" visibile nel form SMTP
+
+- **Fase**: 03
+- **Area**: Settings / SMTP / fields
+- **Tipo**: 🔵 Info
+- **Severity**: Low
+- **Actual**: il form SMTP ha: Server, Port, Username, Password, From Email, From Name, Use TLS, Use SSL. Non c'è un campo esplicito "Reply-To".
+- **Note**: dalla mappatura originale esiste endpoint `/api/settings/email/reply-to` → la feature esiste ma forse è configurata altrove (Alert Management? Email templates?)
+- **Follow-up TODO**: esplorare pagina "Alert Management" (visibile in sidebar) per vedere se il Reply-To sta lì
+- **Discovered**: 2026-04-23
+
+#### [03.11.1.7] Subtitle "Default SMTP for all orgs. Organizations can override" esposto anche in DEMO single-org ✅ (info)
+
+- **Fase**: 03
+- **Area**: Settings / SMTP / copy multi-tenant
+- **Tipo**: 🔵 Info
+- **Actual**: banner blu al top del form: `"Default SMTP settings for all organizations. Organizations can override these with their own SMTP config."`
+- **Valutazione**: in DEMO on-prem c'è di default 1 sola org → copy ridondante ma architetturalmente corretto (la feature multi-tenant è presente anche in DEMO on-prem). Allinea con il fatto che "Organizations" è una voce della sidebar.
+- **Discovered**: 2026-04-23
+
+#### [03.11.1.8] Helper text port "587 (TLS) or 465 (SSL)" non include 25/1025/2525 ✅ (info)
+
+- **Fase**: 03
+- **Area**: Settings / SMTP / UX guidance
+- **Tipo**: 🔵 Info
+- **Actual**: sotto il campo Port c'è l'helper "587 (TLS) or 465 (SSL)". Il nostro 1025 (Mailpit) funziona ma non è suggerito.
+- **Valutazione**: accettabile (`1025` è dev/testlab, non port production standard). Helper è accurato per uso produzione.
+- **Discovered**: 2026-04-23
+
