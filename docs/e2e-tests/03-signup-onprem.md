@@ -1073,6 +1073,71 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 #### [03.11.3.14] SAML complete (dim 1+3+4+5) ✅ — passaggio a Jira
 
 - **Tipo**: 🟢 OK (area conclusa)
+- **Riassunto**: 1 bug High (docker network trap [03.11.3.2]), 4 info testlab config, zero regressioni strutturali
+- **Discovered**: 2026-04-23
+
+---
+
+### 03.11.4 — Jira → jira-mock (MockServer)
+
+#### [03.11.4.1] Mock Jira testlab raggiungibile solo via `/mockserver/dashboard` ✅
+
+- **Fase**: 03
+- **Area**: Testlab jira-mock / endpoint discovery
+- **URL**: `http://localhost:8080/mockserver/dashboard`
+- **Tipo**: 🟢 OK
+- **Actual**:
+  - `http://localhost:8080` root → `NO_MATCH_RESPONSE` (nessuna expectation registrata su path vuoto) — normale per MockServer
+  - `http://localhost:8080/mockserver/dashboard` → dashboard MockServer funzionante
+  - Log confermano caricamento `jira-expectations.json` all'avvio
+- **Discovered**: 2026-04-23
+
+#### [03.11.4.2] Expectations Jira mock pre-configurate (8 endpoint) ✅
+
+- **Fase**: 03
+- **Area**: Testlab jira-mock / API surface
+- **Tipo**: 🟢 OK + 🔵 Info per mapping
+- **Actual** — 8 attive (ordine d'applicazione):
+
+| Method | Path | Scopo |
+|---|---|---|
+| GET | `/rest/api/2/serverInfo` | Jira server version info (login ping) |
+| GET | `/rest/api/2/myself` | Auth check: ritorna user corrente |
+| GET | `/rest/api/2/project/VULN` | Project detail — **project key `VULN` preconfigurato** |
+| GET | `/rest/api/2/project` | List projects |
+| POST | `/rest/api/2/issue` | Create issue — endpoint core per la integration |
+| GET | `/rest/api/2/search` | JQL search |
+| GET | `/rest/api/2/issuetype` | Issue types list (dropdown UI populate) |
+| GET | `/rest/api/2/priority` | Priority list (per priority mapping CVSS→Jira) |
+
+- **Coverage valutazione**: mock copre i pattern tipici di una integration "create from CVE → post issue → search status". Mancano però webhook-back (Jira→SentriKat updates), transitions (status change), attachments
+- **Discovered**: 2026-04-23
+
+#### [03.11.4.3] SentriKat form Issue Tracker Integration — rendering OK ✅ + 2 osservazioni minori
+
+- **Fase**: 03
+- **Area**: Settings / Issue Trackers / UI rendering
+- **URL**: sidebar `INTEGRATIONS → Integrations → Issue Trackers` (path da confermare nel breadcrumb)
+- **Tipo**: 🟢 OK (rendering) + 🔵 Info per dettagli
+- **Actual**:
+  - Banner blu: "Issue Tracker Integration: Create issues directly from vulnerabilities. Supports Jira, YouTrack, GitHub Issues, GitLab Issues, and custom webhooks."
+  - Enabled Issue Trackers — 5 checkbox: Jira (checkable), YouTrack, GitHub Issues, GitLab Issues, Custom Webhook. Utente ha abilitato solo Jira ✅
+  - Helper text: "Enable one or more trackers. A 'Create Issue' button will appear for each on the dashboard." → promette UX: le azioni per-tracker compaiono nel dashboard CVE
+  - Jira Configuration campi: URL, Username, Personal Access Token (masked), toggle `Use Personal Access Token (PAT)`, Project Key, Issue Type dropdown, Custom Fields section con bottone "Fetch Required Fields"
+- **Osservazione #1 — URL prepopolato `host.docker.internal:8080`**: riferimento al testlab mock. Potenziale issue stesso del SAML [03.11.3.2]: se SentriKat genera link "Open in Jira" per il browser usando questo URL, il link sarà unreachable dal browser host. Per **create issue (server-side)** è OK.
+- **Osservazione #2 — Issue Type dropdown mostra `Task` ma placeholder dice "Please fill in URL, username, token, and project key first"**: il dropdown è prepopolato ma richiede fetch completo per essere valido. Potrebbe creare confusione — sembra già selezionato
+- **Discovered**: 2026-04-23
+
+#### [03.11.4.4] ⚠️ Project Key inserito `SEC` ma mock expectation è `VULN` — correzione prima di test
+
+- **Fase**: 03
+- **Area**: Config Jira / test setup
+- **Tipo**: ⚠️ Test setup error (non bug)
+- **Actual**: utente ha compilato `Project Key = SEC`. Il mock ha expectations solo per `/rest/api/2/project/VULN` e non ha una per `/project/SEC` → il Test Connection fallirà con 404 o default "NO_MATCH_RESPONSE"
+- **Azione correttiva richiesta prima di procedere**: cambiare Project Key da `SEC` a `VULN`, poi procedere a fetch fields + save + test
+- **Discovered**: 2026-04-23
+
+- **Tipo**: 🟢 OK (area conclusa)
 - **Dims chiuse**:
   - ✅ dim 1 Happy path — 03.11.3.7 login SSO OK
   - ✅ dim 2 Persistence — config SAML sopravvive (implicito)
