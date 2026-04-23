@@ -158,8 +158,8 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 - 🔴 Bug: 14
 - 🟡 Warning: 8
-- 🔵 Info/UX: 44
-- 🟢 OK passati: 63
+- 🔵 Info/UX: 46
+- 🟢 OK passati: 65
 - ⏸️ Test bloccati: 5
 
 *(aggiornati a mano ad ogni commit)*

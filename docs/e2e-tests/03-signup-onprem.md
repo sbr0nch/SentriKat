@@ -1155,6 +1155,79 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 
 ---
 
+### 03.12 — Agent deployment + inventory
+
+#### [03.12.1] Create Agent API Key form — ricco, ben strutturato ✅
+
+- **Fase**: 03
+- **Area**: Integrations → Agent Keys / CRUD Create
+- **URL**: `http://localhost/admin/integrations/agent-keys` (path da confermare) → "Create Agent API Key" modal
+- **Tipo**: 🟢 OK (form rendering + feature completeness)
+- **Campi osservati**:
+  - **Key Name** (text) — es. "Test Windows Agent"
+  - **Key Type** (dropdown) — `Client` / `Server`. Helper: "Classifies endpoints and software reported by this key. Use 'Server' for infrastructure and 'Client' for workstations/desktops."
+  - **Primary Organization** (dropdown) — "Acme Corp." (org creata al setup)
+  - **Additional Organizations** (OPTIONAL) — helper: "Software reported by this agent will also appear in these organizations (without mixing data between them)" — feature multi-tenant fine-grained
+  - **Max Assets** (number, default 0 = unlimited)
+  - **Expires** (date) — "Leave empty for no expiration"
+  - **Scan Capabilities** (3 toggle, tutti ON di default):
+    - OS Packages: "Scan installed operating system packages and software"
+    - Extensions: "Scan browser extensions (Chrome, Firefox, Edge), IDE plugins (VS Code, JetBrains), and more"
+    - Code Dependencies: "Scan code libraries and dependencies (pip, npm, cargo, gem, go, composer)"
+  - **Auto-approve new products** (toggle, OFF default):
+    - "When enabled, software reported by agents using this key will be added directly to your inventory. When disabled, new products go to the Import Queue for manual review first."
+- **Valutazione positiva**:
+  - 3 Scan Capabilities separabili → fine control per compliance/privacy (es. disabilitare Extensions se l'agent è su macchina clinica con regolamento stretto)
+  - Import Queue flow → governance on new products prima di inventory pollution
+  - Key Type Client/Server → classificazione asset immediata
+  - Max Assets limit → prevenire key leak abuse
+  - Expiry date → best practice security (token rotation)
+- **API Key generata**: `sk_agent_4ApEu7_c80X0LsSXRhGorBr86adftcyZN7ka51MEJWg` (prefix `sk_agent_` identifica il tipo — buona practice)
+- **Discovered**: 2026-04-23
+
+#### [03.12.2] 🔵 Script agent Windows — nome file `sentrikat-agent.ps1` (no OS suffix)
+
+- **Fase**: 03
+- **Area**: Agent download / filename
+- **Tipo**: 🔵 Info (rectification)
+- **Actual**: utente conferma che il file scaricato si chiama `sentrikat-agent.ps1`, non `sentrikat-agent-windows.ps1` come nel repo
+- **Interpretazione**: il server probabilmente serve uno script generico `.ps1` (per tutti i Windows) / `.sh` (per Linux+macOS). Il contenuto differisce in base a OS detection client-side o server-side (query param ?platform=windows)
+- **Note**: coerente con practice tipiche per script di deploy, non è bug
+- **Discovered**: 2026-04-23
+
+#### [03.12.3] 🔵 Date picker "Expires" — placeholder in TEDESCO (`tt.mm.jjjj`) su sito EN-only
+
+- **Fase**: 03
+- **Area**: Agent Keys / i18n / HTML5 date input localization
+- **Tipo**: 🔵 Info (probabile behavior browser nativo)
+- **Severity**: Low (UX minore)
+- **Environment**: Chrome DE del utente
+- **Actual**: il campo "Expires" del form Create Agent API Key mostra placeholder `tt.mm.jjjj` (formato tedesco dd.mm.yyyy con wildcard "tt" per Tag, "mm" per Monat, "jjjj" per Jahr)
+- **Ipotesi root cause**: `<input type="date">` HTML5 localizza il placeholder **secondo la locale del browser** (stesso pattern di [02.2.1] tooltip validation in DE su Chrome DE). Il sito SentriKat non imposta esplicitamente il placeholder in EN
+- **Conferma cluster Chrome DE**: già 3 occorrenze di localizzazione tedesca in un sito EN-only → evidence che la locale browser utente influenza pesantemente la UX
+- **Fix candidato (se si vuole uniformare)**: settare `<input type="date" placeholder="YYYY-MM-DD">` esplicito, oppure usare un date picker JS che ignora locale browser
+- **Non blocca**: funzionalità intatta, solo UX incoerente
+- **Discovered**: 2026-04-23
+
+#### [03.12.4] 🟢 Security default: agent Windows script enforca HTTPS per ServerUrl ✅
+
+- **Fase**: 03
+- **Area**: Agent script / security defaults
+- **Tipo**: 🟢 OK (positive security posture)
+- **Actual**: al run `powershell -ExecutionPolicy Bypass -File .\sentrikat-agent.ps1 -Install` senza override → errore chiaro:
+  ```
+  ERROR: ServerUrl must use HTTPS. Use -AllowHttp to override (NOT recommended).
+  ```
+- **Valutazione**:
+  - ✅ Default sicuro: HTTPS mandatory per proteggere API key + inventory data sniffing
+  - ✅ Messaggio chiaro con indicazione del flag override
+  - ✅ Warning "NOT recommended" sul flag → l'admin è esplicitamente informato del rischio
+- **Workaround per test locale (sentrikat gira su http://localhost senza cert)**: aggiungere `-AllowHttp` al comando (accettabile in test env, non in prod)
+- **Follow-up TODO 03.12.4a**: verificare in fase 07/sicurezza che l'API key NON venga esposta in URL query params (deve essere header `X-Agent-Key`) e che il body `POST /api/agent/inventory` sia compresso/minimale (no PII)
+- **Discovered**: 2026-04-23
+
+---
+
 ### 03.11.7 — SIEM / Syslog → testlab syslog-receiver
 
 #### [03.11.7.1] Form SIEM/Syslog rendering + config options ✅
