@@ -1226,6 +1226,115 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 - **Follow-up TODO 03.12.4a**: verificare in fase 07/sicurezza che l'API key NON venga esposta in URL query params (deve essere header `X-Agent-Key`) e che il body `POST /api/agent/inventory` sia compresso/minimale (no PII)
 - **Discovered**: 2026-04-23
 
+#### [03.12.5] 🟢 Agent install + auto-upgrade + scheduled tasks registration OK ✅
+
+- **Fase**: 03
+- **Area**: Agent install flow / auto-upgrade
+- **Tipo**: 🟢 OK (parziale — install OK, scan fallito separatamente)
+- **Actual** (output run `-Install -AllowHttp`):
+  ```
+  Existing SentriKat Agent detected — upgrading automatically.
+  Old API key revoked on server.
+  Old agent removed. Installing new version...
+
+  TaskPath    TaskName                       State
+  \           SentriKat Agent                Ready
+  \           SentriKat Agent Heartbeat      Ready
+
+  SentriKat Agent installed:
+    - Full scan: every 240 minutes
+    - Heartbeat: every 5 minutes (checks for commands)
+  ```
+- **Valutazione positiva**:
+  - ✅ Auto-detection di installazione esistente (non reinstall cieco)
+  - ✅ Auto-revoke della vecchia API key sul server → security (previene orphan credentials)
+  - ✅ Clean upgrade (rimozione vecchio + install nuovo)
+  - ✅ 2 scheduled tasks Windows registrate:
+    - `SentriKat Agent` → full scan ogni 240 min (4 ore)
+    - `SentriKat Agent Heartbeat` → ogni 5 min (keep-alive + command pull)
+  - ✅ Architettura valida: scan heavyweight separato da heartbeat lightweight
+- **Info 03.12.5a — Cadenza scan default**: 240 min per full scan è conservativo. In incident response settings si potrebbe volerlo più aggressivo (60 min?). Parametro forse esposto al setup, da confermare
+- **Discovered**: 2026-04-23
+
+#### [03.12.6] 🔴 HIGH — "Initial scan failed" silent fail, nessun dettaglio errore, nessun log backend
+
+- **Fase**: 03
+- **Area**: Agent initial inventory / error reporting
+- **Tipo**: 🔴 Bug
+- **Severity**: **High** (il primo check-in di un agente appena installato fallisce SENZA alcun modo per l'admin di capire perché)
+- **Environment**: Windows 11, Windows PowerShell, agent `-Install -AllowHttp` verso `http://localhost`
+- **Steps to reproduce**:
+  1. Crea Agent API Key su SentriKat
+  2. Scarica `sentrikat-agent.ps1`
+  3. `powershell -ExecutionPolicy Bypass -File .\sentrikat-agent.ps1 -Install -AllowHttp`
+  4. Osserva output
+- **Expected**: lo scan iniziale scopre N prodotti, POST verso `/api/agent/inventory`, risposta 200 OK, dashboard mostra prodotti
+- **Actual**:
+  ```
+  Running initial inventory scan...
+  Initial scan failed - agent will retry on next scheduled scan
+  ```
+  - Nessun dettaglio errore (no exception, no HTTP status code, no URL target)
+  - Nessun file log visibile a occhio
+  - Nessun messaggio con suggerimenti ("check network", "check API key", "check server URL")
+- **Verifica lato server SentriKat**:
+  - Dashboard: counters tutti a 0
+  - `INVENTORY → Products List`: vuota
+  - `INVENTORY → Import Queue`: vuota (auto-approve OFF → si aspetterebbe qualcosa qui se ci fosse stato un tentativo)
+  - `INTEGRATIONS → Agent Activity`: vuota (nessun record dell'agent che ha tentato check-in)
+  - `docker compose logs | grep agent/inventory/401/403` → **SOLO** APScheduler noise, zero tentativi di `POST /api/agent/inventory`
+- **Interpretazione**:
+  - La chiamata HTTP dell'agent **probabilmente non arriva mai al server** — altrimenti nginx o app avrebbero loggato il tentativo (anche se 401/403/500)
+  - Possibili cause:
+    1. Errore DNS / connessione prima della POST (il client PS non risolve `http://localhost` dalla macchina Windows → `localhost` è il server SentriKat su Docker? Verifica: dalla macchina Windows `http://localhost` dovrebbe raggiungere nginx:80 → sentrikat:5000, OK)
+    2. Timeout / certificato errato (stiamo su HTTP, non HTTPS — dovrebbe essere forced da AllowHttp)
+    3. API key handling bug nello script
+    4. Errore in fase enumeration (Get-Package/WMI) che abort l'agent prima della POST
+    5. Payload troppo grande (>16MB limit?) se enumerati molti prodotti
+- **Impatto**:
+  - UX: un admin SentriKat che installa l'agent e vede "Initial scan failed" non sa cosa fare
+  - Production impact: stesso scenario in un customer on-prem → support ticket che richiede debug remoto
+- **Fix candidato (per fase fix)**:
+  - Dettaglio errore esplicito con tipo + message (ConnectionError, AuthenticationError, PayloadTooLarge, EnumerationError, ecc.)
+  - Log file locale (es. `%PROGRAMDATA%\SentriKat\agent.log`) con trace completo
+  - Suggested actions nel message ("Verifica che il server sia raggiungibile", "Verifica la API key", ecc.)
+  - Exit code ≠ 0 per scripting / monitoring
+- **Discovered**: 2026-04-23
+
+#### [03.12.7] 🔴 Manca un `agent.log` locale per debug post-failure
+
+- **Fase**: 03
+- **Area**: Agent / diagnostics
+- **Tipo**: 🔴 Bug (collegato a 03.12.6)
+- **Severity**: High (blocker debug)
+- **Actual**: l'agent fallisce lo scan iniziale senza produrre un file di log locale riconoscibile. Senza log file, impossibile fare troubleshooting remoto su customer site
+- **Percorsi tipici attesi (da verificare se esistono)**:
+  - `%PROGRAMDATA%\SentriKat Agent\logs\agent.log`
+  - `%LOCALAPPDATA%\SentriKat\agent.log`
+  - `C:\Program Files\SentriKat Agent\logs\`
+- **Follow-up TODO 03.12.7a**: controllare dove sta installato l'agent dopo `-Install`:
+  ```powershell
+  Get-ScheduledTask -TaskName "SentriKat Agent" | ForEach-Object { $_.Actions }
+  ```
+  per capire da quale path parte + se c'è un log abilitato
+- **Discovered**: 2026-04-23
+
+#### [03.12.8] 🔵 Info — Agent uses Windows Scheduled Tasks (non Windows Service)
+
+- **Fase**: 03
+- **Area**: Agent architecture
+- **Tipo**: 🔵 Info (observation)
+- **Actual**: dopo `-Install` sono registrati 2 Scheduled Tasks (non 2 Windows Services):
+  - `SentriKat Agent` (240 min interval)
+  - `SentriKat Agent Heartbeat` (5 min interval)
+- **Trade-off**:
+  - ✅ Pro: più semplice da installare (no service manager), funziona anche su versioni Windows limitate
+  - ✅ Pro: tasks visibili in Task Scheduler UI → facile per admin controllare stato
+  - ⚠️ Con: se user logoff e il task è "Run when user logged on" → scan non parte; se è "Run whether user logged on or not" serve password user salvata
+  - ⚠️ Con: PowerShell process elevato ogni N minuti è più pesante di un service long-running
+- **Follow-up TODO 03.12.8a**: verificare che i task siano settati `Run whether user is logged on or not` + `Run with highest privileges` (necessario per enumerazione MSI, registry HKLM, WMI) — altrimenti comportamento imprevedibile
+- **Discovered**: 2026-04-23
+
 ---
 
 ### 03.11.7 — SIEM / Syslog → testlab syslog-receiver

@@ -156,10 +156,10 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 ## Bug counter globale
 
-- 🔴 Bug: 14
+- 🔴 Bug: 16
 - 🟡 Warning: 8
-- 🔵 Info/UX: 46
-- 🟢 OK passati: 65
+- 🔵 Info/UX: 48
+- 🟢 OK passati: 66
 - ⏸️ Test bloccati: 5
 
 *(aggiornati a mano ad ogni commit)*
