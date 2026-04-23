@@ -179,6 +179,149 @@
 - **Fix candidato**: mostrare accanto a ogni feature un badge "DEMO" / "PRO" / "BUSINESS" per disambiguare cosa è incluso in che edition; oppure nascondere le feature non incluse nella edition corrente.
 - **Discovered**: 2026-04-23
 
+### [03.6.3] 🔴 HIGH — Setup wizard si auto-locka dopo step 3: step 4/5/6 irraggiungibili, Seed Catalog → 403
+
+- **Fase**: 03
+- **Area**: Setup wizard / bootstrap flow
+- **Tipo**: 🔴 Bug
+- **Severity**: **High** (blocker: impedisce di completare il wizard, impossibile seedare il service catalog di 80+ servizi, utente perde passaggi 5-6 non testabili)
+- **Environment**: local Windows Docker, beta.6 build locale, first install pulita
+- **Steps to reproduce**:
+  1. First-run `localhost/setup`
+  2. Step 1 Welcome → click "Get Started →"
+  3. Step 2 Organization: compila Name (e.g. "SentriKat Test Org") + opt desc/alert emails → click "Create →"
+  4. Step 3 Admin Account: compila username `admin`, email, Full Name, password (min 8) + confirm → click "Create →"
+  5. Step 4 Service Catalog: click "Seed Catalog →"
+- **Expected**: `POST /api/setup/seed-services` → 200/201, lista di 80+ servizi caricata, avanzi a step 5
+- **Actual**:
+  - Console browser: `POST http://localhost/api/setup/seed-services → 403 (FORBIDDEN)` (stack trace: `seedServices @ setup:681`)
+  - Banner rosso inline: **"Setup already completed."**
+  - Impossibile procedere; qualsiasi refresh redirige a `/login` (il setup flag è definitivamente settato)
+  - Step 5 e 6 del wizard **mai visibili**, la mappa del flow rimane incompleta
+- **Root cause ipotesi**:
+  - Il backend marca `setup_complete=True` dopo lo step 3 (creazione admin + org), invece che al termine di TUTTI i 6 step
+  - Il middleware che gate-gli endpoint `/api/setup/*` controlla questo flag → 403 "Setup already completed" su qualsiasi POST successivo
+  - Probabilmente in `app/setup.py` o `app/routes.py` c'è un `if setup.is_complete(): return 403` su tutti gli endpoint `/api/setup/*` senza distinguere quali step sono stati effettivamente fatti
+- **Impatto**:
+  - Customer on-prem non riceve i 80+ servizi preconfigurati (Microsoft Office, Apache, nginx, MySQL, ecc.) → deve seedarli a mano o importarli da CSV
+  - Feature del catalog → inutile per DEMO/first-run
+  - Step 5 e 6 (che potrebbero essere: License activation? SMTP setup? Integrations?) irraggiungibili → **non possiamo testarli in questa install**
+- **Fix candidato**:
+  - Il flag "setup complete" deve dipendere da un checkpoint finale (step 6 final submit), non dal completamento di ogni step singolo
+  - Oppure: endpoint `/api/setup/*` devono essere accessibili in stato `in_progress` fino al final commit, non solo prima del primo POST riuscito
+  - File sospetto: `app/setup.py`, `app/routes.py` (probabilmente funzione `require_setup_incomplete` o decorator simile)
+- **Workaround operativo**:
+  - **Non attuabile via UI**: una volta auto-lockato il wizard non torna indietro
+  - Via CLI: connettersi al DB e flippare la flag `setup_complete=False` manualmente (`docker compose -p v100-beta6 exec sentrikat-db psql -U sentrikat sentrikat -c "UPDATE system_settings SET setup_complete=false WHERE id=1;"` — nome tabella da verificare)
+  - Oppure: wipe volumi + re-install + creare prima admin via env var (se supportato) e saltare wizard
+- **Discovered**: 2026-04-23
+
+### [03.6.4] Step 3 password validation (min 8 char) client-side OK ✅
+
+- **Tipo**: 🟢 OK
+- **Actual**: input password `test123` (6 char) → banner rosso "Password must be at least 8 characters long!" appare in cima al form; rinserire `TestPass123!` → accettato, admin creato. Coerente con [02.6.2] dell'app SaaS.
+- **Discovered**: 2026-04-23
+
+### [03.6.5] 🔵 Label bottoni wizard: "Create →" usato anche per step non-terminali
+
+- **Fase**: 03
+- **Area**: Setup wizard / copywriting
+- **Tipo**: 🔵 Info
+- **Severity**: Low (UX)
+- **Actual**: sia step 2 (Organization) che step 3 (Admin Account) mostrano il bottone `Create →`. Ma il "create" finale (commit del setup) dovrebbe avvenire solo all'ultimo step. I non-finali dovrebbero dire `Next →` per chiarezza.
+- **Correlato**: il bug [03.6.3] potrebbe dipendere proprio dal fatto che il backend interpreta ogni "Create" come commit → marca setup complete prematuramente
+- **Fix candidato**: step 2/3/4 usano `Next →`, solo step 6 (Finalize?) usa `Finish →` o `Complete →`
+- **Discovered**: 2026-04-23
+
+### [03.6.6] 🔴 Dopo login as admin, sidebar mostra "Platform Operations" (sezione SaaS) su installazione on-prem
+
+- **Fase**: 03
+- **Area**: Post-setup / sidebar / mode gating
+- **Tipo**: 🔴 Bug
+- **Severity**: **Medium-High** (security/UX: espone voci di menu irrilevanti per on-prem e potenzialmente confondenti o esposte a click inutili/error-prone)
+- **Environment**: on-prem, `SENTRIKAT_MODE=onpremise`, DEMO edition, primo login come admin (auto-promoted a super_admin su first-run)
+- **Steps to reproduce**:
+  1. Completa setup wizard fino al login
+  2. Login come admin
+  3. Osserva sidebar
+- **Actual**: dopo "System" section, appare una sezione **"Platform Operations"** con 3 voci:
+  - `Cross-Repo Integration`
+  - `Webhook Events`
+  - `Usage Uploads`
+- **Expected**: queste 3 voci sono parti del **portal admin SaaS** (vedi mappatura repo: `portal/src/pages/admin/saas-tenants.astro`, `webhook-outbox.astro`, `usage-metrics.astro`). In installazione on-prem non hanno senso (non c'è cross-repo, non c'è outbound webhook verso un tenant SaaS, non c'è usage upload).
+- **Impatto**:
+  - Customer on-prem vede feature che non gli appartengono → confusione
+  - Click su `Usage Uploads` probabilmente cerca di chiamare `/api/admin/usage/...` con `SENTRIKAT_METRICS_KEY` che non esiste → errori a ripetizione
+  - Espone concetti SaaS-only (cross-repo, webhook outbox) a un customer che potrebbe interpretarli come "funzioni mancanti / bug"
+- **Root cause ipotesi**:
+  - Il menu template (probabilmente in `app/templates/base.html` o layout component) non fa il check `{% if saas_mode %}` prima di renderizzare la sezione Platform Operations
+  - Oppure: la sezione è aggiunta via blueprint/role check ma il check è `is_super_admin` invece di `is_saas_super_admin`
+- **Fix candidato**:
+  - Wrap della section `Platform Operations` con `{% if config['SENTRIKAT_MODE'] == 'saas' %}` nel template
+  - Oppure: gating delle rotte dei 3 endpoint (`/admin/cross-repo`, `/admin/webhook-events`, `/admin/usage-uploads`) a `@saas_only` decorator (simmetrico al `@on_prem_only` usato per backup/restore)
+- **File sospetto**: `app/templates/base.html` o `app/templates/admin_panel.html` + relativi route handler
+- **Discovered**: 2026-04-23
+
+### [03.6.7] 🔵 Console debug log `[SentriKat] Initializing...` visibili in production mode
+
+- **Fase**: 03
+- **Area**: Frontend / logging hygiene
+- **Tipo**: 🔵 Info
+- **Severity**: Low
+- **Environment**: `FLASK_ENV=production`, `SENTRIKAT_ENV=production` nel `.env`
+- **Actual**: dopo login la console browser mostra:
+  ```
+  [SentriKat] Initializing SentriKat Core v1.0.0
+  sentrikat-core.js:30 [SentriKat] SentriKat Core initialized
+  sentrikat-core.js:30 [SentriKat] Loading show, count: 1
+  sentrikat-core.js:30 [SentriKat] Loading hide, count: 0
+  ```
+- **Note**: log interni di debug UX, nessun dato sensibile esposto; utili in dev. In production andrebbero silenziati (es. `if (process.env.NODE_ENV !== "production") console.log(...)` oppure gated da `window.SENTRIKAT_DEBUG` flag)
+- **Osservazione collaterale**: la versione loggata dalla core JS è **`v1.0.0`** (hardcoded?), mentre `VERSION` file e `/api/health` dicono `1.0.0-beta.2` → terza versione "disallineata" (cfr. [03.5.3]): repo dice beta.2, footer/health dicono beta.2, JS core dice 1.0.0. Tre canali, tre valori diversi.
+- **File sospetto**: `app/static/js/sentrikat-core.js`
+- **Discovered**: 2026-04-23
+
+### [03.6.8] 🔵 Nessun 302 redirect su `/setup` dopo completamento: l'UI mostra wizard + banner "Setup already completed"
+
+- **Fase**: 03
+- **Area**: Setup wizard / routing
+- **Tipo**: 🔵 Info
+- **Severity**: Low
+- **Actual**: dopo il lock del wizard al step 3 (vedi [03.6.3]), visitare `localhost/setup` mostra ancora la card wizard (step 4) con il banner rosso "Setup already completed." — invece di redirezionare a `/login` o `/` con HTTP 302
+- **Fix candidato**: il router deve `abort(302, location='/login')` (o `/` se loggato) quando il setup è già stato completato, invece di servire il wizard con un errore inline
+- **Discovered**: 2026-04-23
+
+### [03.6.9] Creazione org + admin user + login con credenziali scelte ✅
+
+- **Fase**: 03
+- **Area**: Setup wizard / admin user
+- **Tipo**: 🟢 OK
+- **Credenziali usate (per tracking dei test successivi)**:
+  - Org name: (da confermare utente — testuale creata allo step 2)
+  - Username: `admin`
+  - Email: `sotadenis94@gmail.com`
+  - Full Name: `System Administrator`
+  - Password: `TestPass123!`
+- **Actual**:
+  - Step 2 Organization → Create OK
+  - Step 3 Admin Account → Create OK, admin promosso automaticamente a super_admin (primo utente on-prem)
+  - Login post-setup funzionante; banner/errori su email o password sbagliate mostrati correttamente
+- **Discovered**: 2026-04-23
+
 ---
 
-*(aggiornamento incrementale — step 2-6 wizard da testare, quindi primo login, license activation, ecc.)*
+## 03.5 — Bug update: conferma VERSION file
+
+### [03.5.3.confirm] Conferma su 3 canali che la versione riportata è `1.0.0-beta.2` anche se il tag è `v1.0.0-beta.6`
+
+- **Conferma di bug [03.5.3]** dopo install effettiva:
+  - `Get-Content C:\SentriKat\v1.0.0-beta.6\VERSION` → `1.0.0-beta.2`
+  - `/api/health` JSON → `"version":"1.0.0-beta.2"` + header `X-App-Version: 1.0.0-beta.2`
+  - Footer UI dopo login → `Powered by SentriKat v1.0.0-beta.2`
+  - Bonus inconsistency (vedi [03.6.7]): core JS log → `SentriKat Core v1.0.0` (stringa hardcoded, non legge dal VERSION)
+- **Aggiornamento Severity**: resta **High** perché impatta 3 canali visibili al customer (footer, API, log interno) + 1 canale sviluppatore (JS core)
+- **Discovered (confirm)**: 2026-04-23
+
+---
+
+*(aggiornamento incrementale — dashboard post-login + esplorazione menu "Platform Operations" da confermare, poi configurazione integrazioni testlab, poi deploy agent)*
