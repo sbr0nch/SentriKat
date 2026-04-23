@@ -1369,13 +1369,10 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 - **Ipotesi aggiuntive (sollevate dall'utente durante la sessione)**:
   1. **DEMO limit (5 agent max)**: improbabile come causa — messaggio "Invalid or missing API key" NON è lo stesso di "Quota exceeded". Uno usa codice/testo diverso. Se fosse DEMO limit: test API con `curl` direttamente restituirebbe `{"error":"demo_limit_reached","hint":"Upgrade to PRO..."}`, non key-invalid
   2. **Installazione on-prem non registrata col license server upstream**: plausibile come causa secondaria. Il nostro `.env` ha `SENTRIKAT_LICENSE=` e `SENTRIKAT_LICENSE_SERVER=` **vuoti** (DEMO no-license). Se la validation delle agent API keys richiede check upstream col license server (telemetria/metering), il fallimento di quel check potrebbe tradursi in un "key invalid" silent. Da approfondire
-- **Diagnostica definitiva (da eseguire prima di assumere root cause)**:
-  - Verificare nella UI `INTEGRATIONS → Agent Keys` lo stato della key → Active? Revoked? Expired?
-  - Grep dello script scaricato per l'effettiva key embedded:
-    ```powershell
-    Select-String -Path "C:\Users\cti-admin\Downloads\sentrikat-agent.ps1" -Pattern "sk_agent_"
-    ```
-  - Confronto con la key UI
+- **Diagnostica eseguita**:
+  1. ✅ **Key UI vs script embedded match**: grep `Select-String -Path sentrikat-agent.ps1 -Pattern "sk_agent_"` mostra `[string]$ApiKey = "sk_agent_4ApEu7_c80X0LsSXRhGorBr86adftcyZN7ka51MEJWg"` → esattamente la key copiata dall'UI. **NO mismatch client-side, la key embedded è quella giusta**
+  2. ❌ **security.log nel container è vuoto**: `docker compose exec sentrikat tail /var/log/sentrikat/security.log` restituisce zero righe. Significa che il file esiste ma nessun evento security (inclusi auth failure) viene loggato lì — **aggrava bug [03.12.13] observability**
+- **Next step diagnostica** (nuova strada): interrogare direttamente il DB per vedere lo stato della key
 - **Discovered**: 2026-04-23 (breakthrough diagnostic)
 
 #### [03.12.10] 🔵 Info — Scheduled task punta a path user Downloads invece di path di sistema
