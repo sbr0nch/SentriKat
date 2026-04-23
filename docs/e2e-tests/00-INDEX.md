@@ -156,11 +156,11 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 ## Bug counter globale
 
-- 🔴 Bug: 16
+- 🔴 Bug: 18
 - 🟡 Warning: 8
 - 🔵 Info/UX: 48
 - 🟢 OK passati: 66
-- ⏸️ Test bloccati: 5
+- ⏸️ Test bloccati: 6
 
 *(aggiornati a mano ad ogni commit)*
 
@@ -177,5 +177,6 @@ Test che non sono eseguibili finché non viene risolto un bug a monte. Da ripren
 | ⏸️ 03.11.5 (all) | 03 / Webhook | Test funzionali Webhook out bloccati dalla stessa policy SSRF | [03.11.5.2] stesso root cause di 03.11.4.5 |
 | ⏸️ 03.11.6.4 | 03 / GitLab | Test funzionali GitLab bloccati dalla stessa policy SSRF | stesso root cause di 03.11.4.5 |
 | ⏸️ 03.11.6.8 | 03 / YouTrack | Saltato in questa sessione (pattern atteso uguale), test rinviato a post-fix | stesso root cause presunto |
+| ⏸️ 03.12.6–15 | 03 / Agent inventory | Agent install OK ma initial scan 403/401 con messaggio fuorviante "Invalid API key". Key attiva nel DB (`active=t`, usage_count=3). Root cause vero nascosto da messaggio generico | [03.12.14] + possibilmente license-server-upstream validation in DEMO |
 
 **Regola operativa**: quando un test fallisce ma è chiaro che dipende da un altro bug non ancora fixato, lo spostiamo qui invece di marcarlo come "bug autonomo" (evita falsi positivi sul conteggio bug). Riapriremo questi test in una seconda passata dopo la fase fix, in ordine di dipendenza (prima i fix bloccanti, poi i test sbloccati).

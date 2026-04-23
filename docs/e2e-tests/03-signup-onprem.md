@@ -1370,10 +1370,87 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
   1. **DEMO limit (5 agent max)**: improbabile come causa — messaggio "Invalid or missing API key" NON è lo stesso di "Quota exceeded". Uno usa codice/testo diverso. Se fosse DEMO limit: test API con `curl` direttamente restituirebbe `{"error":"demo_limit_reached","hint":"Upgrade to PRO..."}`, non key-invalid
   2. **Installazione on-prem non registrata col license server upstream**: plausibile come causa secondaria. Il nostro `.env` ha `SENTRIKAT_LICENSE=` e `SENTRIKAT_LICENSE_SERVER=` **vuoti** (DEMO no-license). Se la validation delle agent API keys richiede check upstream col license server (telemetria/metering), il fallimento di quel check potrebbe tradursi in un "key invalid" silent. Da approfondire
 - **Diagnostica eseguita**:
-  1. ✅ **Key UI vs script embedded match**: grep `Select-String -Path sentrikat-agent.ps1 -Pattern "sk_agent_"` mostra `[string]$ApiKey = "sk_agent_4ApEu7_c80X0LsSXRhGorBr86adftcyZN7ka51MEJWg"` → esattamente la key copiata dall'UI. **NO mismatch client-side, la key embedded è quella giusta**
-  2. ❌ **security.log nel container è vuoto**: `docker compose exec sentrikat tail /var/log/sentrikat/security.log` restituisce zero righe. Significa che il file esiste ma nessun evento security (inclusi auth failure) viene loggato lì — **aggrava bug [03.12.13] observability**
-- **Next step diagnostica** (nuova strada): interrogare direttamente il DB per vedere lo stato della key
-- **Discovered**: 2026-04-23 (breakthrough diagnostic)
+  1. ✅ **Key UI vs script embedded match**: la key embedded nel `.ps1` è esattamente `sk_agent_4ApEu7_c80X0LsSXRhGorBr86adftcyZN7ka51MEJWg` — match perfetto con UI. NO mismatch client-side
+  2. ❌ **security.log nel container è vuoto** (aggrava [03.12.13])
+  3. ✅ **Query DB `agent_api_keys`** — 1 riga trovata con stato:
+     ```
+     id: 1
+     organization_id: 1
+     name: Test Windows Agent
+     key_hash: d2e23e5951d3c9a1... (SHA-256 hex)
+     key_prefix: sk_agent_4
+     encrypted_key: gAAAAABp6mmYfl... (Fernet encrypted)
+     key_type: client
+     scan_os_packages/extensions/dependencies: t/t/t
+     active: t                            ← ATTIVA
+     max_assets: 0                        ← unlimited
+     allowed_ips: (vuoto)                 ← nessuna IP restriction
+     auto_approve: f
+     last_used_at: 2026-04-23 19:00:33    ← aggiornato dal server al nostro test!
+     usage_count: 3                       ← incrementato dal server!
+     ```
+- **🎯 INSIGHT CRITICO — ipotesi self-revoke [03.12.9] CONFUTATA**:
+  - `active = true` e nessuna colonna `revoked_at` popolata → la key **NON è stata revocata**
+  - `last_used_at` riflette il tempo preciso dei nostri test recenti → **il server TROVA la key** nel lookup
+  - `usage_count = 3` → il server **incrementa** il counter a ogni chiamata
+  - Significa che il server esegue correttamente il match DB, poi **qualcos'altro** downstream fallisce e restituisce 401
+- **Conclusione root cause**: il 401 non è "API key invalid", è un **messaggio di errore FUORVIANTE** che nasconde il vero motivo del rifiuto (scope check? license check? plan gate? org binding?). La key è operativa nel DB ma viene bloccata da un secondo layer di validation
+- **Discovered**: 2026-04-23 (breakthrough diagnostic completo)
+
+#### [03.12.14] 🔴 CRITICAL — Messaggio d'errore `"Invalid or missing API key"` FUORVIANTE: la key è valida ma viene rifiutata da check downstream
+
+- **Fase**: 03
+- **Area**: Agent auth / error message correctness
+- **Tipo**: 🔴 Bug
+- **Severity**: **Critical** (impedisce debug, devia root cause analysis, fa perdere ore di tempo — l'admin guarda API key, ricrea, re-installa, ma il problema non è lì)
+- **Environment**: agent Windows beta.6 DEMO
+- **Evidence**:
+  - DB row per key `sk_agent_4ApEu7_...` ha `active=true`, `last_used_at` aggiornato, `usage_count=3`
+  - Server risponde `401 {"error":"Invalid or missing API key","hint":"Include X-Agent-Key header with your agent API key"}`
+  - Contraddizione esplicita: la chiave **è stata trovata** (DB update conferma), ma il messaggio dice "invalid or missing"
+- **Scenario behind-the-scenes (ricostruzione)**:
+  1. POST arriva con `X-Agent-Key`
+  2. Server: `SELECT * FROM agent_api_keys WHERE key_hash=sha256(header_value)` → **MATCH**
+  3. Server: `UPDATE agent_api_keys SET last_used_at=NOW(), usage_count=usage_count+1 WHERE id=1` → OK
+  4. Server: ulteriore check (organization binding? plan gate? quota? license server?) → **FAIL**
+  5. Server: return `401 {"error":"Invalid or missing API key"}` → **messaggio sbagliato per questa condizione**
+- **Impatto**:
+  - Admin operativo: spende ore a investigare la chiave, ricreare, re-installare
+  - Support team: difficile triage su customer report "API key not working" — la diagnostica punta alla chiave ma il problema è altrove
+  - Error handling inconsistency: dovrebbe esserci `403 Forbidden` con `{"error":"<specific_reason>"}` in uno tra:
+    - `key_scope_mismatch`
+    - `organization_not_authorized`
+    - `feature_not_available_on_plan`
+    - `license_server_validation_failed`
+    - `agent_quota_exceeded`
+- **Fix candidato (per fase fix, non ora)**:
+  - Separare il flow di validation in step distinti con messaggi specifici
+  - Se la key viene trovata (lookup OK) e qualche altro check fallisce → response 403 (non 401) con reason specifica
+  - Log WARN a backend con reason esatta
+- **Discovered**: 2026-04-23
+
+#### [03.12.15] 🔴 HIGH — Post-breakthrough: agent è bloccato ma ROOT CAUSE reale non raggiungibile senza leggere codice
+
+- **Fase**: 03
+- **Area**: Agent flow / diagnostic dead-end
+- **Tipo**: 🔴 Bug (meta-observation) + decisione operativa
+- **Severity**: High (blocca il testing di 03.12+ con rischio di compromettere le fasi successive che dipendono da dati inventory reali: products, CVE matching, remediation, compliance reports)
+- **Stato**:
+  - ❌ Root cause definitivo non raggiungibile dal solo debug black-box: serve leggere il codice `app/agent_api.py` o `app/authz.py` per capire quale check downstream sta fallendo
+  - ✅ Abbiamo raccolto sufficienti evidence da giustificare un fix:
+    - [03.12.6] Silent fail con 1 riga generica
+    - [03.12.7] No local agent.log
+    - [03.12.9] Auto-upgrade revoke logic da chiarire
+    - [03.12.10] Script in Downloads dir invece di ProgramData
+    - [03.12.13] Server non logga 403 su stdout
+    - [03.12.14] Messaggio 401 fuorviante
+- **Candidate root cause (ordinate per plausibilità)**:
+  1. **🟡 DEMO/on-prem senza license server upstream**: ipotesi utente, plausibile. Il backend `metering` potrebbe richiedere license-server per "attivare" l'uso agent anche in DEMO
+  2. **🟡 Org binding mismatch**: `organization_id=1` nel DB, ma l'endpoint potrebbe aspettare che l'agent dichiari esplicitamente l'org nel body, e il body potrebbe essere `-1-byte` ([03.12.12]) o altro
+  3. **🔵 License/subscription gate**: l'istanza DEMO non ha `Subscription` attiva, qualcosa controlla `.has_active_subscription` prima di accettare inventory
+  4. **🔵 Feature gate `agent_inventory`**: questo feature potrebbe essere gated e per DEMO disabilitato
+- **Decisione operativa**: **⏸️ BLOCK sull'agent flow**. Spostato nel blocked backlog. Passiamo a testing delle aree non-bloccate (CISA sync, compliance reports vuoti ma UI testabile, backup/restore on-prem, altri Settings tab). Torneremo sull'agent dopo fase fix
+- **Discovered**: 2026-04-23
 
 #### [03.12.10] 🔵 Info — Scheduled task punta a path user Downloads invece di path di sistema
 
