@@ -508,6 +508,42 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 
 ## 03.11 — Integrazioni testlab
 
+### Testlab credenziali e mapping (riferimento per tutti i test integrazioni)
+
+**Mailpit** (SMTP capture): `host.docker.internal:1025` SMTP / `http://localhost:8025` Web UI — no auth.
+
+**OpenLDAP** directory tree (da `C:\SentriKat\testlab\ldap-seed\01-users-and-groups.ldif`):
+
+- **Base DN**: `dc=sentrikat-test,dc=local`
+- **Bind accounts**:
+  - Admin: `cn=admin,dc=sentrikat-test,dc=local` / `admin123` (full access)
+  - **Readonly (consigliato per SentriKat bind, least privilege)**: `cn=readonly,dc=sentrikat-test,dc=local` / `readonly123`
+- **OU**: `ou=users` (5 users), `ou=groups` (3 groups)
+- **Users seedati** (tutti password `password123`):
+
+| uid | cn | mail | gruppo LDAP | role map atteso su SentriKat |
+|---|---|---|---|---|
+| `admin.user` | Admin User | `admin@sentrikat-test.local` | sentrikat-admins | super_admin / org_admin |
+| `it.manager` | IT Manager | `itmanager@sentrikat-test.local` | sentrikat-admins | org_admin |
+| `sec.analyst` | Security Analyst | `analyst@sentrikat-test.local` | sentrikat-analysts | manager |
+| `viewer` | Read Only Viewer | `viewer@sentrikat-test.local` | sentrikat-viewers | user (read-only) |
+| `disabled.user` | Disabled User | `disabled@sentrikat-test.local` | (none, `loginShell=/bin/false`) | da testare: deve essere negato il login |
+
+- **Gruppi** (objectClass `groupOfNames`, member attribute `member`):
+  - `cn=sentrikat-admins,ou=groups,...` → members: `admin.user`, `it.manager`
+  - `cn=sentrikat-analysts,ou=groups,...` → member: `sec.analyst`
+  - `cn=sentrikat-viewers,ou=groups,...` → member: `viewer`
+- **User filter consigliato**: `(uid={username})` oppure `(&(objectClass=inetOrgPerson)(uid={username}))`
+
+**Keycloak** (SAML IdP): `http://localhost:8180` admin `admin/admin123`, HTTPS `8443` (da esplorare per realm+client).
+**Jira mock** (MockServer): `http://localhost:8080` (host) → container :1080.
+**webhook-tester**: `http://localhost:8800`.
+**syslog-receiver**: `host.docker.internal:5514` UDP+TCP.
+**squid-proxy**: `http://localhost:3128`.
+**Dozzle** (log viewer): `http://localhost:9999`.
+
+---
+
 ### 03.11.1 — SMTP → Mailpit
 
 #### [03.11.1.1] SMTP save + test → feedback verde UI ✅ (pending delivery verification)
