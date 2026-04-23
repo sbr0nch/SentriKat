@@ -209,17 +209,6 @@
 
 ---
 
-## 02.8 — Edge 409 duplicate (parziale)
-
-### [02.8.1] 409 su email non accettate ✅
-
-- **Tipo**: 🟢 OK (parziale, vedi follow-up in 02.3.2)
-- **Actual**: 2 tentativi con alias Gmail → 409 entrambi
-- **Discovered**: 2026-04-23
-- **Follow-up TODO 02.8.2**: vero duplicate (stessa email già registrata in precedenza, senza alias) — testare con l'email del trial passato per confermare 409 + messaggio UI chiaro.
-
----
-
 ## 02.15 — Deployment type switcher
 
 ### [02.15.1] Plan picker nascosto quando deployment=on-prem ✅
@@ -376,6 +365,195 @@
 - **Actual**: dall'intero flow (form Trial → submit → email welcome → login → dashboard) NESSUN punto propone pagamento / Stripe checkout. L'email dichiara esplicitamente `Starter (Early Access — $0)` e "features are free during Early Access".
 - **Follow-up TODO 02.12.2**: verificare cosa succede al termine dell'Early Access (trial expire): l'utente vede paywall? email reminder? downgrade automatico a Free?
 - **Discovered**: 2026-04-23
+
+---
+
+## 02.8 — Edge 409 duplicate (parziale)
+
+### [02.8.1] 409 su email non accettate ✅
+
+- **Tipo**: 🟢 OK (parziale, vedi follow-up in 02.3.2)
+- **Actual**: 2 tentativi con alias Gmail → 409 entrambi
+- **Discovered**: 2026-04-23
+- **Follow-up TODO 02.8.2**: vero duplicate (stessa email già registrata in precedenza, senza alias) — testare con l'email del trial passato per confermare 409 + messaggio UI chiaro.
+
+### [02.8.2] 409 su true duplicate (stessa email già registrata) + UI chiara ✅
+
+- **Fase**: 02
+- **Area**: Edge 409 duplicate
+- **URL**: `POST /api/v1/provision/trial` con email già usata nel trial appena completato
+- **Tipo**: 🟢 OK
+- **Actual**: submit con stessa email appena registrata → UI mostra `"Account already exist"`, messaggio chiaro. Funzione di dedup operativa.
+- **Discovered**: 2026-04-23
+
+---
+
+## 02.14 — Pricing page CTAs
+
+### [02.14.1] `/pricing` rendering + CTAs coerenti ✅
+
+- **Fase**: 02
+- **Area**: Pricing page
+- **URL**: `https://sentrikat.com/pricing`
+- **Tipo**: 🟢 OK
+- **Actual**: utente conferma "si va tutto bene" (pagina carica, card visibili, CTAs puntano agli endpoint attesi: `#trial` per EA, `mailto:sales@sentrikat.com` per Enterprise, `#demo` per On-prem, capacity endpoint popolato)
+- **Follow-up TODO 02.14.2**: in un prossimo passaggio verificare dettagli quantitativi (sconti multi-anno 10%/15%, listino agent packs +25/+50/+100/Unlimited, add-on Compliance Pack €199/mo e Priority Support €999/yr) e testare il toggle "annual vs monthly" se esiste
+- **Discovered**: 2026-04-23
+
+---
+
+## 02.7 (continua) — Subscription detail in `app.sentrikat.com`
+
+### [02.7.6] 🟡 Contraddizione Early Access vs Billing "Monthly / Renews 23 May 2026"
+
+- **Fase**: 02
+- **Area**: First-time UX / Subscription
+- **URL**: `https://app.sentrikat.com/` → Settings → Subscription
+- **Tipo**: 🟡 Warning
+- **Severity**: Medium (causa ansia al cliente: "mi addebiteranno qualcosa il 23 maggio?" — rischio churn)
+- **Environment**: prod
+- **Actual** (dallo screenshot):
+  - Plan: `Starter`
+  - Status: `ACTIVE`
+  - **Billing: `Monthly`**
+  - **Renews: `23 May 2026`** (1 mese dopo il signup di oggi 2026-04-23)
+  - Nessuna label esplicita "Early Access" visibile sulla card Current Plan
+  - Email welcome diceva `"Starter (Early Access — $0)"` e `"all features are free during Early Access"`
+- **Issue**: il customer vede un billing mensile con data di rinnovo concreta ma non c'è indicazione che sia gratuito. Un cliente EA si chiede: "devo cancellare per non essere addebitato?"
+- **Expected**:
+  - Opzione A: `Billing: Early Access (Free)` + `Renews: —` (o EA end date chiaramente etichettata)
+  - Opzione B: riga aggiuntiva `Early Access: Active (Free until 2026-XX-YY)`
+  - Opzione C: badge grande "EARLY ACCESS — FREE" accanto al plan name
+- **File sospetto**: template/component della pagina Subscription nel frontend SaaS prodotto, + logica Plan/Subscription backend dove non discrimina tra EA trial e paid subscription
+- **Discovered**: 2026-04-23
+
+### [02.7.7] 🔵 Subtitle "LDAP configuration, SMTP settings..." su Starter dove LDAP è gated
+
+- **Fase**: 02
+- **Area**: Copywriting / feature gating consistency
+- **Tipo**: 🔵 Info
+- **Severity**: Low
+- **Actual**: la pagina Subscription ha header `"System Settings"` con subtitle `"LDAP configuration, SMTP settings, and system options"`. Ma nella stessa pagina `LDAP / Active Directory` è listato come ❌ (non incluso su Starter).
+- **Issue**: copy hardcoded che menziona feature non disponibili → confonde l'utente.
+- **Fix candidato**: subtitle dinamico che elenchi solo le feature disponibili nel plan attuale, oppure più generico `"Manage your subscription, notifications, and system options"`
+- **Discovered**: 2026-04-23
+
+### [02.7.8] 🔵 Breadcrumb "Home / Administration" non coerente col menu
+
+- **Fase**: 02
+- **Area**: Navigation / breadcrumbs
+- **Tipo**: 🔵 Info
+- **Severity**: Low
+- **Actual**: l'utente ha cliccato `Settings → Subscription` in sidebar ma la breadcrumb mostra `Home / Administration` (non `Home / Settings / Subscription` come ci si aspetterebbe)
+- **Issue**: il path percorso non è rappresentato; se l'utente clicca "Administration" nella breadcrumb, dove finisce?
+- **Fix candidato**: breadcrumb basata sulla navigazione reale della sidebar
+- **Discovered**: 2026-04-23
+
+### [02.7.9] 🔵 Manca label esplicita "Early Access" sulla Current Plan card
+
+- **Fase**: 02
+- **Area**: Subscription / UX
+- **Tipo**: 🔵 Info
+- **Severity**: Low (strettamente collegato a 02.7.6)
+- **Actual**: la card Current Plan mostra `Starter / ACTIVE / Monthly / 23 May 2026` senza dire che il cliente è in Early Access (€0). Unica indicazione "Early Access" era nell'email welcome.
+- **Fix candidato**: quando `plan.is_early_access == True` → badge verde "EARLY ACCESS" + testo "Free during Early Access program"
+- **Discovered**: 2026-04-23
+
+### [02.7.10] 🔵 Manca usage / quota attuale (agenti used, users used, storage used)
+
+- **Fase**: 02
+- **Area**: Subscription / quota visibility
+- **Tipo**: 🔵 Info
+- **Severity**: Low-Medium
+- **Actual**: `Plan Limits` mostra i massimi (Agents: 10, Users: 3, Products: Unlimited, API Keys: 2, Storage: 500 MB) ma NON mostra il consumo attuale (es. `2 / 10 agents used`, `1 / 3 users`, `48 MB / 500 MB used`)
+- **Issue**: utente non sa quando sta per saturare; cliente a livelli critici non ha early warning
+- **Fix candidato**:
+  - Aggiungere barre di progresso `<n> / <max> (<%>)` per ogni limit
+  - Alert email al 80%/95% del limite
+- **Discovered**: 2026-04-23
+
+### [02.7.11] 🔵 SBOM Export visibile in sidebar ma NON nella lista "Features Included"
+
+- **Fase**: 02
+- **Area**: Feature gating / consistency
+- **Tipo**: 🔵 Info
+- **Severity**: Low (da chiarire: feature universale o bug di visibilità?)
+- **Actual**:
+  - Sidebar su Starter mostra voce `Inventory → Products → SBOM Export` (visibile e presumibilmente cliccabile)
+  - Pagina Subscription → `Features Included` NON elenca SBOM tra le feature attive (né come ❌)
+  - Nel repo il commit recente `e769ce9 fix(plans): declare sbom_export in seeded plans so /api/sbom/* isn't 403` suggerisce che SBOM è stato reso feature universale
+- **Chiarimenti da ottenere**:
+  - SBOM Export è incluso in tutti i piani (anche Starter/Early Access)?
+  - Se sì: la feature list della Subscription page va aggiornata per elencarlo come ✅
+  - Se no: la voce in sidebar va nascosta o deve mostrare teaser "Pro+ only"
+- **Follow-up TODO 02.7.11a**: cliccare SBOM Export in sidebar → si apre la pagina? restituisce 403? scarica un JSON?
+- **Discovered**: 2026-04-23
+
+### [02.7.12] Subscription page rendering + feature matrix visibile ✅
+
+- **Fase**: 02
+- **Area**: Subscription / UX
+- **Tipo**: 🟢 OK (contenuto presente e ben organizzato)
+- **Actual**: pagina bene strutturata con:
+  - Current Plan card (Starter / ACTIVE / Monthly / 23 May 2026)
+  - Plan Limits card (10 agents, 3 users, Unlimited products, 2 API keys, 500 MB storage)
+  - Features Included grid (13 feature, ✅/❌ per piano Starter)
+  - Paid Add-on section (Compliance Pack — NOT PURCHASED, con teaser "Upgrade your plan to Pro, Business, or Enterprise first to unlock add-on eligibility")
+  - Footer CTA "Need more capacity? → View Plans"
+- **Feature matrix Starter documentata** (da 13 voci):
+  - ✅ Email Alerts
+  - ✅ Webhooks
+  - ✅ Push Agents
+  - ✅ API Access
+  - ❌ NIS2/DORA + BOD 22-01 Reports
+  - ❌ Multi-Tenant
+  - ❌ LDAP / Active Directory
+  - ❌ White-Labeling
+  - ❌ Issue Trackers
+  - ❌ Backup & Restore
+  - ❌ SAML SSO
+  - ❌ SIEM Integration
+  - ❌ Audit Log Export
+- **Nota su compliance**: NIS2/DORA+BOD gated; Compliance Pack (PCI-DSS/ISO 27001/SOC 2) come paid add-on separato su Pro/Business/Enterprise → due layer di compliance gating
+- **Discovered**: 2026-04-23
+
+---
+
+## Stato fase
+
+**✅ FASE 02 COMPLETATA (al 90%)** — happy path e primo onboarding coperti.
+
+**Sotto-aree chiuse**: 02.1 · 02.2 · 02.3 · 02.4 · 02.5 · 02.6 · 02.7 · 02.8 · 02.12 · 02.14 · 02.15
+
+**Sotto-aree rimanenti (cross-fase, da riprendere dopo admin portal)**:
+- 02.9 — 503 `EA_CAPACITY_FULL`: non forzabile su prod (capacity 2/30 open). Da testare in fase 05 abbassando `capacity` da `/admin/settings` o `/admin/plans` a 2, riprovare signup → attesa 503.
+- 02.10 — 422 validation server-side: HTML5 blocca la maggior parte a client-side (email format, required). Test con payload malformato via fetch/curl rinviato (opzionale).
+- 02.11 — Provisioning bridge license-server → SentriKat SaaS: verificare in fase 05 `/admin/saas-tenants` che il tenant creato oggi appaia nell'elenco e che `/admin/webhook-outbox` mostri la delivery webhook come SUCCESS.
+- 02.13 — Terms tracking (`terms_accepted_at`, `terms_version: "2026-02-09"`): verificare in fase 05 nella detail page del tenant/customer in `/admin/customers/<id>`.
+
+## Riepilogo bug fase 02
+
+| ID | Severity | Titolo |
+|---|---|---|
+| 🔴 02.2.1 | Medium | Validation in tedesco (Chrome DE) su sito EN-only |
+| 🔴 02.4.1 | Medium-High | Temp password inviata in plaintext via email |
+| 🟡 02.4.2 | Medium | Prezzo email in USD `$` mentre il sito usa EUR `€` |
+| 🟡 02.7.6 | Medium | Billing "Monthly / Renews 23 May" su Early Access gratuito |
+| 🔵 02.2.3 | — | Niente Turnstile su TrialSignup (by design, ma ← spam surface su free account) |
+| 🔵 02.3.2 | — | Alias Gmail bloccati (feature, ma UX del messaggio 409 da rivedere) |
+| 🔵 02.4.5–4.8 | — | Email: SPF/DKIM/DMARC, reply-to, tracking, List-Unsubscribe |
+| 🔵 02.6.3 | — | Complessità password oltre min-length da verificare |
+| 🔵 02.6.4 | — | Copy "admin asked you to renew" su SaaS self-signup |
+| 🔵 02.7.2 | — | Company name uppercase in badge (CSS?) |
+| 🔵 02.7.3 | — | Feature gating Starter sidebar vs Features Included |
+| 🔵 02.7.4 | — | No onboarding wizard / welcome modal |
+| 🔵 02.7.7 | — | Subtitle hardcoded "LDAP configuration" su Starter senza LDAP |
+| 🔵 02.7.8 | — | Breadcrumb "Home / Administration" inconsistente |
+| 🔵 02.7.9 | — | Manca label "Early Access" su Current Plan card |
+| 🔵 02.7.10 | — | Manca usage/quota attuale (x/max con %) |
+| 🔵 02.7.11 | — | SBOM Export visibile in sidebar ma non in Features Included |
+
+**Totale fase 02: 2 bug (1 Med-High + 1 Med) + 2 warning Medium + 13 info, 11 OK** — rilevanti 🟡 02.7.6 (EA billing confusion) e 🔴 02.4.1 (plaintext password email).
 
 ---
 
