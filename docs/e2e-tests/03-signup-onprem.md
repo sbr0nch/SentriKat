@@ -535,10 +535,45 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 - **Follow-up**: aprire `http://localhost:8025` (Mailpit Web UI) e confermare (→ 03.11.1.2)
 - **Discovered**: 2026-04-23
 
-#### [03.11.1.2] ⏳ Verifica consegna su Mailpit (pending utente)
+#### [03.11.1.2] Consegna email verificata in Mailpit ✅
 
-- **Tipo**: ⏳ Pending
-- **Action required**: aprire `http://localhost:8025` nel browser → inbox dovrebbe contenere una email di test da SentriKat al `FROM=noreply@sentrikat.local`
+- **Fase**: 03
+- **Area**: Settings / SMTP / delivery test
+- **Tipo**: 🟢 OK
+- **URL evidence**: `http://localhost:8025`
+- **Actual**:
+  - 2 email ricevute in Mailpit inbox (una per ogni click "Send Test Email")
+  - From: `"SentriKat Local" <noreply@sentrikat.local>`
+  - To: `sotadenis94@gmail.com` (email dell'admin loggato — destinatario di default dei test email, corretto)
+  - Subject: `"SentriKat SMTP Test - Configuration Successful"`
+  - Body preview: `"✓ SMTP Configuration Test Successful This is a test email from SentriKat vulnerability management system. SMTP Configuration Details: Server: host.docker.internal:1025 From: noreply@sentrikat.local ..."`
+- **Conferma pipeline**:
+  - ✅ Client SMTP si connette a `host.docker.internal:1025` dal container
+  - ✅ Mailpit riceve correttamente
+  - ✅ Nessuna consegna verso Internet (`sotadenis94@gmail.com` non è uscito dal laboratorio locale — Mailpit cattura qualunque dominio)
+  - ✅ From = `noreply@sentrikat.local` come configurato
+  - ✅ To = email admin loggato
+- **Discovered**: 2026-04-23
+
+#### [03.11.1.9] 🔵 Nessun throttling/dedup dei test email in UI
+
+- **Fase**: 03
+- **Area**: Settings / SMTP / rate limiting UX
+- **Tipo**: 🔵 Info
+- **Severity**: Low
+- **Actual**: due click consecutivi su `Send Test Email` → due email consegnate. Niente cooldown / "Email già inviata di recente, riprova tra X secondi" / dedup lato UI.
+- **Impatto**: accettabile (test tool), ma un admin impaziente può flooding la propria casella / Mailpit con decine di test. Se integrato con rate limiting globale del Flask-Limiter ([03.5.4]) potrebbe essere implicitamente limitato in prod.
+- **Discovered**: 2026-04-23
+
+#### [03.11.1.10] 🔵 Test email contiene info di config SMTP in plaintext nel body
+
+- **Fase**: 03
+- **Area**: Settings / SMTP / test email content / info disclosure
+- **Tipo**: 🔵 Info
+- **Severity**: Low (scenario di minaccia molto specifico)
+- **Actual**: il body della test email include `"SMTP Configuration Details: Server: host.docker.internal:1025 From: noreply@sentrikat.local..."` — la configurazione interna è trasmessa in plaintext via SMTP
+- **Threat model**: se la email finisce in mano a terzi (spear-phishing audit, email gateway compromesso, mailbox rubata) l'attaccante scopre hostname interno + porta SMTP del sistema di vuln management (piccolo OSINT)
+- **Trade-off**: il body tecnico è utile per debug, quindi conservarlo è giusto. Forse un'opzione "Verbose/Minimal" o ridurre i dettagli a "host+port masked"
 - **Discovered**: 2026-04-23
 
 #### [03.11.1.3] 🔁 Conferma bug [02.7.7] anche su on-prem: subtitle pagina "LDAP configuration, SMTP settings, and system options"

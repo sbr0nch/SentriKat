@@ -112,6 +112,7 @@ Ogni bug/osservazione va aggiunta con questo schema:
 | 2026-04-23 | 03 | Setup wizard walk + first login | 🔴 **03.6.3 HIGH** wizard auto-locka dopo step 3, `POST /api/setup/seed-services` → 403 "Setup already completed", step 5-6 mai visibili; 🔴 03.6.6 sezione "Platform Operations" (SaaS) visibile in sidebar on-prem; 🔵 03.6.5 label "Create →" su step intermedi (ambiguo), 03.6.7 debug log JS in production, 03.6.8 nessun 302 su /setup post-lock; 🟢 password validation client-side, org+admin+login OK; 🔁 VERSION bug [03.5.3] CONFERMATO su 3 canali (VERSION file, /api/health, footer UI) + JS core hardcoded "v1.0.0" |
 | 2026-04-23 | 03 | Sidebar map + Platform Operations probing | 🟢 mappa sidebar on-prem documentata (confronto vs SaaS Starter); 🔴 03.7.2 pagina Webhook Events mostra copy "upstream SentriKat-web license server" con concetti SaaS-only (plan change/revocation); 🔴 03.7.3 typo `/ap1/license/events` (dovrebbe essere `/api/`); 🔴 03.7.4 pagina Usage Uploads dice "this SaaS" + espone comando Python in UI customer-facing (privacy/trust issue per on-prem); 🔵 03.7.5 `system_settings` senza chiavi setup (flag altrove); 🟢 03.7.6 empty-state banner actionable ("Run CISA sync", "Add Products"); 🔵 03.7.7 nessun errore console → rafforza severity 03.6.6 (non cosmetic, funzionale) |
 | 2026-04-23 | 03 | SMTP → Mailpit configurata da UI | 🟢 save + test UI feedback verde, config persistente; ⏳ consegna email in Mailpit (http://localhost:8025) pending verifica utente; 🟡 03.11.1.5 password field mostra `••••••••` senza password reale (misleading); 🔵 03.11.1.3 subtitle hardcoded "LDAP configuration..." cross-ref [02.7.7]; 🔵 03.11.1.4 label inconsistency sidebar "Email (SMTP)" vs tab "Email & Alerts"; 🔵 03.11.1.6 nessun campo Reply-To nel form; 🔵 03.11.1.7 copy multi-tenant "Default SMTP for all orgs" esposto anche in DEMO single-org; 🔵 03.11.1.8 helper text port non include dev port 1025 |
+| 2026-04-23 | 03 | SMTP delivery verificata in Mailpit | 🟢 2 email arrivate in Mailpit (http://localhost:8025) con From=noreply@sentrikat.local, To=admin, Subject "SentriKat SMTP Test - Configuration Successful" — pipeline SMTP client→testlab funziona, nessuna delivery a Internet; 🔵 03.11.1.9 nessun throttling sui test email; 🔵 03.11.1.10 body test email espone host+port SMTP in plaintext (info disclosure minore) |
 
 ---
 
@@ -119,7 +120,7 @@ Ogni bug/osservazione va aggiunta con questo schema:
 
 - 🔴 Bug: 11
 - 🟡 Warning: 6
-- 🔵 Info/UX: 25
-- 🟢 OK passati: 43
+- 🔵 Info/UX: 27
+- 🟢 OK passati: 44
 
 *(aggiornati a mano ad ogni commit)*
