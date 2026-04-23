@@ -94,6 +94,44 @@ Ogni bug/osservazione va aggiunta con questo schema:
 
 ---
 
+## Testing depth standard — matrice per ogni feature
+
+Dal 2026-04-23 l'utente ha alzato il livello: ogni feature deve essere **coperta in tutte le direzioni**, non solo happy path. Per ogni feature/area d'ora in poi usiamo questa checklist di 7 dimensioni:
+
+| # | Dimensione | Cosa testare |
+|---|---|---|
+| 1 | **Happy path** | Config corretta, azione riuscita con UI feedback positivo |
+| 2 | **Persistence** | La config/entità sopravvive a refresh, restart container, re-login |
+| 3 | **CRUD completo** | Create, Read (list + detail), Update, Delete. Ogni operazione deve essere testata + verificato che il resto del sistema reagisca |
+| 4 | **Role-based access** | Stessa azione tentata da ogni ruolo (super_admin, org_admin, manager, user, LDAP-mapped, SAML-mapped). Chi può cosa? Verifica 403 dove atteso |
+| 5 | **State transitions** | Accept, Ban, Disable, Force password change, Enable, Re-enable, Delete, Restore. Ogni transizione deve essere testata + verificato l'impatto (es. utente bannato non deve più poter loggare) |
+| 6 | **Negative / edge** | Input invalidi, null, stringhe troppo lunghe, SQL injection-like, XSS, race condition (2 admin che modificano lo stesso oggetto), payload oltre limite quota, utente inesistente, password sbagliata |
+| 7 | **Integration / cross-feature** | Come la feature impatta le altre? Es: LDAP user creato → compare in "All Users"? Email digest lo include? Audit log traccia? Webhook outbound lo segnala? |
+
+Esempio concreto per LDAP (riferimento per 03.11.2):
+
+```
+LDAP dimension matrix:
+1. Happy path       : admin.user login LDAP → dashboard
+2. Persistence      : config sopravvive restart; sync scheduler runs
+3. CRUD             : admin invita LDAP user bulk, rimuove, modifica role post-invite
+4. Role-based       : super_admin/org_admin/manager/viewer login LDAP → UI/menu corretti per ruolo
+5. State transitions: disable.user → login rifiutato; admin ban admin.user → login rifiutato; admin revoca session attiva → utente forzato a re-login
+6. Negative         : utente inesistente LDAP, password sbagliata, LDAP server down, bind user con password errata, filter LDAP malformato, utente con uid contenente caratteri speciali
+7. Integration      : login LDAP → audit log evento "user.login.ldap"; disable user → webhook outbound; LDAP sync → SystemNotification "N users synced"; email digest include nuovi LDAP users
+```
+
+Stessa matrice applicata a **ogni area** in tutte le fasi: SMTP, SAML, Jira, Webhook, Syslog, Agents, Products, Vulnerabilities, Remediation, Compliance Reports, Alerts, Backup/Restore, Billing, ecc.
+
+**ID schema esteso** per distinguere dimensioni:
+`<fase>.<area>.<dim>.<num>` → esempio `03.11.2.5.2` = fase 03, area 11.2 (LDAP), dimensione 5 (State transitions), test #2 (es. admin ban del bug trovato)
+
+Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11.2-ldap.md`) invece di gonfiare il file fase.
+
+---
+
+---
+
 ## Progress log
 
 | Data | Fase | Azione | Note |

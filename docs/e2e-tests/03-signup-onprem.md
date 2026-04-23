@@ -612,6 +612,177 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 - **Trade-off**: il body tecnico è utile per debug, quindi conservarlo è giusto. Forse un'opzione "Verbose/Minimal" o ridurre i dettagli a "host+port masked"
 - **Discovered**: 2026-04-23
 
+---
+
+### 03.11.2 — LDAP → OpenLDAP (testlab)
+
+#### [03.11.2.1] Form LDAP save + test → UI feedback verde ✅
+
+- **Fase**: 03
+- **Area**: Settings → Authentication → LDAP / AD Configuration
+- **URL**: `http://localhost/admin/settings` (tab "Authentication")
+- **Tipo**: 🟢 OK (livello UI, non ancora verificato end-to-end con login utente LDAP)
+- **Values configured**:
+  - LDAP Server URL: `host.docker.internal`
+  - Port: `389`
+  - Base DN: `dc=sentrikat-test,dc=local`
+  - Bind DN (Service Account): `cn=readonly,dc=sentrikat-test,dc=local`
+  - Bind Password: `readonly123` (mascherata 10+ bullet nel form)
+  - Search Filter: `(uid={username})`
+  - Username Attribute: `uid`
+  - Email Attribute: `mail`
+  - Use TLS/STARTTLS: OFF
+  - Enable Scheduled LDAP Synchronization: ON (Every 24 hours, Last Scheduled Sync: Never)
+- **Actions**: Save → verde; Test Connection → verde (dopo save)
+- **Discovered**: 2026-04-23
+
+#### [03.11.2.2] 🔴 HIGH — Form LDAP manca completamente della sezione **Group Mapping**
+
+- **Fase**: 03
+- **Area**: Settings → Authentication → LDAP / feature completeness
+- **Tipo**: 🔴 Bug
+- **Severity**: **High** (senza group mapping, la LDAP sync non può assegnare ruoli/organizzazioni agli utenti → feature business critica Pro-grade è monca)
+- **Environment**: on-prem DEMO beta.6
+- **Steps to reproduce**:
+  1. Settings → Authentication → LDAP / Active Directory Configuration
+  2. Osservare i campi disponibili
+- **Expected** (dalla mappa architetturale repo: `/api/ldap/groups`, `/api/ldap/invite`, `/api/ldap/sync` + `LDAPGroupMapping` model):
+  - Sezione dedicata "Group Search" con Group Search Base, Group Filter (`(objectClass=groupOfNames)`), Group Member Attribute (`member`), Group Name Attribute (`cn`)
+  - Sezione "Role Mapping" con matrice `LDAP Group → SentriKat Role` (es. `sentrikat-admins → super_admin`)
+  - Opzione "Auto-create users on first login"
+  - Opzione "Default role (no group match)"
+- **Actual**: il form ha **solo** questi campi:
+  - Server connection (URL, Port, Bind DN, Bind Password, TLS)
+  - User search minimal (Base DN, Search Filter, Username Attribute, Email Attribute)
+  - Automatic Synchronization (toggle + interval — ma **sync di cosa?** non è chiaro se sincronizza solo users, anche groups, o mapping)
+  - **Niente** group/role mapping
+  - **Niente** "auto-create users" toggle esplicito (implicito?)
+- **Impatto**:
+  - Utenti LDAP che fanno login arrivano nel sistema (si presume) ma **come che ruolo?** Default "user"? Rimangono "pending"?
+  - `sentrikat-admins` non viene promosso a super_admin automaticamente — l'admin deve promuovere manualmente ogni utente LDAP via "All Users" → defeats lo scopo della group sync
+  - La feature "Scheduled LDAP Synchronization" è esposta ma non è chiaro cosa sincronizzi senza mapping
+- **Hint backend presente**: il repo contiene `app/ldap_group_api.py`, `app/ldap_sync.py`, `ldap_group_mapping` model → quindi la feature esiste backend ma **non è collegata a questa pagina UI**
+- **Correlato**: [03.11.2.3] sidebar Users & Access non mostra voci LDAP
+- **File sospetto**: template della pagina Authentication/LDAP + possibile pagina "LDAP Group Mapping" separata non linkata dalla sidebar
+- **Discovered**: 2026-04-23
+
+#### [03.11.2.3] 🔴 HIGH — Sidebar "Users & Access" NON espone voci LDAP/Group dopo config
+
+- **Fase**: 03
+- **Area**: Sidebar / feature discoverability
+- **Tipo**: 🔴 Bug
+- **Severity**: **High** (feature implementata ma irragiungibile dall'utente)
+- **Steps to reproduce**:
+  1. Config LDAP salvata + test verde (vedi 03.11.2.1)
+  2. (opzionale) hard refresh della pagina
+  3. Espandi sidebar `MANAGEMENT → Users & Access`
+- **Expected** (dalla mappa repo `/api/ldap/users`, `/api/ldap/invite`, `/api/ldap/bulk-invite`, `/api/ldap/groups`):
+  - Voce "LDAP Users" (browse/search directory, invite)
+  - Voce "LDAP Groups" o "Group Mapping" (map LDAP groups to SentriKat roles)
+  - Voce "LDAP Sync" / "Sync Log" (history delle sync)
+- **Actual**: utente conferma che `Users & Access` ha SOLO la voce `All Users`. Non appaiono sezioni LDAP-specific.
+- **Impatto**:
+  - Admin non può sfogliare utenti LDAP per invitarli prima del primo login
+  - Non può fare bulk invite via LDAP group membership
+  - Non può vedere il sync log per debug
+  - La voce `Automatic Synchronization` nel form di config LDAP è disconnessa (no UI per vedere i risultati)
+- **Regressione confermata (testimonianza utente)**:
+  > "Mi ricordo che c'era una voce del menu che appariva dopo la config LDAP che abbiamo fatto ora, e c'era anche un'altra voce per gestire gli utenti LDAP."
+  L'utente (che conosce il prodotto e lo ha già testato in versioni precedenti) conferma empiricamente che in builds precedenti — post-config LDAP — la sidebar mostrava **2 voci aggiuntive** dedicate (LDAP Users management + LDAP Group Mapping). In beta.6 queste voci NON appaiono. Quindi non è solo ipotesi, è **regressione su feature pre-esistente**.
+- **Root cause hypothesis (ipotizzata dall'utente)**:
+  > "Sono stati modificati o disabilitati o la logica è falsa all'introduzione del SaaS, quando abbiamo messo logiche sulle voci del menu (quando e come devono apparire per SaaS ed on-prem)."
+  Plausibile: durante il refactor mode-based gating, le voci LDAP sono state gated con un check sbagliato (es. `{% if saas_mode %}` invece che `{% if ldap_enabled %}`), eliminandole dalla sidebar on-prem.
+- **Corroborazione della hypothesis**:
+  - [03.6.6]: SaaS-only section `Platform Operations` esposta a on-prem (gating rotto in una direzione — mostra cosa non dovrebbe)
+  - [03.11.2.3]: feature LDAP Users/Groups implementata backend + esistente in passato → non in sidebar on-prem (gating rotto nell'altra direzione — nasconde cosa dovrebbe mostrare)
+  - Due regressioni **simmetriche** sullo stesso componente (sidebar renderer) — coerente con un unico commit/refactor SaaS gating che ha introdotto entrambe
+- **Impatto aggravato**:
+  - La feature "Automatic Synchronization" (toggle + 24h interval) è esposta nel form, ma senza group mapping UI sincronizza "niente di utile"
+  - Senza group mapping: un utente LDAP che fa login diventa default role → admin deve promuoverlo manualmente → la feature enterprise-grade è monca
+  - Per un customer on-prem che ha già 50+ utenti LDAP, è un **blocker** (dovrebbero promuovere a mano 50 utenti)
+- **Group mapping obbligatorio/opzionale?**:
+  - Design voluto: **opzionale** (senza mapping = tutti default role), ma **la UI di configurazione deve esistere** per chi lo vuole
+  - Attualmente: **impossibile configurarlo anche volendo** (campi assenti dal form)
+- **Follow-up TODO 03.11.2.3a**: chiedere all'utente hard refresh (Ctrl+F5) per confermare definitivamente. Se persiste, durante il code-reading finale cercare:
+  - `{% if saas_mode %}` o `{% if is_saas %}` sulla sidebar template
+  - Decorator `@saas_only` / `@requires_saas` su rotte `/admin/ldap-users`, `/admin/ldap-groups`
+  - Logica blueprint `ldap_group_api.py` che potrebbe essere condizionalmente registrata
+- **File sospetto**: template della sidebar (`app/templates/base.html` o layout component), + blueprint registration di `ldap_api.py` / `ldap_group_api.py` che potrebbero essere gated dietro check mode
+- **Discovered**: 2026-04-23
+
+#### [03.11.2.4] 🟡 "Test Connection" funziona solo DOPO aver salvato, non sui valori correnti del form
+
+- **Fase**: 03
+- **Area**: Settings → Authentication → LDAP / UX
+- **Tipo**: 🟡 Warning
+- **Severity**: Medium (UX → costringe a save+rollback manuale in caso di errore config)
+- **Steps to reproduce**:
+  1. Compila il form con config ipotetica (anche deliberatamente sbagliata)
+  2. Click "Test Connection" **senza** aver cliccato prima "Save LDAP Settings"
+- **Expected**: la UI testa con i valori CORRENTI nel form (client-side POST di quei values al endpoint `/api/settings/ldap/test`) → ti dice subito se funzionano, senza toccare la config persistita
+- **Actual** (riportato dall'utente): il test NON funziona se prima non salvi. Significa che il button Test usa la config persistita nel DB, non quella nel form
+- **Impatto UX**:
+  - Admin deve salvare config (anche errata) → test → capire errore → salvare di nuovo. Nel frattempo LDAP è "abilitato" con config errata (rischio: utenti LDAP proveranno a loggare con config rotta)
+  - Rende debug estenuante: 3-4 iterazioni = 3-4 save + 3-4 test
+- **Fix candidato**: fare Test Connection accettare i valori del form come payload POST, stateless, senza dipendere dal DB
+- **Discovered**: 2026-04-23
+
+#### [03.11.2.5] 🔵 Ambiguity: campo "LDAP Server URL" accetta URL completo oppure hostname, port separato
+
+- **Fase**: 03
+- **Area**: Settings → Authentication → LDAP / form design
+- **Tipo**: 🔵 Info
+- **Severity**: Low
+- **Actual**:
+  - Placeholder campo URL: `ldap://dc.example.com:389`
+  - Helper text: `"Format: ldap://server:port or ldaps://server:636"`
+  - Nello screenshot config funzionante l'utente ha messo `host.docker.internal` **senza** prefix `ldap://` né porta, e Port separato = `389`. Ha funzionato.
+- **Issue**: non è chiaro quale sintassi è canonica:
+  - Se metto `ldap://host:389` nel primo campo e anche `389` nel secondo, quale vince?
+  - Se metto `ldaps://host:636` nel primo, il secondo campo Port è ignorato?
+- **Fix candidato**: o il campo URL include tutto (→ rimuovi Port), o il campo URL accetta solo hostname (→ aggiorna placeholder/helper). Attualmente doppia sorgente ambigua.
+- **Discovered**: 2026-04-23
+
+#### [03.11.2.6] 🔵 Form LDAP manca di opzioni: Display Name Attribute, Default Role, Auto-create users toggle
+
+- **Fase**: 03
+- **Area**: Settings → Authentication → LDAP / feature completeness
+- **Tipo**: 🔵 Info
+- **Severity**: Low-Medium
+- **Missing fields**:
+  - `Display Name Attribute` (per popolare SentriKat User.full_name; senza questo probabilmente fallback a `cn` o `uid`)
+  - `Default Role` (se no group match, che ruolo assegnare)
+  - `Auto-create users on first login` toggle (comportamento implicito, non controllabile)
+  - `Use Pagination` (per directory molto grandi → `ldap3` lo supporta)
+  - `Connection Timeout` / `Read Timeout`
+- **Discovered**: 2026-04-23
+
+#### [03.11.2.7] 🔵 Testo info banner "LDAP Authentication Setup" dichiara un comportamento implicito
+
+- **Fase**: 03
+- **Area**: Settings → Authentication → LDAP / UX banner
+- **Tipo**: 🔵 Info
+- **Actual**: banner blu in cima alla pagina LDAP dice:
+  `"LDAP Authentication Setup: Configure connection to your Active Directory/LDAP server. LDAP users cannot be created directly — they are discovered when they log in. You need a service account with read permissions to search for users in your directory."`
+- **Osservazione**: il banner **implicitamente** conferma che gli utenti vengono auto-create on login (`discovered when they log in`) → meglio avere un toggle esplicito + log esplicito "Created 1 new user via LDAP"
+- **Aggrava [03.11.2.2]**: senza group mapping UI, se l'utente è "discovered" al login, che ruolo riceve? Il banner non lo dice
+- **Discovered**: 2026-04-23
+
+#### [03.11.2.8] 🔵 Log backend `ldap` vuoto dopo save/test
+
+- **Fase**: 03
+- **Area**: Logs / debugging
+- **Tipo**: 🔵 Info
+- **Actual**: `docker compose logs --tail 50 sentrikat | Select-String -Pattern "ldap"` dopo save+test restituisce solo la riga di boot (`Log files: application.log, error.log, access.log, ldap.log, security.log, audit.log, performance.log`). Nessun log applicativo di LDAP bind/test/save.
+- **Possibili cause**:
+  - I log LDAP finiscono nel file dedicato `/var/log/sentrikat/ldap.log` (non catturato da `docker compose logs` che legge solo stdout/stderr del process principale)
+  - Il log level di LDAP è troppo alto (WARNING+) e i success non si vedono
+- **Follow-up TODO**: entrare nel container e tailare `ldap.log` direttamente:
+  ```powershell
+  docker compose -p v100-beta6 exec sentrikat tail -n 50 /var/log/sentrikat/ldap.log
+  ```
+- **Discovered**: 2026-04-23
+
 #### [03.11.1.3] 🔁 Conferma bug [02.7.7] anche su on-prem: subtitle pagina "LDAP configuration, SMTP settings, and system options"
 
 - **Fase**: 03
