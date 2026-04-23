@@ -6,6 +6,106 @@
 
 ---
 
+## 🔴 HANDOFF — leggi PRIMA di continuare (session continuity)
+
+Se sei un nuovo Claude che apre questa sessione o se ci ritorniamo dopo una pausa, questa è la sintesi operativa.
+
+### 🛑 LAST SESSION STOP — 2026-04-24
+
+L'utente ha detto `"per oggi mi fermo qui, ricordami domani dove eravamo e cosa dobbiamo fare"` subito dopo aver aperto `https://portal.sentrikat.com` e scoperto che l'**OTP non arriva via email**. La fase 04 è stata aperta ma **bloccata al primo test**.
+
+**Cosa proporre all'utente quando riprende**:
+
+1. **Prima di tutto**: verificare se il bug OTP è ancora presente. Rifare la prova su `https://portal.sentrikat.com`:
+   - Inserisci email `muscleaddiction49@gmail.com`
+   - Click Send OTP
+   - **Controlla spam folder Gmail** (non fatto nella sessione precedente — potrebbe essere che l'email finisse semplicemente in spam)
+   - Se NON arriva nemmeno in spam → bug [04.1.3] confermato ancora attivo → **opzione A**: passare a fase 05 (admin portal, auth diversa) o fase 06 (app.sentrikat.com, auth password)
+   - Se arriva in spam → declassare bug a 🟡 warning (deliverability) e proseguire fase 04 normale
+   - Se arriva normalmente → bug era intermittent / risolto → log come `intermittent fixed`
+
+2. **Options per continuare** (utente ha già accettato strategia "Mixed"):
+   - **Opzione A (consigliata se 04 resta blocked)**: saltare a **Fase 05 Portal Admin** con bearer `ADMIN_API_KEY`. Non serve OTP. Apri `https://portal.sentrikat.com/admin` con l'API key generata dal license-server. Mappare le 25 pagine admin
+   - **Opzione B**: **Fase 06 app.sentrikat.com auth/RBAC/2FA matrix completa** — già abbiamo account admin locale + SAML user creato in fase 02/03. Test dim 4 Role-based, dim 5 state transitions, dim 6 negative
+   - **Opzione C**: **Second pass con seed DB fake data** (Strategia F) per popolare dashboard on-prem e testare compliance reports download, remediation UI, SLA enforcement
+   - **Opzione D**: **Trigger manuali on-prem** (Strategia A) — sequenza di click su "Sync CISA Now / Sync EPSS Now / Sync CPE Now / Send Email Alerts Now / Run Auto-Ack Now / Run Health Check Now" per popolare dati + validare che i job lavorino end-to-end
+
+3. **Utente ha detto di voler fare PR su main** dopo questa sessione — ci sono ~25+ commit di docs `docs(e2e):*` da fare review e merge
+
+### Dov'eravamo (ultimo update: 2026-04-24, commit recenti `469d5f2` + successivi)
+
+- **Fasi completate o in corso**:
+  - ✅ Fase 01 Landing — 3 bug, 1 warn, 3 info, 18 OK ma **SOLO happy path + navigation**, NON 7-dim
+  - ✅ Fase 02 Signup SaaS — 2 bug, 2 warn, 13 info, 13 OK, 90% chiusa, MA **senza framework 7-dim completo**
+  - 🟡 Fase 03 On-prem — enorme scope, 50+ finding registrati, 6 aree ⏸️ bloccate. Pragmaticamente chiusa dove non bloccata
+  - 🟡 Fase 04 Portal Customer — **BLOCCATA dal primo test**: bug `[04.1.3]` OTP email non arriva, login impossibile
+- **Bug totali counter**: vedi "Bug counter globale" in fondo a questo file. Aggiornato a ogni commit
+- **Branch**: `claude/add-sentikat-e2e-tests-Cyd6M` su `sbr0nch/SentriKat`. Docs in `docs/e2e-tests/`
+
+### Framework consolidato (DA USARE da qui in avanti)
+
+Durante il lavoro sono stati introdotti **tre framework** che prima NON erano in vigore:
+
+1. **7-dim matrix** (vedi sezione "Testing depth standard" in questo file): ogni area va testata in 7 dimensioni (Happy / Persistence / CRUD / Role-based / State transitions / Negative / Integration)
+2. **Deployment scope labels** (vedi "Deployment scope labels"): ogni bug dichiara `🏢 on-prem` / `☁️ SaaS` / `🏢☁️ both` / `🌐 landing` / `🏛 portal` / `🔐 license-server` / `📚 docs` / `🚀 release` / `📦 agent` / `🔄 cross-repo`
+3. **Time-based strategies A-G** (vedi "Strategie per testare feature time-based"): ogni feature async/scheduled ha una strategia esplicita per il test
+
+### ⚠️ Debito tecnico — cosa va ri-testato con framework completo
+
+Le aree seguenti sono state testate **prima** dell'adozione completa del framework. Vanno ri-passate in un secondo giro:
+
+| Area | Cosa manca | Priority |
+|---|---|---|
+| Fase 01 Landing (tutto) | 7-dim: dim 2 persistence (i.e. config cookie banner sopravvive ad hard refresh?), dim 5 state transition (cookie accept → reject → accept), dim 6 negative (CAPTCHA failure su form, rate limit submit form) | Medium |
+| Fase 02 Signup SaaS | 7-dim: dim 5 (disable user dopo signup, cancel trial via admin), dim 6 (special char in email/company, unicode nella company, SQL injection test su fields), dim 7 (audit log evento `user.signup`, webhook outbound, SIEM forwarding su signup event) | Medium |
+| Fase 03.11.1 SMTP | 7-dim: dim 2 persistence post-restart, dim 3 CRUD (disable+rewire), dim 5 (destination down → graceful fail), dim 6 (host invalido, port out-of-range, format invalido), dim 7 (eventi REALI come password reset, CVE alert, digest — non solo test event) | High (user-facing) |
+| Fase 03.11.7 SIEM | 7-dim: stesso pattern SMTP — persistence, CRUD, state down, negative input, real event flow | Medium |
+| Fase 03.11.3 SAML | dim 6 assertion replay, expired, invalid signature; dim 7 audit log + webhook outbound login | Medium |
+| Fase 03.14 Settings tabs | mancano click reali su ogni bottone (Sync CISA Now, Sync EPSS Now, Sync CPE Now, Run Auto-Ack Now, Send Email Alerts Now, Send Webhook Alerts Now, ecc.) — vedi catalogo "Scheduler jobs" nella sezione strategy time-based | High (senza questi la feature non è validata) |
+
+### Aree BLOCCATE (backlog — vedi sezione "Test bloccati da fix propedeutici")
+
+Non ritentare senza prima avere un fix upstream:
+- `[03.6.3]` setup wizard step 3 auto-lock → step 4-6 mai visibili
+- `[03.11.2.3]` sidebar Users&Access manca voci LDAP (regressione refactor mode-gating)
+- `[03.11.2.9]` login LDAP blocked by 03.11.2.3
+- `[03.11.4.5]` SSRF policy in prod mode ignora `ALLOW_PRIVATE_URLS` (Jira + Webhook + GitLab locali untestable)
+- `[03.11.5.2]` Webhook blocked, stesso root cause
+- `[03.11.6.4]` GitLab blocked, stesso
+- `[03.12.x + 03.13.2]` Agent Push feature-gated a Professional (Community)
+- `[04.1.3]` OTP email non arriva su portal prod
+
+### Prossimo step suggerito (continuità)
+
+Strategia concordata: **"Mixed"** — non perdere tempo a sbloccare test, procedere su aree indipendenti.
+
+Oggi siamo bloccati in fase 04 (portal customer) al primo test. Opzioni per ripartire:
+
+1. **Fase 05 Portal Admin** (stessa base Astro ma auth admin bearer `ADMIN_API_KEY`, bypassa OTP customer) — probabilmente funziona
+2. **Fase 06 App core auth/RBAC** (`app.sentrikat.com`): abbiamo già account admin locale + SAML user su on-prem — matrix RBAC completo con dim 4
+3. **Fase 13 Admin ops on-prem** (backup/restore, scheduler trigger tutti, admin dashboards) con strategia A (Run Now buttons) → popola dati reali
+4. **Second pass con seed DB** (Strategia F): insertion di fake product + vuln match → dashboard, remediation, compliance reports diventano testabili senza sbloccare agent
+
+### Riferimenti PR recenti rilevanti (contesto)
+
+- **SentriKat-web PR #225/226/227** (17-apr, branch `claude/fix-login-issue-wCfsw`): tre iterazioni per fix login portal → area fragile. Il bug [04.1.3] OTP NON-arrivo è probabile regressione di una di queste PR, oppure di qualche commit successivo
+- **PR #231** (22-apr, `fix(license-server): wrap enqueue_webhook_event in try/except`): toccava license-server outbox; improbabile abbia rotto OTP ma **va considerato** perché license-server è il processo che invia OTP
+- **Nessun commit esplicito su OTP/SMTP nel periodo** visibile via GitHub UI commits page — il fix "di ieri/altro ieri" di cui parla l'utente potrebbe essere un commit con titolo generico (es. `fix(portal)`, `fix(login-issue)`) che implicitamente toccava il flow email
+
+### File layout docs/e2e-tests/
+
+- `00-INDEX.md` ← master (questo file)
+- `01-landing-site.md` ← fase 01 details
+- `02-signup-saas.md` ← fase 02 details
+- `03-signup-onprem.md` ← fase 03 details (più grande — 50+ find)
+- `04-portal-customer.md` ← fase 04 appena scaffolded, blocked al primo test
+
+Ogni bug ha ID `<fase>.<area>.<n>` (es. `03.11.2.3`). Extended form `<fase>.<area>.<dim>.<n>` quando applichiamo 7-dim matrix.
+
+---
+
+---
+
 ## Repo coinvolte
 
 | Repo | Path | Ruolo |
