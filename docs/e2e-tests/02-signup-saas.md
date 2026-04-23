@@ -183,26 +183,12 @@
 - **File sospetto**: template welcome email (core backend `app/` + stringa "Early Access — $0")
 - **Discovered**: 2026-04-23
 
-### [02.4.3] 🟡 Layout email: enorme spazio nero a sinistra (template non responsive / half-width)
+### [02.4.3] ~~Layout email con spazio nero a sinistra~~ — FALSO POSITIVO ❌
 
-- **Fase**: 02
-- **Area**: Welcome email / template HTML
-- **Tipo**: 🟡 Warning
-- **Severity**: Low-Medium (brand/UX)
-- **Actual**: screenshot mostra che il contenuto dell'email occupa solo la **metà destra** del viewport email client, con enorme spazio nero vuoto a sinistra. Il layout sembra essere "pinned right" invece di "centered" o "full-width".
-- **Possibili cause**:
-  - CSS `margin-left: auto` senza `margin-right: auto` → pinned right
-  - Uso di table layout con `align="right"` su container invece di `align="center"`
-  - Media query responsive rotta su desktop
-  - Dark mode del client email invertito (Gmail/Outlook a volte invertono colori; forse il template non è dark-mode-safe e lo spazio "nero" è in realtà CSS var sballata)
-- **Verifica aggiuntiva (da chiedere)**:
-  - L'email è aperta in Gmail web? App Gmail mobile? Client?
-  - Se spostata in "light mode" del client (o aperta in modalità base HTML) il layout torna centrato?
-- **Fix candidato**:
-  - Usare table-based email template (standard per compatibilità email client)
-  - Max-width 600px centered con margin auto
-  - Testare con Litmus/Mail-Tester su 10+ client (Gmail web/mobile, Outlook 2016/365, Apple Mail, Yahoo)
-- **Discovered**: 2026-04-23
+- **Tipo**: ❌ Non-bug (rettificato)
+- **Actual**: utente conferma che lo spazio nero era solo il crop dello screenshot iniziale; aprendo la mail a larghezza piena il layout è correttamente centrato e simmetrico (vedi secondo screenshot email).
+- **Azione**: voce annullata, non va in bug count.
+- **Discovered / resolved**: 2026-04-23
 
 ### [02.4.4] Welcome email contenuto — rimanenti aspetti ✅ (con follow-up)
 
@@ -240,6 +226,155 @@
 
 - **Tipo**: 🟢 OK
 - **Actual**: utente conferma "sparisce" il plan picker (Starter/Pro/Business/Enterprise) quando si passa da SaaS a On-prem — behavior corretto (piani SaaS non applicabili on-prem, i piani on-prem passano da contact-sales / licensing dedicato).
+- **Discovered**: 2026-04-23
+
+---
+
+## 02.5 — Redirect post-success
+
+### [02.5.1] Nessun auto-redirect post-submit — utente usa il link dalla email (by design) ✅
+
+- **Tipo**: 🟢 OK
+- **Actual**: dopo `201 Created` l'UI rimane sulla landing con il messaggio di conferma; l'utente prosegue cliccando "Log In Now" dalla welcome email (link validi, tutti funzionanti)
+- **Decisione di design coerente**: evita confusione se l'utente ha chiuso l'email; il flow resta: submit → email → click in email → login. È un modello accettato.
+- **Discovered**: 2026-04-23
+
+---
+
+## 02.6 — Login `app.sentrikat.com` + force password change
+
+### [02.6.1] Login con temp password funziona + forced change al primo login ✅
+
+- **Fase**: 02
+- **Area**: Login app.sentrikat.com
+- **URL**: `https://app.sentrikat.com/login`
+- **Tipo**: 🟢 OK
+- **Actual**: email + temp password (dall'email welcome) → login OK → pagina `Password Update Required` appare subito (come promesso nell'email).
+- **Evidence**: screenshot `Password Update Required` con logo mascot stile mongoose, campi "Current Password / New Password / Confirm New Password" e bottone "Change Password"
+- **Discovered**: 2026-04-23
+
+### [02.6.2] Policy password: min 8 char enforced, mismatch rilevato ✅
+
+- **Tipo**: 🟢 OK (policy enforcement visibile)
+- **Actual**:
+  - Password `test123` (6 char) → errore chiaro: `"Password must be at least 8 characters"`
+  - Password `TestPass123!` (12 char, mix) → accettata
+  - Confirm password diversa da new password → errore chiaro "password non uguali"
+- **Discovered**: 2026-04-23
+
+### [02.6.3] 🔵 Password policy: da verificare complessità oltre il min-length
+
+- **Fase**: 02
+- **Area**: Login / password policy
+- **Tipo**: 🔵 Info (follow-up)
+- **Severity**: Low-Medium (security posture)
+- **Actual**: l'unico messaggio visto è "at least 8 characters". Non è chiaro se il server enforce anche: maiuscole, minuscole, numeri, simboli, no-common-passwords list (NIST SP 800-63B raccomanda di confrontare con lista breached password come Have-I-Been-Pwned invece di regole di complessità).
+- **Follow-up TODO 02.6.3a**: testare con password:
+  - `password` (8 lowercase, dizionario comune) → dovrebbe essere rifiutata se c'è breached-list check
+  - `12345678` (8 digit) → dovrebbe essere rifiutata
+  - `aaaaaaaa` (8 ripetute)
+  - Registrare quali passano e quali no → mappare la policy effettiva
+- **Discovered**: 2026-04-23
+
+### [02.6.4] 🔵 Copy "an administrator asked you to renew it" visibile anche su SaaS first-login
+
+- **Fase**: 02
+- **Area**: Login / copywriting
+- **Tipo**: 🔵 Info (minor UX)
+- **Severity**: Low
+- **Actual**: la pagina `Password Update Required` mostra il messaggio:
+  > "Please choose a new password to continue. This is required either because your password has expired, it's your first login, or an administrator asked you to renew it."
+- **Issue**: su **SaaS self-signup** non esiste un "administrator" che ha chiesto il renew — l'utente ha appena creato da sé l'account. Il copy è un "union message" pensato per on-prem (dove super_admin può forzare renew) ma riusato anche su SaaS.
+- **Fix candidato**: render condizionale del copy in base al context:
+  - `first_login=True` → "Welcome! Please choose a new password to replace the temporary one we emailed you."
+  - `expired=True` → "Your password has expired. Please choose a new one."
+  - `forced_by_admin=True` → "An administrator asked you to renew your password."
+- **Discovered**: 2026-04-23
+
+---
+
+## 02.7 — Onboarding / first-time UX
+
+### [02.7.1] Dashboard empty state coerente e ben strutturata ✅
+
+- **Fase**: 02
+- **Area**: First-time UX
+- **URL**: `https://app.sentrikat.com/` (dopo login + password change)
+- **Tipo**: 🟢 OK
+- **Actual**: **Vulnerability Dashboard** con:
+  - 4 cards counter: `0-DAY (0)`, `CRITICAL CVES (0)`, `HIGH CVES (0)`, `MEDIUM CVES (0)` — coerente per un account appena creato senza agent
+  - Widget **KEV Catalog: 13,978** (conteggio totale CISA KEV, popolato dal sync) + `Affecting Products: 0`, `Needs Review: 0`, `Products Tracked: 0`, `High EPSS Risk: 0`, `Low Priority: 0`
+  - Priority Breakdown (donut chart, empty "No data yet")
+  - Remediation Progress (line chart, empty "No data yet" + CTA `Take Snapshot`)
+  - Remediation Actions list ("No pending remediation actions")
+  - SLA Compliance ("No SLA policies configured" + CTA `Set up SLA`)
+  - Remediation Overview, Assignments (empty)
+  - Source filter: `All | Servers | Clients | Containers | Dependencies` — filtering per tipologia asset
+  - Top bar: breadcrumb `Home / Dashboard`, badge `TAKIRTNES` (company), dark mode toggle, user email dropdown
+- **Console**: zero errori
+- **Network**: tutte 200
+- **Discovered**: 2026-04-23
+
+### [02.7.2] 🔵 Badge company name in uppercase (text-transform CSS)
+
+- **Fase**: 02
+- **Area**: First-time UX / branding
+- **Tipo**: 🔵 Info
+- **Actual**: l'utente ha dichiarato company name `Takirtnes` (mixed case) nel form Trial; l'email welcome mostra coerentemente `Takirtnes`. Nel dashboard top-right il badge mostra `TAKIRTNES` (uppercase).
+- **Ipotesi**: CSS `text-transform: uppercase` sul badge (styling intenzionale). Se fosse DB normalization sarebbe un bug di consistency.
+- **Follow-up TODO 02.7.2a**: inspect element sul badge per confermare CSS vs valore salvato. Se c'è un editor company name (Settings → profile) verificare che il valore in DB sia preservato nella sua casing.
+- **Discovered**: 2026-04-23
+
+### [02.7.3] 🔵 Feature gating mappa da validare su piano Starter
+
+- **Fase**: 02
+- **Area**: First-time UX / subscription / feature gating
+- **Tipo**: 🔵 Info (da validare in fase 14 SaaS-specific)
+- **Sidebar menu visto (piano Starter)**:
+  - **OVERVIEW**: Dashboard, Assignments
+  - **INVENTORY → Products**: Products List, Endpoints, Containers, Dependencies, Import Queue, **SBOM Export**, Exclusions
+  - **MANAGEMENT → Users & Access**: All Users
+  - **INTEGRATIONS**: Agent Keys, Agent Activity
+  - **SYSTEM → Settings**: Alert Management, Email & Notifications, Subscription
+- **Osservazioni da confermare (dalla mappa architetturale originale)**:
+  - ❓ **SBOM Export** visibile su Starter: dalla mappatura `SBOM export` era previsto `Pro+ only`. Da verificare cliccandolo: si apre o dà 403 "upgrade required"? Se si apre, la mappa di gating è sbagliata o Starter include SBOM da recente change (cfr. commit `e769ce9 fix(plans): declare sbom_export in seeded plans so /api/sbom/* isn't 403` — probabilmente SBOM ora è incluso in tutti i plan)
+  - ❓ **LDAP settings**, **SAML settings**: NON visibili nel menu → feature gated correttamente (Pro+/Business+). Tuttavia bisogna verificare che sulla pagina `/settings` o `/subscription` l'utente veda un teaser "Upgrade to unlock LDAP/SAML" per informare dell'opzione
+  - ❓ **Jira/GitHub/GitLab/YouTrack integrations**: "Integrations" in sidebar mostra solo Agent Keys + Agent Activity → probabilmente gating Pro+. Verificare se esiste una pagina Integrations con teaser
+  - ❓ **Compliance reports** (BOD, NIS2, PCI, ISO, SOC2) non appaiono in menu: gated Pro+
+- **Follow-up TODO 02.7.3a**: in fase 14 SaaS-specific fare il test completo di feature gating (cliccare ogni voce gated e registrare il messaggio ricevuto). In fase 13 admin cross-ref con `/admin/plans` e `/admin/licenses` per vedere cosa il tenant ha effettivamente abilitato
+- **Discovered**: 2026-04-23
+
+### [02.7.4] 🔵 No welcome modal / tour / onboarding wizard
+
+- **Fase**: 02
+- **Area**: First-time UX
+- **Tipo**: 🔵 Info (UX)
+- **Severity**: Low
+- **Actual**: subito dopo il cambio password l'utente atterra nella dashboard empty senza:
+  - welcome modal di benvenuto
+  - checklist "Complete your setup" (deploy agent, invite team, configure alerts, set up SLA)
+  - tour guidato (es. driver.js / intro.js)
+  - CTA dominante per "primo step" (Deploy your first agent)
+- **Impatto**: utente tecnico power va bene; early access signup è una popolazione che conosce il prodotto. Ma per conversione trial → paid un onboarding guidato aumenta attivazione. Nel repo `setup.html` esiste ma forse è solo per on-prem first-run.
+- **Nota**: il widget "KEV Catalog 13,978" senza contesto può confondere chi non conosce CISA KEV — sarebbe utile un tooltip "? what's this?"
+- **Follow-up TODO 02.7.4a**: verificare se esiste una pagina `/getting-started` o `/welcome` non linkata dal sidebar; controllare `app/templates/setup.html` se viene mostrato anche su SaaS first-login
+- **Discovered**: 2026-04-23
+
+### [02.7.5] Menu navigabile, niente errori console, tutti 200 su network ✅
+
+- **Tipo**: 🟢 OK (sanity check)
+- **Actual**: utente conferma "console nessun errore, ho tutti 200 su network"
+- **Discovered**: 2026-04-23
+
+---
+
+## 02.12 — Stripe NOT proposed in Early Access
+
+### [02.12.1] Nessun CTA Stripe/checkout durante signup EA ✅
+
+- **Tipo**: 🟢 OK
+- **Actual**: dall'intero flow (form Trial → submit → email welcome → login → dashboard) NESSUN punto propone pagamento / Stripe checkout. L'email dichiara esplicitamente `Starter (Early Access — $0)` e "features are free during Early Access".
+- **Follow-up TODO 02.12.2**: verificare cosa succede al termine dell'Early Access (trial expire): l'utente vede paywall? email reminder? downgrade automatico a Free?
 - **Discovered**: 2026-04-23
 
 ---

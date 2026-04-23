@@ -106,14 +106,15 @@ Ogni bug/osservazione va aggiunta con questo schema:
 | 2026-04-23 | 01 | Blog + form rendering + capacity | blog OK (post IT mischiato), contact/demo/contact-sales/feedback rendering OK, capacity `{"active":2,"capacity":30,"status":"open"}` |
 | 2026-04-23 | 01 | **FASE 01 chiusa** | 3 bug (2 High, 1 Med), 1 warning, 3 info, 18 OK — pronto per fase 02 |
 | 2026-04-23 | 02 | Happy path trial SaaS (submit+email) | 🔴 02.4.1 temp password in plaintext via email (Med-High); 🔴 02.2.1 validation in DE; 🟡 02.4.2 valuta $ vs €; 🟡 02.4.3 email layout; 🟢 form rendering + 201 + deployment switcher + terms-block OK |
+| 2026-04-23 | 02 | Login + force password change + dashboard | 02.4.3 declassificato ❌ falso positivo; 🟢 login+forced-change+password-policy(min8)+mismatch OK; 🔵 02.6.3 complexity da verificare, 02.6.4 copy admin-renew su SaaS, 02.7.2 badge uppercase, 02.7.3 feature gating Starter, 02.7.4 no onboarding wizard; dashboard empty-state OK, Stripe NOT proposed ✅ |
 
 ---
 
 ## Bug counter globale
 
 - 🔴 Bug: 5
-- 🟡 Warning: 3
-- 🔵 Info/UX: 4
-- 🟢 OK passati: 24
+- 🟡 Warning: 2
+- 🔵 Info/UX: 8
+- 🟢 OK passati: 32
 
 *(aggiornati a mano ad ogni commit)*
