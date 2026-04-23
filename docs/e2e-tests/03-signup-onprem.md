@@ -783,17 +783,143 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
   ```
 - **Discovered**: 2026-04-23
 
-#### [03.11.2.10] ❓ Da chiarire — Sezione LDAP "sparita" dopo save?
+#### [03.11.2.10] 🟡 Sezione LDAP nascosta dopo save, richiede workaround (refresh + switch tab + refresh) per ri-vedere
 
 - **Fase**: 03
-- **Area**: Settings → Authentication / UI layout
-- **Tipo**: ❓ Da chiarire (scroll vs bug)
-- **Actual**: dopo la config SAML, l'utente apre la pagina Authentication e non vede più la sezione LDAP in vista; vede SAML Single Sign-On direttamente
-- **Due scenari plausibili**:
-  - **A (non bug)**: la pagina Authentication è multi-sezione (LDAP sopra, SAML sotto) — serve scroll per vedere entrambi; dopo una navigazione via SAML-specific form, lo scroll position è posizionato sullo SAML e LDAP è fuori dal viewport
-  - **B (bug grave)**: la sezione LDAP è effettivamente nascosta / rimossa dopo il save della config LDAP → impossibile riaprire la pagina di config LDAP per modificarla/disabilitarla (= operabilità persa)
-- **Diagnostic step**: scroll to top della pagina Authentication → se LDAP appare sopra = scenario A, nessun bug; se non appare = scenario B, aprire come bug
-- **Discovered**: 2026-04-23 — pending verifica utente
+- **Area**: Settings → Authentication / UI accordion / persistence
+- **Tipo**: 🟡 Warning (UX disastroso ma workaround esiste)
+- **Severity**: Medium-High (admin che pensa di aver "rotto" la config può essere spinto a reinstallare)
+- **Environment**: on-prem DEMO beta.6
+- **Steps to reproduce**:
+  1. Config LDAP salvata + test verde (03.11.2.1)
+  2. Naviga su altro tab (es. Email & Alerts)
+  3. Torna su Authentication
+- **Expected**: la sezione "LDAP / Active Directory Configuration" rimane visibile, cliccabile, modificabile
+- **Actual (conferma utente: "No era sparita, ho dovuto refreshare tutto e cambiare tab e refreshare per vedere la sezione LDAP")**:
+  - La sezione LDAP **scompare** dalla pagina Authentication dopo la prima navigazione via
+  - Per ri-aprire la pagina LDAP servono: Ctrl+F5 hard refresh → switch a un altro tab → switch back → hard refresh di nuovo
+  - Comportamento **non-reproducible con singolo refresh**
+- **Impatto operativo**:
+  - Admin che vuole modificare bind password / filter / URL non sa come accedere alla config salvata → può essere portato a ricreare tutto da zero
+  - In scenari di incident response (es. LDAP server migrato) l'admin non può aggiornare la config senza questi workaround
+  - Feature di config esiste lato backend (`/api/settings/ldap`) ma UI non la espone in modo consistente
+- **Rafforza cluster regressioni [03.11.2]**:
+  - La logica di render dell'accordion Authentication ha bug: LDAP section hidden dopo interazione con SAML (o dopo save stesso)
+  - Coerente col pattern "refactor mode-gating ha rotto le UI LDAP": form incompleto (03.11.2.2), sidebar voci sparite (03.11.2.3), section nascosta (03.11.2.10), login bloccato downstream (03.11.2.9)
+- **File sospetto**: template della pagina Authentication (JS toggle per show/hide section) — probabilmente un flag "shown when fresh / hidden when configured" invertito, o CSS `display: none` che non viene rimosso
+- **Discovered**: 2026-04-23 — confermato utente
+
+---
+
+### 03.11.3 — SAML → Keycloak (testlab)
+
+#### [03.11.3.1] SAML save + test → UI feedback verde ✅
+
+- **Fase**: 03
+- **Area**: Settings → Authentication → SAML Single Sign-On
+- **URL**: `http://localhost/admin/settings` (tab "Authentication" → section SAML)
+- **Tipo**: 🟢 OK (livello UI, login SSO bloccato da 03.11.3.2)
+- **Values configured**:
+  - Enable SAML SSO: ON
+  - SP Entity ID: `http://localhost/api/saml/metadata` (pre-compilato, match col client Keycloak)
+  - ACS URL: `http://localhost/saml/acs`
+  - IdP Metadata URL: `http://host.docker.internal:8180/realms/sentrikat-test/protocol/saml/descriptor`
+  - Default Organization: org creata nel setup wizard
+  - Auto-provision new users: ON
+  - Update user info on login: ON
+  - Attribute Mapping: default (Microsoft/ADFS-style claims)
+- **Actions**: Save → verde; Test Configuration → verde
+- **Discovered**: 2026-04-23
+
+#### [03.11.3.2] 🔴 HIGH — Login SSO "pending forever", SAML AuthnRequest non arriva a Keycloak
+
+- **Fase**: 03
+- **Area**: SAML login flow / docker network routing
+- **Tipo**: 🔴 Bug (di UX/documentazione, non di auth core)
+- **Severity**: **High** (il login SSO **non funziona** dopo config corretta; l'utente non sa perché)
+- **Environment**: Docker Desktop Windows, `host.docker.internal` usato per riferirsi al host dal container
+- **Steps to reproduce**:
+  1. Config SAML salvata con `IdP Metadata URL = http://host.docker.internal:8180/realms/sentrikat-test/protocol/saml/descriptor`
+  2. Logout
+  3. Click "Login with SSO"
+- **Expected**: browser rediretto a Keycloak login page, dopo login torna a SentriKat
+- **Actual**:
+  - Browser console vuoto (no error)
+  - Network tab mostra sequenza:
+    ```
+    login 200 (8.5 kB)
+    logo 302 redirect
+    status 200
+    login 302 redirect
+    saml?SAMLRequest=fZJbj9MwEIXf...&RelayState=%2F   → PENDING FOREVER
+    ```
+  - La richiesta `saml?SAMLRequest=...` (che il browser deve inviare a Keycloak) rimane in **pending** = browser non riesce a risolvere l'hostname della destinazione
+- **Root cause identificata** (non un bug di auth, è una trappola di networking):
+  - L'IdP metadata è stato fetchato dal container SentriKat via `host.docker.internal:8180` → Keycloak restituisce metadata XML con `Location="http://host.docker.internal:8180/realms/..."` (perché Keycloak genera URL basati sul `Host` header ricevuto)
+  - SentriKat salva questi URL come `SingleSignOnService Location` nel suo config
+  - Quando il browser fa il redirect SAML, tenta di raggiungere `http://host.docker.internal:8180/realms/...` — **ma `host.docker.internal` è un DNS resolver interno di Docker Desktop**, il browser Windows non lo conosce → timeout silenzioso (pending)
+- **Impatto**:
+  - Tutti i customer che installano SentriKat su Docker Desktop + Keycloak/ADFS/Okta su docker-network condivisa subiranno questo bug senza capire perché
+  - Documentazione SentriKat non avverte di questa trappola
+  - Il form IdP Metadata accetta 1 solo campo → impossibile distinguere "URL per fetch metadata (backend)" vs "URL che il browser userà (frontend)"
+- **Soluzioni possibili (nessuna richiede fix del prodotto)**:
+  - **Workaround A (rapido, usiamo per test)**: scaricare l'XML metadata dal browser (`http://localhost:8180/realms/sentrikat-test/protocol/saml/descriptor` — dal punto di vista del browser Windows) e **incollarlo** nel form SentriKat come XML invece che URL. Gli URL dentro l'XML saranno `localhost:8180/...` → browser può risolvere
+  - **Workaround B**: configurare Keycloak con `KC_HOSTNAME=localhost` in modo che generi sempre URL con `localhost:8180`
+  - **Workaround C**: creare un docker network condiviso `testlab_default + sentrikat_default` ed entrambi usare `keycloak:8080` come hostname (ma il browser non vedrebbe comunque `keycloak:8080`)
+- **Fix candidato (per future-fix)**:
+  - Il form IdP Metadata dovrebbe offrire 2 input: "URL to fetch metadata from (server-side)" + "Public URL of IdP (browser-facing)". Se diversi, SentriKat riscrive gli URL del metadata con il secondo prima di salvare
+  - In alternativa: documentare chiaramente nella UI che "se usi un hostname non pubblico (es. host.docker.internal, keycloak, docker-compose service name), il SAML SSO non funzionerà via browser"
+- **Discovered**: 2026-04-23
+
+#### [03.11.3.3] 🔵 Info — Keycloak testlab client SAML configurato con `RSA_SHA1` (deprecato)
+
+- **Fase**: 03
+- **Area**: Testlab config / signature algorithm
+- **Tipo**: 🔵 Info (non è bug SentriKat, è setup testlab)
+- **Actual** (dal Keycloak client "SentriKat SAML" → Signature and Encryption):
+  - Signature algorithm: `RSA_SHA1`
+  - Sign documents: ON, Sign assertions: ON
+  - Canonicalization: EXCLUSIVE
+- **Nota security**: SHA-1 è considerato deprecato per firme digitali (NIST deprecation 2011). SHA-256 raccomandato per SAML production
+- **Azione**: **non modificare ora** — potenzialmente inclusiva per testare che SentriKat gestisca SHA1 senza warning. Quando testiamo SAML production-grade, settare `RSA_SHA256` su Keycloak client e verificare che SentriKat validi correttamente
+- **Discovered**: 2026-04-23
+
+#### [03.11.3.4] 🔵 Info — Client SAML Keycloak: Name ID format=`username`, Force POST binding, Include AuthnStatement
+
+- **Fase**: 03
+- **Area**: Testlab SAML client config / mappatura
+- **Tipo**: 🔵 Info
+- **Actual (SAML capabilities nel client Keycloak):**
+  - Name ID format: `username` (il SAML Response userà `uid` come NameID; coerente con LDAP mapping)
+  - Force name ID format: ON
+  - Force POST binding: ON (browser farà POST, non REDIRECT — buona pratica per assertion signing)
+  - Force artifact binding: OFF
+  - Include AuthnStatement: ON (needed for proper SAML response)
+  - Include OneTimeUse Condition: OFF (OK per sessione SSO multi-use)
+- **Valutazione**: config del testlab è sensata per testing. Username-based NameID è OK per mapping su `admin.user`, `sec.analyst` ecc.
+- **Discovered**: 2026-04-23
+
+#### [03.11.3.5] 🔵 Info — Realm Keycloak signing key `RS256` (RSA) attiva e valida fino al 2036
+
+- **Fase**: 03
+- **Area**: Testlab realm keys
+- **Tipo**: 🔵 Info
+- **Actual** (dal Keycloak realm sentrikat-test → Keys tab):
+  - 4 chiavi attive:
+    - AES OCT (aes-generated) — ENC
+    - RSA-OAEP (rsa-enc-generated) — ENC — valid to 2036-02-22
+    - HS512 OCT (hmac-generated-hs512) — SIG
+    - **RS256 RSA (rsa-generated) — SIG** — valid to 2036-02-22
+  - La chiave RS256 è quella usata per firmare SAML assertions (rilevante per [03.11.3.3])
+- **Discovered**: 2026-04-23
+
+#### [03.11.3.6] Keycloak `sentrikat-test` realm users presenti e match con OpenLDAP ✅
+
+- **Fase**: 03
+- **Area**: Testlab parity LDAP↔Keycloak
+- **Tipo**: 🟢 OK
+- **Actual**: il realm Keycloak `sentrikat-test` ha gli stessi 5 utenti dell'OpenLDAP (admin.user, disabled.user [Disabled badge], it.manager, sec.analyst, viewer). Stessa email per user. Parity utile: potremo testare lo stesso utente via LDAP login vs SAML login per confrontare role mapping e user provisioning
+- **Discovered**: 2026-04-23
 
 ---
 
