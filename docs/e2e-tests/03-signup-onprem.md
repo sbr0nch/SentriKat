@@ -783,6 +783,36 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
   ```
 - **Discovered**: 2026-04-23
 
+#### [03.11.2.10] ❓ Da chiarire — Sezione LDAP "sparita" dopo save?
+
+- **Fase**: 03
+- **Area**: Settings → Authentication / UI layout
+- **Tipo**: ❓ Da chiarire (scroll vs bug)
+- **Actual**: dopo la config SAML, l'utente apre la pagina Authentication e non vede più la sezione LDAP in vista; vede SAML Single Sign-On direttamente
+- **Due scenari plausibili**:
+  - **A (non bug)**: la pagina Authentication è multi-sezione (LDAP sopra, SAML sotto) — serve scroll per vedere entrambi; dopo una navigazione via SAML-specific form, lo scroll position è posizionato sullo SAML e LDAP è fuori dal viewport
+  - **B (bug grave)**: la sezione LDAP è effettivamente nascosta / rimossa dopo il save della config LDAP → impossibile riaprire la pagina di config LDAP per modificarla/disabilitarla (= operabilità persa)
+- **Diagnostic step**: scroll to top della pagina Authentication → se LDAP appare sopra = scenario A, nessun bug; se non appare = scenario B, aprire come bug
+- **Discovered**: 2026-04-23 — pending verifica utente
+
+---
+
+### 03.13 — CISA / NVD sync (osservazioni di resilience)
+
+#### [03.13.1] NVD online/offline recovery automatico ✅
+
+- **Fase**: 03
+- **Area**: Vulnerability data sync / fault tolerance
+- **Tipo**: 🟢 OK (resilience behavior)
+- **Actual durante la sessione**:
+  - Primo osservazione: footer mostrava alert "NVD API returned an error. Fallback sources (CVE.org, ENISA EUVD) will be used." — coerente con `NVD_API_KEY=` vuoto (rate limit 120 req/day senza key, facile da esaurire)
+  - Poco dopo: footer mostra "NVD online" → rate limit resettato / NVD riuscita → app re-promuove NVD come sorgente primaria
+- **Valutazione**: il fault-tolerance multi-sorgente (NVD → CVE.org/Vulnrichment → ENISA EUVD → vendor feeds) funziona. Il sistema degrada graziosamente e recupera automaticamente quando l'endpoint principale torna disponibile, senza richiedere restart.
+- **Follow-up opzionale**: configurare `NVD_API_KEY` (gratuita, `https://nvd.nist.gov/developers/request-an-api-key`) alza la quota a 10K/day ed elimina quasi del tutto il toggling offline/online. Non blocca i test.
+- **Discovered**: 2026-04-23
+
+---
+
 #### [03.11.2.9] ⏸️ BLOCKED — Login LDAP `admin.user` → 401, test NON conclusivo finché [03.11.2.3] non è risolto
 
 - **Fase**: 03
