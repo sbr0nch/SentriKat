@@ -35,7 +35,7 @@ Ogni fase ha un proprio file `NN-nome.md` (creato al momento, non tutti in antic
 |---|---|---|---|
 | 01 | `01-landing-site.md` | Landing `sentrikat.com`: nav, CTA, pagine marketing, blog, vs/*, compliance, pricing, legal, sitemap, RSS, cookie banner | ✅ completata (3 bug, 1 warn, 3 info, 18 OK — follow-up non bloccanti aperti) |
 | 02 | `02-signup-saas.md` | Signup SaaS: form Early Access, capacity check, `/api/v1/provision/trial`, Stripe checkout, webhook, bridge provisioning → `app.sentrikat.com` | ✅ 90% (2 bug, 2 warn, 13 info, 13 OK; 4 sotto-aree rimandate a fase 05 admin) |
-| 03 | `03-signup-onprem.md` | Signup on-prem: lead/contact sales, acquisto license, download binario, install Docker, setup wizard, attivazione RSA, hardware lock | ⬜ |
+| 03 | `03-signup-onprem.md` | Signup on-prem: lead/contact sales, acquisto license, download binario, install Docker, setup wizard, attivazione RSA, hardware lock | 🟡 in corso (install OK, wizard step 1 OK, 1 bug HIGH version, 2 warn log level/rate-limiter) |
 | 04 | `04-portal-customer.md` | `portal.sentrikat.com` customer: OTP login, dashboard, account, licenze, downloads, support/feedback, checkout, upgrade, logout | ⬜ |
 | 05 | `05-portal-admin.md` | `portal.sentrikat.com` admin: 25 pagine admin (customers, licenses, plans, leads, demo-requests, feedback, audit, logs, usage-metrics, ecc.) | ⬜ |
 | 06 | `06-app-auth-rbac.md` | `app.sentrikat.com` auth: local, LDAP/AD, SAML 2.0, TOTP 2FA, session, password reset, RBAC (super_admin/org_admin/manager/user) | ⬜ |
@@ -108,14 +108,15 @@ Ogni bug/osservazione va aggiunta con questo schema:
 | 2026-04-23 | 02 | Happy path trial SaaS (submit+email) | 🔴 02.4.1 temp password in plaintext via email (Med-High); 🔴 02.2.1 validation in DE; 🟡 02.4.2 valuta $ vs €; 🟡 02.4.3 email layout; 🟢 form rendering + 201 + deployment switcher + terms-block OK |
 | 2026-04-23 | 02 | Login + force password change + dashboard | 02.4.3 declassificato ❌ falso positivo; 🟢 login+forced-change+password-policy(min8)+mismatch OK; 🔵 02.6.3 complexity da verificare, 02.6.4 copy admin-renew su SaaS, 02.7.2 badge uppercase, 02.7.3 feature gating Starter, 02.7.4 no onboarding wizard; dashboard empty-state OK, Stripe NOT proposed ✅ |
 | 2026-04-23 | 02 | 409 true duplicate + pricing + Subscription | 🟢 409 on same email + UI chiara; 🟢 /pricing OK; 🟡 02.7.6 "Billing Monthly / Renews 23 May" su EA gratuito; 🔵 4 info su Subscription (subtitle LDAP hardcoded, breadcrumb Administration, no EA badge, no usage quota, SBOM Export mismatch sidebar vs feature list) — **FASE 02 chiusa al 90%** |
+| 2026-04-23 | 03 | Install beta.6 on Windows + first-boot | 🟢 build OK (~2min), 3 container healthy; 🔴 03.5.3 VERSION file inchiodato a beta.2 nel tag beta.6 (health+header dicono versione sbagliata); 🟡 03.5.4 Flask-Limiter in-memory storage (no Redis); 🟡 03.5.5 ERROR log per metrics key assente (dovrebbe essere WARN/INFO); 🔵 03.5.6 APScheduler missed jobs in catch-up; 🟢 wizard /setup visibile 6-step; 🔵 03.6.2 Multi-Tenancy listata in welcome anche su DEMO |
 
 ---
 
 ## Bug counter globale
 
-- 🔴 Bug: 5
-- 🟡 Warning: 3
-- 🔵 Info/UX: 13
-- 🟢 OK passati: 35
+- 🔴 Bug: 6
+- 🟡 Warning: 5
+- 🔵 Info/UX: 14
+- 🟢 OK passati: 38
 
 *(aggiornati a mano ad ogni commit)*
