@@ -1319,6 +1319,146 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
   per capire da quale path parte + se c'è un log abilitato
 - **Discovered**: 2026-04-23
 
+#### [03.12.9] 🔴 HIGH — API key generata viene rifiutata dal server (403/401) senza motivo chiaro
+
+- **Fase**: 03
+- **Area**: Agent auth / API key lifecycle
+- **Tipo**: 🔴 Bug (diagnostic breakthrough di [03.12.6])
+- **Severity**: **High** (primo scan block-bloccante per ogni nuovo agent)
+- **Environment**: agent Windows con API key `sk_agent_4ApEu7_c80X0LsSXRhGorBr86adftcyZN7ka51MEJWg`
+- **Diagnostica che ha trovato il root cause**:
+  1. Il nginx access log mostra che l'agent arriva effettivamente al server:
+     ```
+     172.22.0.1 - - [23/Apr/2026:19:00:33 +0000] "POST /api/agent/inventory HTTP/1.1" 403 254 "-" "SentriKat-Agent/1.0.0 (Windows)"
+     ```
+     → **la chiamata raggiunge nginx/sentrikat; il server risponde 403 Forbidden** (254 byte di response)
+  2. Test manuale endpoint heartbeat con la stessa API key via `Invoke-WebRequest`:
+     ```
+     POST /api/agent/heartbeat → 401
+     Response: {"error":"Invalid or missing API key","hint":"Include X-Agent-Key header with your agent API key"}
+     ```
+     → **la chiave viene rigettata dal server** anche se è quella appena generata dalla UI
+- **Ipotesi root cause — "self-revocation" dello script durante auto-upgrade**:
+  - Timeline:
+    1. Utente crea API key `Y` (sk_agent_4ApEu7_...) nella UI
+    2. Utente scarica `sentrikat-agent.ps1` → il server embed la key `Y` nello script
+    3. Utente esegue con `-Install` → lo script detecta **installazione pre-esistente** (da test precedente — quando l'utente aveva "una volta" SentriKat funzionante)
+    4. Script esegue "Old API key revoked on server" — ma **quale key revoca?**
+       - Se lo script legge la key dall'installazione precedente, revoca la OLD key X → OK, non impatta Y
+       - Ma se lo script revoca la key EMBEDDED nel nuovo script (Y) prima di configurare, si auto-suicida
+    5. Agent installato con la key `Y` che è stata revocata → 403/401 su ogni call
+- **Evidence behaviorale**:
+  - Entrambe le chiamate (inventory via agent + heartbeat via curl manuale) falliscono
+  - La stessa chiave è usata in entrambi i casi
+  - 401 response testo: "Invalid or missing API key" → **la key non è riconosciuta nel DB** (non è né non-autorizzata né orphan — è proprio assente/revocata)
+- **Conferma necessaria — chiedere all'utente**:
+  1. Tornare nella UI `INTEGRATIONS → Agent Keys` → vedere lo stato della key appena creata:
+     - Active? Revoked? Expired?
+     - Last seen?
+  2. Confrontare la key visualizzata nella UI (o prefix) con quella embedded nello script:
+     ```powershell
+     Select-String -Path "C:\Users\cti-admin\Downloads\sentrikat-agent.ps1" -Pattern "sk_agent_"
+     ```
+- **Impatto**:
+  - Feature "auto-upgrade" dell'agent è utile ma ha un side-effect che auto-impedisce il primo scan
+  - In ambiente customer reale: installazione nuova pulita probabilmente funzionerebbe (no previous agent → no revoke), ma qualsiasi scenario di re-deploy / upgrade soffre del problema
+- **Fix candidato (per fase fix, non ora)**:
+  - Lo script auto-upgrade deve revocare **solo** la key dell'installazione precedente, NON la key nuova embedded nello script attuale
+  - La UI deve mostrare esplicitamente lo stato della key (Active / Revoked / Expired) + "Last seen" timestamp
+  - L'endpoint `/api/agent/inventory` deve ritornare 401 con messaggio identico a heartbeat ("Invalid or missing API key") invece di 403, per coerenza
+- **Ipotesi aggiuntive (sollevate dall'utente durante la sessione)**:
+  1. **DEMO limit (5 agent max)**: improbabile come causa — messaggio "Invalid or missing API key" NON è lo stesso di "Quota exceeded". Uno usa codice/testo diverso. Se fosse DEMO limit: test API con `curl` direttamente restituirebbe `{"error":"demo_limit_reached","hint":"Upgrade to PRO..."}`, non key-invalid
+  2. **Installazione on-prem non registrata col license server upstream**: plausibile come causa secondaria. Il nostro `.env` ha `SENTRIKAT_LICENSE=` e `SENTRIKAT_LICENSE_SERVER=` **vuoti** (DEMO no-license). Se la validation delle agent API keys richiede check upstream col license server (telemetria/metering), il fallimento di quel check potrebbe tradursi in un "key invalid" silent. Da approfondire
+- **Diagnostica definitiva (da eseguire prima di assumere root cause)**:
+  - Verificare nella UI `INTEGRATIONS → Agent Keys` lo stato della key → Active? Revoked? Expired?
+  - Grep dello script scaricato per l'effettiva key embedded:
+    ```powershell
+    Select-String -Path "C:\Users\cti-admin\Downloads\sentrikat-agent.ps1" -Pattern "sk_agent_"
+    ```
+  - Confronto con la key UI
+- **Discovered**: 2026-04-23 (breakthrough diagnostic)
+
+#### [03.12.10] 🔵 Info — Scheduled task punta a path user Downloads invece di path di sistema
+
+- **Fase**: 03
+- **Area**: Agent install / file location / stability
+- **Tipo**: 🔵 Info (deploy hygiene)
+- **Severity**: Medium (low impact oggi, alto rischio domani)
+- **Actual** (da `Get-ScheduledTask | Select Actions`):
+  ```
+  Arguments: -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden
+             -File "C:\Users\cti-admin\Downloads\sentrikat-agent.ps1" -RunOnce
+  Execute: powershell.exe
+  ```
+- **Issue**: lo script non è **copiato** in un path di sistema durante `-Install`. Resta nel path dove l'utente lo ha scaricato (`Downloads`). Conseguenze:
+  - Se l'utente cancella il file da Downloads → task si rompe silenziosamente
+  - Se `cti-admin` elimina il profilo o rinomina l'account → path risolve a null
+  - Se la dir Downloads è sync con OneDrive / roaming → behaviour imprevedibile
+  - Se l'agent gira come `LocalSystem` (non come user) potrebbe non avere accesso al path user
+- **Fix candidato**: `-Install` deve copiare lo script in `%PROGRAMDATA%\SentriKat Agent\bin\sentrikat-agent.ps1` e puntare il task lì
+- **Discovered**: 2026-04-23
+
+#### [03.12.11] 🔵 Info — LastTaskResult `267011` = "SCHED_S_TASK_HAS_NOT_RUN"
+
+- **Fase**: 03
+- **Area**: Scheduled task status
+- **Tipo**: 🔵 Info
+- **Actual** (da `Get-ScheduledTaskInfo`):
+  ```
+  LastRunTime        : 11/30/1999 12:00:00 AM
+  LastTaskResult     : 267011
+  NextRunTime        : 4/24/2026 12:53:35 AM
+  NumberOfMissedRuns : 0
+  ```
+- **Interpretazione**:
+  - `267011` (0x41303) = `SCHED_S_TASK_HAS_NOT_RUN` — il task non è MAI stato eseguito automaticamente
+  - `LastRunTime 11/30/1999 12:00:00 AM` = epoch Windows (valore default quando mai eseguito)
+  - Il task attende il `NextRunTime` (4 ore dopo install)
+- **Nota**: **la RunOnce action eseguita durante `-Install` è una esecuzione separata, non logged qui**. Il task in sé non è mai partito.
+- **Discovered**: 2026-04-23
+
+#### [03.12.12] 🔵 Info — Verbose output "POST with -1-byte payload" sospetto
+
+- **Fase**: 03
+- **Area**: Agent script / HTTP body preparation
+- **Tipo**: 🔵 Info (da investigare)
+- **Actual** (da run manuale con `-Verbose`):
+  ```
+  VERBOSE: Target Image Version 10.0.26200.8246
+  VERBOSE: POST with -1-byte payload
+  ```
+- **Interpretazione possibile**:
+  - `-1-byte payload` = size pre-compressione calcolata in modo strano (stream length unknown)
+  - Potrebbe essere un artefatto di PowerShell `Invoke-WebRequest` quando `Content-Length` è settato a -1 per chunked transfer
+  - Oppure il body è effettivamente null/vuoto → il server risponde 403 perché payload non valido (corroborerebbe [03.12.9])
+- **Follow-up TODO 03.12.12a**: aprire lo script `sentrikat-agent.ps1` e cercare il blocco `Invoke-RestMethod` / `Invoke-WebRequest` per vedere come costruisce il body. Se il body è serializzato dopo la logging, può essere che il verbose stampi prima della preparazione effettiva
+- **Discovered**: 2026-04-23
+
+#### [03.12.13] 🔴 403 server-side su inventory NON loggato nello stdout di sentrikat container
+
+- **Fase**: 03
+- **Area**: Server logging / observability
+- **Tipo**: 🔴 Bug (observability)
+- **Severity**: Medium-High (diagnostica bloccata lato server)
+- **Actual**:
+  - nginx access log mostra chiaramente: `POST /api/agent/inventory HTTP/1.1" 403 254`
+  - `docker compose logs sentrikat | grep agent|inventory|403|401` → **ZERO match per quel 403**
+  - Solo rumore APScheduler
+- **Issue**: il sentrikat backend sta ritornando 403 ma **non lo logga nei suoi stdout/stderr** — rende impossibile per un admin capire perché l'agent viene rifiutato
+- **Fix candidato**:
+  - Logging esplicito su agent API key validation failure:
+    ```
+    WARNI [app.agent_api] Agent auth rejected: key=sk_agent_4ApEu7... reason=key_revoked ip=172.22.0.1
+    ```
+  - Così nell'audit log + SIEM forwarding (che abbiamo già configurato — [03.11.7]) c'è traccia di ogni auth fail
+- **Nota**: il log potrebbe essere finito in `/var/log/sentrikat/security.log` (che NON è su stdout). Da verificare:
+  ```powershell
+  docker compose -p v100-beta6 exec sentrikat tail -n 50 /var/log/sentrikat/security.log
+  ```
+- **Discovered**: 2026-04-23
+
+---
+
 #### [03.12.8] 🔵 Info — Agent uses Windows Scheduled Tasks (non Windows Service)
 
 - **Fase**: 03
