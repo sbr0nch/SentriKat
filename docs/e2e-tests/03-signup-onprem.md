@@ -1155,6 +1155,107 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 
 ---
 
+### 03.11.6 — Lateral test: GitHub / GitLab / YouTrack (SSRF uniformity check)
+
+Obiettivo di questo mini-test: determinare se la policy SSRF (`ALLOW_PRIVATE_URLS` ignorato in prod) è uniforme su tutti gli issue tracker con URL configurabile.
+
+#### [03.11.6.1] 🔵 GitHub Issues NON ha campo Base URL / API URL — hardcoded per GitHub Cloud
+
+- **Fase**: 03
+- **Area**: Settings / Issue Trackers / GitHub / feature completeness
+- **Tipo**: 🔵 Info (feature gap, potenziale enterprise blocker)
+- **Severity**: Low-Medium (per customer che usa GitHub Enterprise self-hosted)
+- **Actual**: espandendo GitHub Issues Configuration il form contiene SOLO:
+  - Personal Access Token
+  - Repository Owner
+  - Repository Name
+  - (nessun campo URL/Base URL)
+- **Implicazione**: il client GitHub è hardcoded per `api.github.com`. **GitHub Enterprise Server self-hosted** (es. `github.company.com`) **NON è supportato** in questo form
+- **Impatto enterprise**: molti clienti enterprise usano GitHub Enterprise su dominio privato — per loro questa integration non è utilizzabile
+- **Beneficio collaterale (per il nostro test)**: save passa senza problemi SSRF perché non c'è URL da validare → vedi 03.11.6.2
+- **Fix candidato**: aggiungere campo opzionale "GitHub API Base URL (leave blank for github.com)" come fanno molti altri tool
+- **Discovered**: 2026-04-23
+
+#### [03.11.6.2] GitHub Issues save OK (no URL field = no SSRF validation) ✅
+
+- **Tipo**: 🟢 OK
+- **Actual**: save del form GitHub con token+owner+repo riusce. Nessun campo URL → niente validation SSRF
+- **Discovered**: 2026-04-23
+
+#### [03.11.6.3] GitHub Test Connection error message chiaro: `"GitHub: Authentication failed - check token"` ✅
+
+- **Fase**: 03
+- **Area**: GitHub integration / error handling
+- **Tipo**: 🟢 OK (UX)
+- **Actual**: con dummy token "dummy-token-123" il test produce messaggio **chiaro e specifico** nella UI
+- **Contrasto**: vs webhook Test Connection [03.11.5.3] che ritorna 500 nudo senza messaggio → qui l'endpoint di test GitHub è correttamente gestito. Inconsistency nei pattern di error handling tra endpoint `/test` dei vari tracker
+- **Discovered**: 2026-04-23
+
+#### [03.11.6.4] ⏸️ GitLab Issues — stessa policy SSRF blocca con URL privato (conferma uniformità)
+
+- **Fase**: 03
+- **Area**: GitLab integration / SSRF
+- **Tipo**: ⏸️ Test bloccato (stessa causa di 03.11.4.5)
+- **Actual**:
+  - GitLab URL: `http://host.docker.internal:8800`
+  - Save → toast rosso `"Error saving settings: Setting 'gitlab_url' targets a private/internal network address. External URLs are required."`
+  - Console: `POST /api/settings/batch 400 (BAD REQUEST)` + `POST /api/integrations/issue-tracker/test 500 (INTERNAL SERVER ERROR)` → stesso pattern bug [03.11.5.3]
+- **Conferma**: la policy SSRF si applica UNIFORMEMENTE a tutti i tracker con URL configurabile (Jira, Webhook, GitLab). GitHub passa solo perché non ha URL. YouTrack da testare ma atteso uguale
+- **Discovered**: 2026-04-23
+
+#### [03.11.6.5] 🔵 UX strano — Dopo save fallito per SSRF, UI mostra messaggio inline `"GitLab: Project not found: 1"`
+
+- **Fase**: 03
+- **Area**: GitLab integration / UI state
+- **Tipo**: 🔵 Info (UX confuso)
+- **Severity**: Low-Medium
+- **Actual**: nel screenshot, sotto il bottone Save Settings, appare un blocco rosso con `"GitLab: Project not found: 1"` **mentre il toast in alto dice** `"gitlab_url targets a private/internal network address"`
+- **Issue**: due messaggi di errore **contraddittori**:
+  - Toast: SSRF block (la request non è partita)
+  - Inline: "Project not found" (suggerisce che la request sia partita e abbia ricevuto 404 dal server)
+- **Possibili cause**:
+  - `"Project not found"` è residuo di un tentativo precedente che non viene pulito quando si riconfigurazione
+  - Oppure: il Test Connection tentava prima di raggiungere GitLab (e ha ricevuto 404 perché host.docker.internal:8800 è webhook-tester non GitLab reale) PRIMA che la validation SSRF bloccasse il save
+- **Fix candidato**: reset di stato quando save fallisce, oppure mostrare errore singolo (non due messaggi contraddittori)
+- **Discovered**: 2026-04-23
+
+#### [03.11.6.6] 🔵 System health banner: `"No active agent API keys (agents cannot push data)"`
+
+- **Fase**: 03
+- **Area**: System health monitor / empty state
+- **Tipo**: 🔵 Info (atteso a setup iniziale)
+- **Actual**: banner rosso in cima alla pagina Administration: `"System health: 1 critical config issue(s): No active agent API keys (agents cannot push data)"` + link "View"
+- **Valutazione**: informativo e corretto — non abbiamo ancora creato nessun agent API key (lo faremo in 03.12). Il health monitor rileva correttamente lo stato
+- **Positivo**: ✅ feature Health Checks funzionante, rileva config gaps proattivamente
+- **Follow-up**: dopo che creeremo gli agent keys il banner dovrebbe sparire
+- **Discovered**: 2026-04-23
+
+#### [03.11.6.7] 🔵 Log SSRF etichetta sempre "Jira tracker setup" anche per GitLab save (context bug nel logger)
+
+- **Fase**: 03
+- **Area**: Logging / context labeling
+- **Tipo**: 🔵 Info (logging hygiene)
+- **Severity**: Low-Medium (debug/ops misleading)
+- **Actual** — dai log dopo save GitLab:
+  ```
+  WARNI [app.network_security] SSRF blocked: Jira tracker setup attempted request to internal URL: http://host.docker.internal:8080
+  ```
+  Ma l'utente ha configurato GitLab, non Jira. Il contesto "Jira tracker setup" è **hardcoded** o ereditato da una chiamata precedente
+- **Issue**:
+  - Debug futuro sarà difficile: loggato "Jira" quando era GitLab → ops sta perseguendo il bug sbagliato
+  - Se un incident-response team guarda il SIEM, tutti i bloccchi SSRF saranno attribuiti a "Jira"
+- **Fix candidato**: passare il contesto corretto al logger (`module_name` o `integration_type` dal chiamante)
+- **Discovered**: 2026-04-23
+
+#### [03.11.6.8] YouTrack — non testato (skippato) ⏭️
+
+- **Tipo**: ⏭️ Skipped (pattern già noto, non aggiunge info)
+- **Razionale**: YouTrack probabilmente usa la stessa policy — test rapido non prioritario per ora
+- **Follow-up TODO**: test YouTrack save con URL privato dopo fase fix; verificare che anche là il pattern regga
+- **Discovered**: 2026-04-23
+
+---
+
 ### 03.11.4 — Jira → jira-mock (MockServer)
 
 #### [03.11.4.1] Mock Jira testlab raggiungibile solo via `/mockserver/dashboard` ✅

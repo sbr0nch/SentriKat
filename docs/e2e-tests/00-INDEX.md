@@ -158,9 +158,9 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 - 🔴 Bug: 14
 - 🟡 Warning: 8
-- 🔵 Info/UX: 38
-- 🟢 OK passati: 58
-- ⏸️ Test bloccati: 3
+- 🔵 Info/UX: 43
+- 🟢 OK passati: 60
+- ⏸️ Test bloccati: 5
 
 *(aggiornati a mano ad ogni commit)*
 
@@ -175,5 +175,7 @@ Test che non sono eseguibili finché non viene risolto un bug a monte. Da ripren
 | ⏸️ 03.11.2.9 | 03 / LDAP login | Login di un utente LDAP seedato non può essere testato significativamente finché non c'è la pagina admin per "accettare/invitare" l'utente LDAP prima del login | [03.11.2.3] Sidebar LDAP Users / LDAP Groups sparita |
 | ⏸️ 03.11.4 (all) | 03 / Jira integration | Test funzionali Jira non eseguibili con testlab docker in `FLASK_ENV=production` (policy SSRF hardening ignora `ALLOW_PRIVATE_URLS`) | [03.11.4.5] + hardening policy in production mode |
 | ⏸️ 03.11.5 (all) | 03 / Webhook | Test funzionali Webhook out bloccati dalla stessa policy SSRF | [03.11.5.2] stesso root cause di 03.11.4.5 |
+| ⏸️ 03.11.6.4 | 03 / GitLab | Test funzionali GitLab bloccati dalla stessa policy SSRF | stesso root cause di 03.11.4.5 |
+| ⏸️ 03.11.6.8 | 03 / YouTrack | Saltato in questa sessione (pattern atteso uguale), test rinviato a post-fix | stesso root cause presunto |
 
 **Regola operativa**: quando un test fallisce ma è chiaro che dipende da un altro bug non ancora fixato, lo spostiamo qui invece di marcarlo come "bug autonomo" (evita falsi positivi sul conteggio bug). Riapriremo questi test in una seconda passata dopo la fase fix, in ordine di dipendenza (prima i fix bloccanti, poi i test sbloccati).
