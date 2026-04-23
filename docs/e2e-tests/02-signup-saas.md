@@ -38,3 +38,222 @@
 ---
 
 *(bug/osservazioni da popolare durante la sessione)*
+
+---
+
+## 02.1 — Form TrialSignup rendering
+
+### [02.1.1] Required fields correttamente marcati ✅
+
+- **Tipo**: 🟢 OK
+- **Actual**: utente conferma "tutto a posto", i required hanno marker visibile o comportamento nativo `required`
+- **Discovered**: 2026-04-23
+
+---
+
+## 02.2 — Validazione lato client
+
+### [02.2.1] Messaggio di validazione del checkbox Terms mostrato in TEDESCO
+
+- **Fase**: 02 — Signup SaaS
+- **Area**: Client validation
+- **URL**: `https://sentrikat.com/#trial`
+- **Tipo**: 🔴 Bug
+- **Severity**: Medium (UX, non funzionale — validazione funziona ma in lingua sbagliata)
+- **Environment**: prod
+- **Steps to reproduce**:
+  1. Apri `https://sentrikat.com/#trial`
+  2. Compila il form senza flaggare il checkbox "I agree to the Early Access Terms..."
+  3. Clicca "Join Early Access"
+- **Expected**: messaggio di errore in inglese (il sito è EN-only, vedi 01.9.1), es. "Please check this box to continue"
+- **Actual**: messaggio di errore in **tedesco**: `"Klicke dieses Kästchen an, wenn du fortfahren möchtest."`
+- **Root cause**: il checkbox usa l'attributo HTML nativo `required`, che produce un tooltip di validazione **nella lingua del browser** (UA locale), non nella lingua del sito. Se l'utente ha Chrome in DE (come mostrato in screenshot "DevTools is now available in German"), vede il messaggio in DE — anche se il sito è EN.
+- **Impatto**: visitatori EN su Chrome DE (comune in Svizzera/Germania/Austria) vedono messaggio inaspettato. Mix di lingue dà impressione di sito poco curato.
+- **Fix candidato**:
+  - Opzione A (minima): sostituire `required` HTML con validation JS + messaggio custom in inglese `input.setCustomValidity("Please accept the Terms to continue")` oppure pattern `<div role="alert">`
+  - Opzione B (i18n completa): se si introduce i18n (vedi 01.9.1), localizzare anche i messaggi di validazione secondo la lingua dichiarata della pagina
+- **File sospetto**: `SentriKat-web/landing/src/components/TrialSignup.astro` (checkbox `accepted_terms`)
+- **Discovered**: 2026-04-23
+
+### [02.2.2] Submit bloccato se terms non checked ✅
+
+- **Tipo**: 🟢 OK
+- **Actual**: il form non submitta se `accepted_terms` non è flaggato (browser-native HTML5 validation fa il suo lavoro)
+- **Discovered**: 2026-04-23
+
+### [02.2.3] Nessun CAPTCHA Turnstile sul form TrialSignup ✅ (by design)
+
+- **Tipo**: 🟢 OK (behavior coerente col repo) / 🔵 Info
+- **Actual**: form Trial NON ha Turnstile (contrariamente a Contact e Demo). Utente conferma assenza.
+- **Consistency check**: coerente con `TrialSignup.astro` nel repo (Turnstile è usato solo in `Contact.astro` e `DemoRequest.astro`).
+- **Security note**: l'assenza di Turnstile sul form che CREA ACCOUNT (= consuma slot da 30 di capacity) è un potenziale rischio spam/DoS. Mitigato dal fatto che email alias comuni sono bloccati server-side (vedi 02.3.2) e da capacity cap EA. Da considerare l'aggiunta di Turnstile anche qui se il programma Early Access esce da "beta fidata" — va documentato come decisione esplicita.
+- **Discovered**: 2026-04-23
+
+---
+
+## 02.3 — Submit happy path SaaS
+
+### [02.3.1] Happy path SaaS → `201 Created` ✅
+
+- **Fase**: 02
+- **Area**: Submit happy path
+- **URL**: `POST https://sentrikat.com/api/v1/provision/trial`
+- **Tipo**: 🟢 OK
+- **Environment**: prod
+- **Actual**:
+  - Network: `POST /api/v1/provision/trial` → **201 Created**, 1.2 kB response, 329 ms
+  - UI: messaggio di conferma inline "Welcome to Early Access! Check your email for your credentials. You'll log in at app.sentrikat.com."
+  - Email ricevuta pochi secondi dopo (vedi 02.4)
+- **Discovered**: 2026-04-23
+
+### [02.3.2] Email con alias Gmail `+tag` bloccate → `409 Conflict` ✅ (funzione di sicurezza)
+
+- **Fase**: 02
+- **Area**: Submit happy path / Edge duplicate
+- **Tipo**: 🟢 OK + 🔵 Info (behavior voluto)
+- **Actual**:
+  - Due tentativi `POST /api/v1/provision/trial` con alias Gmail (pattern `user+tag@gmail.com`) → entrambi **409 Conflict**, ~400 ms e ~267 ms
+  - Terzo tentativo con email pulita → **201 Created** (happy path)
+- **Behavior**: il backend bloccando gli alias `+tag` previene abuse (1 utente che crea N trial bypassando email univoca). Coerente con best practice.
+- **Follow-up TODO — verificare**:
+  - Il 409 su alias Gmail: la response body dice esplicitamente "alias blocked" / "email plus-sign not allowed" / o generico "account already exists"? Dal punto di vista UX il messaggio dovrebbe essere chiaro (non generico), altrimenti un utente che ha davvero un alias legittimo si confonde.
+  - Il **vero** caso duplicato (stessa email EXACT match, senza alias) produce anche 409? Da testare in 02.8 con email già registrata.
+  - Altri provider con alias (Outlook `.` e `+`, ProtonMail `+`, ecc.) sono bloccati? In alternativa viene normalizzato solo Gmail?
+- **Discovered**: 2026-04-23
+
+---
+
+## 02.4 — Welcome email
+
+### [02.4.1] 🔴 Temporary password inviata IN CHIARO via email
+
+- **Fase**: 02
+- **Area**: Welcome email / Security
+- **Tipo**: 🔴 Bug
+- **Severity**: **Medium-High** (security — password in plaintext su canale non crittografato end-to-end)
+- **Environment**: prod
+- **Steps to reproduce**:
+  1. Completa signup trial
+  2. Controlla inbox della email di signup
+  3. Apri la email "Welcome to SentriKat Early Access — Your Account is Ready!"
+- **Expected**: nessuna password in chiaro nell'email. Best practice possibili:
+  - Magic link one-time (token JWT) per primo login → utente fa subito reset password
+  - Oppure: email dice solo "Go to `app.sentrikat.com/login`, use your email, we'll send a 6-digit code" (stile OTP come già fa il portal)
+  - Oppure: password temp consegnata tramite secondo canale (SMS, pagina post-signup visibile solo una volta)
+- **Actual**: email contiene la **temporary password in chiaro** (es. `922DaVMks3giMNhI`) visibile come testo selezionabile nel corpo dell'email, accanto all'URL di login e alla email dell'utente. Screenshot:
+  ```
+  Login URL:          https://app.sentrikat.com/login
+  Email:              musicaaddiction49@gmail.com
+  TEMPORARY PASSWORD  922DaVMks3giMNhI
+  You will be asked to change this password on first login.
+  ```
+- **Attack model**:
+  - Se un attaccante compromette l'email provider della vittima (phishing, password reuse, breach DB provider, SIM swap → reset email) ha accesso immediato al prodotto prima che la vittima si accorga
+  - Email gateway/SMTP intermediari possono loggare il body in chiaro (rischio insider/SIEM leak)
+  - Email NON cifrata end-to-end: chiunque sniffi il traffico SMTP pre-TLS o acceda al mailbox legge la password
+  - Account takeover: attaccante logga, cambia password, manda reset email, blocca vittima
+- **Mitigazione attuale**: `"You will be asked to change this password on first login"` → la temp password ha vita breve. Ma **se l'attaccante logga prima della vittima, diventa lui a fare il forced change** e l'account è perso.
+- **Fix candidato**:
+  - Magic link one-time che scade in 15 min, no password nel body
+  - Dopo click, pagina che richiede set password + opzionalmente 2FA immediato
+  - In alternativa: OTP via email a ogni login (modello passwordless), senza temporary password
+- **File sospetto**:
+  - Backend SentriKat core: template email welcome trial (probabilmente in `app/email_alerts.py` o `app/provision_api.py`)
+  - Template HTML: cercare stringa "Temporary Password" in `app/templates/` o `app/email_templates/`
+- **Discovered**: 2026-04-23
+
+### [02.4.2] 🟡 Valuta email in dollari ($) mentre il sito usa euro (€)
+
+- **Fase**: 02
+- **Area**: Welcome email / i18n / pricing
+- **Tipo**: 🟡 Warning
+- **Severity**: Medium (coerenza brand, fiducia cliente — lo customer si chiede "quanto pagherò? dollari o euro?")
+- **Actual**: email mostra "`Starter (Early Access — $0)`" con simbolo dollaro. Il resto del sito (`/pricing`, Stripe checkout, Contact Sales agent packs) usa **€ EUR**.
+- **Consistency check vs mappa repo**:
+  - Landing pricing: €
+  - Stripe agent upgrade: €999/yr Priority, €199/mo Compliance
+  - Portal admin pricing config: atteso €
+  - Email template: $ ← incoerente
+- **Impatto**:
+  - Confusione utente al prossimo upgrade paid (si aspetta USD, vede EUR)
+  - Argomento particolarmente sensibile per CH/EU customers (SentriKat è Swiss-focused)
+- **Fix candidato**:
+  - Template email: sostituire `$` con `€` per plan price display, O usare un formato locale-aware
+  - Idealmente: leggere la valuta dal Plan.currency nel DB invece di hardcodarla
+- **File sospetto**: template welcome email (core backend `app/` + stringa "Early Access — $0")
+- **Discovered**: 2026-04-23
+
+### [02.4.3] 🟡 Layout email: enorme spazio nero a sinistra (template non responsive / half-width)
+
+- **Fase**: 02
+- **Area**: Welcome email / template HTML
+- **Tipo**: 🟡 Warning
+- **Severity**: Low-Medium (brand/UX)
+- **Actual**: screenshot mostra che il contenuto dell'email occupa solo la **metà destra** del viewport email client, con enorme spazio nero vuoto a sinistra. Il layout sembra essere "pinned right" invece di "centered" o "full-width".
+- **Possibili cause**:
+  - CSS `margin-left: auto` senza `margin-right: auto` → pinned right
+  - Uso di table layout con `align="right"` su container invece di `align="center"`
+  - Media query responsive rotta su desktop
+  - Dark mode del client email invertito (Gmail/Outlook a volte invertono colori; forse il template non è dark-mode-safe e lo spazio "nero" è in realtà CSS var sballata)
+- **Verifica aggiuntiva (da chiedere)**:
+  - L'email è aperta in Gmail web? App Gmail mobile? Client?
+  - Se spostata in "light mode" del client (o aperta in modalità base HTML) il layout torna centrato?
+- **Fix candidato**:
+  - Usare table-based email template (standard per compatibilità email client)
+  - Max-width 600px centered con margin auto
+  - Testare con Litmus/Mail-Tester su 10+ client (Gmail web/mobile, Outlook 2016/365, Apple Mail, Yahoo)
+- **Discovered**: 2026-04-23
+
+### [02.4.4] Welcome email contenuto — rimanenti aspetti ✅ (con follow-up)
+
+- **Fase**: 02
+- **Area**: Welcome email
+- **Tipo**: 🟢 OK + 🔵 Info
+- **Attributi verificati**:
+  - Subject: `"Welcome to SentriKat Early Access — Your Account is Ready!"` ✅
+  - Sender: `SentriKat <noreply@sentrikat.com>` ✅
+  - Contenuto: plan, email, login URL, temp password, getting started (4 step), managing licenses section con rimando a `portal.sentrikat.com` ✅
+  - Menzione del doppio sistema auth: `app.sentrikat.com` (password) vs `portal.sentrikat.com` (OTP 6-digit) ✅ — coerente con architettura mappata
+- **Follow-up TODO**:
+  - 02.4.5 SPF/DKIM/DMARC: verificare da Gmail "Show original" che l'email passi SPF=pass, DKIM=pass, DMARC=pass
+  - 02.4.6 Reply-to: verificare che un reply arrivi a `support@` o `hello@` e non a `noreply@` (black hole)
+  - 02.4.7 Link tracking: ci sono redirect tracking sui link (tipo `click.sentrikat.com/r/...`)? Se sì, sono sicuri/consistenti?
+  - 02.4.8 Unsubscribe: c'è link List-Unsubscribe header (obbligatorio per Gmail/Yahoo 2024+)?
+- **Discovered**: 2026-04-23
+
+---
+
+## 02.8 — Edge 409 duplicate (parziale)
+
+### [02.8.1] 409 su email non accettate ✅
+
+- **Tipo**: 🟢 OK (parziale, vedi follow-up in 02.3.2)
+- **Actual**: 2 tentativi con alias Gmail → 409 entrambi
+- **Discovered**: 2026-04-23
+- **Follow-up TODO 02.8.2**: vero duplicate (stessa email già registrata in precedenza, senza alias) — testare con l'email del trial passato per confermare 409 + messaggio UI chiaro.
+
+---
+
+## 02.15 — Deployment type switcher
+
+### [02.15.1] Plan picker nascosto quando deployment=on-prem ✅
+
+- **Tipo**: 🟢 OK
+- **Actual**: utente conferma "sparisce" il plan picker (Starter/Pro/Business/Enterprise) quando si passa da SaaS a On-prem — behavior corretto (piani SaaS non applicabili on-prem, i piani on-prem passano da contact-sales / licensing dedicato).
+- **Discovered**: 2026-04-23
+
+---
+
+## Follow-up cross-fase
+
+### [01.1.2] 🔵 DOMContentLoaded 4.99s + Finish 4.1 min — possibile revisione "velocissimo" (01.1.1)
+
+- **Fase**: 01 → cross-ref
+- **Area**: Performance
+- **Tipo**: 🔵 Info (da rivalidare)
+- **Actual**: dagli screenshot di DevTools in fase 02 risulta `DOMContentLoaded: 4.99s` e `Finish: 4.1 min` sulla pagina `/#trial` con 37 requests / 6.8 kB transferred / 1.2 MB resources
+- **Note**:
+  - `Finish: 4.1 min` è probabilmente dovuto a "Preserve log" attivato durante l'intera sessione (somma di tutto il tempo con tab aperta), non un tempo di caricamento reale
+  - `DOMContentLoaded: 4.99s` è più interessante: per una pagina Astro static dovrebbe essere sub-secondo. Possibili cause: hydration React islands pesanti, CSP block del font che causa layout shift/timeout, risorse bloccanti
+- **Follow-up**: ricaricare `/` in tab fresco senza Preserve log e misurare `DOMContentLoaded`. Se davvero è >3s su prod → bug performance (riclassificare 01.1.1 da 🟢 a 🟡)
+- **Discovered**: 2026-04-23

@@ -105,14 +105,15 @@ Ogni bug/osservazione va aggiunta con questo schema:
 | 2026-04-23 | 01 | vs/ + SEO artifacts + 404 | vs/ OK, sitemap/robots/rss/security.txt OK, 🔴 bug 404→home redirect (01.17.1) |
 | 2026-04-23 | 01 | Blog + form rendering + capacity | blog OK (post IT mischiato), contact/demo/contact-sales/feedback rendering OK, capacity `{"active":2,"capacity":30,"status":"open"}` |
 | 2026-04-23 | 01 | **FASE 01 chiusa** | 3 bug (2 High, 1 Med), 1 warning, 3 info, 18 OK — pronto per fase 02 |
+| 2026-04-23 | 02 | Happy path trial SaaS (submit+email) | 🔴 02.4.1 temp password in plaintext via email (Med-High); 🔴 02.2.1 validation in DE; 🟡 02.4.2 valuta $ vs €; 🟡 02.4.3 email layout; 🟢 form rendering + 201 + deployment switcher + terms-block OK |
 
 ---
 
 ## Bug counter globale
 
-- 🔴 Bug: 3
-- 🟡 Warning: 1
-- 🔵 Info/UX: 3
-- 🟢 OK passati: 18
+- 🔴 Bug: 5
+- 🟡 Warning: 3
+- 🔵 Info/UX: 4
+- 🟢 OK passati: 24
 
 *(aggiornati a mano ad ogni commit)*
