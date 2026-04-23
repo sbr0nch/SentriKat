@@ -1155,6 +1155,83 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 
 ---
 
+### 03.11.7 — SIEM / Syslog → testlab syslog-receiver
+
+#### [03.11.7.1] Form SIEM/Syslog rendering + config options ✅
+
+- **Fase**: 03
+- **Area**: Settings → SIEM / Syslog
+- **URL**: `http://localhost/admin/settings` (tab "SIEM / Syslog")
+- **Tipo**: 🟢 OK
+- **Actual — form contiene**:
+  - Header: `"SIEM / Syslog Forwarding"`
+  - Description: `"Forward vulnerability events to your SIEM (Splunk, ELK, ArcSight, QRadar) via syslog. Supports CEF, JSON, and RFC 5424 formats over UDP or TCP."`
+  - Toggle: Enable Syslog Forwarding (ON)
+  - Syslog Server Host: text
+  - Port: number
+  - Protocol: dropdown **UDP / TCP**
+  - Event Format: dropdown **RFC 5424 / CEF / JSON**
+  - Facility: dropdown (local0 default)
+  - Buttons: Save Settings | Send Test Event
+- **Positivi**:
+  - Descrizione menziona esplicitamente i 4 SIEM vendor più comuni (Splunk, ELK, ArcSight, QRadar) → UX chiara
+  - Supporto multi-format (CEF, JSON, RFC 5424) + multi-protocol (UDP, TCP) → coverage enterprise
+- **Discovered**: 2026-04-23
+
+#### [03.11.7.2] Save + Test Event: NO SSRF blocking (come atteso, syslog non è HTTP outbound) ✅
+
+- **Fase**: 03
+- **Area**: SIEM / Syslog + policy SSRF uniformity
+- **Tipo**: 🟢 OK
+- **Config utilizzata**:
+  - Host: `host.docker.internal`
+  - Port: `5514`
+  - Protocol: UDP
+  - Format: RFC 5424 (Standard Syslog)
+  - Facility: local0
+- **Actual**:
+  - Save → nessun errore 400 SSRF
+  - Send Test Event → lavoro senza errori UI
+  - Log backend: nessuna riga `SSRF blocked` per syslog → **syslog bypassa la validation SSRF** (coerente: usa socket UDP/TCP dedicato, non HTTP client)
+- **Conferma policy map** (vedi tabella riassuntiva commit `1d55762`):
+  - SIEM / Syslog → UDP/TCP dedicato → **NON SSRF-gated** ✅
+- **Discovered**: 2026-04-23
+
+#### [03.11.7.3] End-to-end delivery su testlab-syslog confermato ✅ (prima integrazione outbound funzionante nel nostro env)
+
+- **Fase**: 03
+- **Area**: SIEM / Syslog / dim 1 happy path + dim 7 integration
+- **Tipo**: 🟢 OK
+- **Verifica**: `docker logs -f testlab-syslog` mostra "un sacco di contenuto" al click di Send Test Event
+- **Interpretazione**:
+  - SentriKat apre socket UDP verso `host.docker.internal:5514`
+  - testlab-syslog (alpine + socat listener su 5514 UDP+TCP) riceve e stampa stdout
+  - Docker logs cattura e rende visibile
+- **Status area**:
+  - ✅ dim 1 Happy path — save + test + delivery OK
+  - ✅ dim 2 Persistence — da verificare (restart container sentrikat, check config)
+  - ⬜ dim 3 CRUD — disable syslog forwarding, rewire, re-enable
+  - ⬜ dim 5 State transitions — syslog destination down (stoppare testlab-syslog) → SentriKat logga fallimento ma non crasha?
+  - ⬜ dim 6 Negative — host invalido, port fuori range, format invalido
+  - ⬜ dim 7 Integration profonda — verificare che eventi REALI (login utente, CVE match, remediation action) finiscano in syslog, non solo test event
+- **Follow-up TODO 03.11.7.3a**: catturare il messaggio syslog effettivo per vedere formato RFC 5424 effettivo (timestamp, hostname, app name, PID, structured data, msg) e validare che sia parsabile da Splunk/ELK/ArcSight
+- **Follow-up TODO 03.11.7.3b**: in fase 7 (agents + inventory) vedere se il discovery di un nuovo asset genera evento syslog appropriato
+- **Discovered**: 2026-04-23
+
+#### [03.11.7.4] 🔵 Info — "Un sacco di contenuto" al singolo test event suggerisce multi-line o flood
+
+- **Fase**: 03
+- **Area**: SIEM / Syslog / event volume
+- **Tipo**: 🔵 Info (da chiarire)
+- **Actual**: utente descrive che il click Send Test Event ha generato "un sacco di contenuto" in `docker logs -f testlab-syslog`
+- **Due scenari possibili**:
+  - **A**: un singolo evento test multi-line (es. RFC 5424 con structured data lunghi + eventi aggiuntivi per header SIEM) — normale
+  - **B**: il click Send Test Event triggera multipli eventi (es. test + audit log entry + session event) — potenzialmente un bug di flooding
+- **Follow-up TODO 03.11.7.4a**: contare i messaggi arrivati per un singolo click Test Event e vedere se sono 1 (atteso) o più. Se >3 è bug di flooding → da aprire come bug puntuale
+- **Discovered**: 2026-04-23
+
+---
+
 ### 03.11.6 — Lateral test: GitHub / GitLab / YouTrack (SSRF uniformity check)
 
 Obiettivo di questo mini-test: determinare se la policy SSRF (`ALLOW_PRIVATE_URLS` ignorato in prod) è uniforme su tutti gli issue tracker con URL configurabile.
