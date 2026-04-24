@@ -3139,7 +3139,15 @@
                             <i class="bi bi-person"></i>
                             All Users
                         </a>
-                        {% set has_ldap = (saas_mode and subscription and subscription.has_feature('ldap')) or (not saas_mode and license and license.is_professional()) %}
+                        {# has_ldap mirrors the gating used for the Authentication
+                           settings link above: a super_admin can always see and
+                           manage LDAP (platform support), otherwise require an
+                           LDAP-capable subscription (SaaS) or Pro license
+                           (on-prem). Previously this block omitted the super_admin
+                           bypass, which hid LDAP Users / LDAP Groups from
+                           super_admins on Community/DEMO even though they could
+                           configure LDAP upstream — see bug [03.11.2.3]. #}
+                        {% set has_ldap = is_platform_admin or (saas_mode and subscription and subscription.has_feature('ldap')) or (not saas_mode and license and license.is_professional()) %}
                         {% if has_ldap %}
                         <a href="/admin-panel#ldapUsers" class="sidebar-sublink" data-hash="ldapUsers">
                             <i class="bi bi-diagram-3"></i>
@@ -3288,8 +3296,13 @@
                 </div>
                 {% endif %}
 
-                {# Platform Operations — Sprint 6 cross-repo visibility (super_admin only). #}
-                {% if current_user and current_user.is_super_admin() %}
+                {# Platform Operations — Sprint 6 cross-repo visibility.
+                   SaaS-only: these pages surface webhook events pushed by the
+                   upstream SentriKat-web license server and usage metering
+                   uploads sent to it. On on-prem installations there is no
+                   upstream license server, so the section must stay hidden
+                   (see bug [03.6.6]). #}
+                {% if saas_mode and current_user and current_user.is_super_admin() %}
                 <div class="sidebar-nav-section">
                     <div class="sidebar-nav-title">Platform Operations</div>
                     <a href="#" class="sidebar-link" onclick="toggleSubmenu(this, event)" data-tooltip="Cross-Repo Integration">

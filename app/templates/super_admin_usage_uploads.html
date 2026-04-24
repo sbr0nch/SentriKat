@@ -84,14 +84,11 @@
         </div>
     </div>
     {% else %}
-    <div class="alert alert-info">
+    <div class="alert alert-info mb-0">
         No usage uploads have been performed yet. The metering job runs
-        hourly at minute :05. You can trigger it manually with:
-        <pre class="mb-0 mt-2"><code>docker compose exec sentrikat python -c "
-from app import create_app
-from app.scheduler import usage_metering_upload_job
-usage_metering_upload_job(create_app())
-"</code></pre>
+        hourly at minute :05. If you need to trigger it out-of-band,
+        follow the operator runbook rather than running raw Python from
+        the container.
     </div>
     {% endif %}
 </div>
