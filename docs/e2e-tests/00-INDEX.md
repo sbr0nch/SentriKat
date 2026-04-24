@@ -307,19 +307,20 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 | 2026-04-23 | 03 | SMTP → Mailpit configurata da UI | 🟢 save + test UI feedback verde, config persistente; ⏳ consegna email in Mailpit (http://localhost:8025) pending verifica utente; 🟡 03.11.1.5 password field mostra `••••••••` senza password reale (misleading); 🔵 03.11.1.3 subtitle hardcoded "LDAP configuration..." cross-ref [02.7.7]; 🔵 03.11.1.4 label inconsistency sidebar "Email (SMTP)" vs tab "Email & Alerts"; 🔵 03.11.1.6 nessun campo Reply-To nel form; 🔵 03.11.1.7 copy multi-tenant "Default SMTP for all orgs" esposto anche in DEMO single-org; 🔵 03.11.1.8 helper text port non include dev port 1025 |
 | 2026-04-23 | 03 | SMTP delivery verificata in Mailpit | 🟢 2 email arrivate in Mailpit (http://localhost:8025) con From=noreply@sentrikat.local, To=admin, Subject "SentriKat SMTP Test - Configuration Successful" — pipeline SMTP client→testlab funziona, nessuna delivery a Internet; 🔵 03.11.1.9 nessun throttling sui test email; 🔵 03.11.1.10 body test email espone host+port SMTP in plaintext (info disclosure minore) |
 | **2026-04-26** | — | **🔧 SESSION FIX — Batch 1 core** (laptop remoto, scope SentriKat only) | Creato `FIX-HANDOFF-sentrikat-web.md` per bug scoped al secondo repo. Applicati fix in SentriKat core:<br>✅ **[03.5.3]** VERSION file beta.2→beta.6 + guard CI release.yml (fail-fast se VERSION≠tag) — `VERSION`, `.github/workflows/release.yml`<br>❌ **[03.7.3]** FALSE POSITIVE — template ha già `/api/license/events` corretto al tag beta.6. Probabile mis-trascrizione `i`→`1` nel test. Bug chiuso senza fix codice<br>✅ **[03.6.6]** + **[03.7.2]** + **[03.7.4]** (1 fix consolidato) — sidebar Platform Operations gated con `saas_mode`, route `/super-admin/webhook-events` e `/super-admin/usage-uploads` restituiscono 404 in on-prem, rimosso comando Python debug dal template usage uploads — `app/templates/base.html`, `app/observability_api.py`, `app/templates/super_admin_usage_uploads.html`<br>✅ **[03.12.14]** agent error messages richer — `get_agent_api_key()` ora ritorna reason-code specifico (`missing_api_key`/`invalid_api_key`/`inactive_api_key`/`expired_api_key`/`ip_not_allowed`) invece del generico "Invalid or missing API key". `api_docs.py` OpenAPI spec aggiornata — `app/agent_api.py`, `app/api_docs.py`<br>✅ **[03.11.2.3]** sidebar LDAP Users/Groups regressione — aggiunto `is_platform_admin` al gating di `has_ldap` in modo che super_admin on-prem DEMO le veda (allineamento con Authentication settings) — `app/templates/base.html`<br>✅ **[03.11.4.5]** SSRF `ALLOW_PRIVATE_URLS` — CRITI spam log ridotto a 1 warning single-shot, UI error arricchito con hint su `FLASK_ENV=development`, docstring aggiornato — `app/network_security.py`<br>**Verifica differita**: laptop principale con docker → rebuild + rigiro test sulle aree fixate |
+| **2026-04-26** | — | **🔧 SESSION FIX — Batch web (parallela)** (sbr0nch/SentriKat-web, branch `claude/fix-sentrikat-e2e-handoff-gsI9M`, PR aperta dall'utente) | **12/12 bug del handoff fixati**, 9 commit atomici, HEAD `b766153`. Dettaglio in `docs/e2e-tests/FIX-HANDOFF-sentrikat-web.md` — Progress log. Highlights:<br>✅ **[04.1.3] CRITICAL OTP** (`524208b`) — root cause **NON** era PR #231 come ipotizzato in handoff: era `send_email` + `BackgroundTasks` che catturavano ogni eccezione con `print(...)` → response sempre 200 anche su fallimento SMTP. Fix: `logger.exception` + `await` sincrono + return 500 esplicito<br>✅ **[02.4.1]** + **[02.4.2]** (`0f93867`) — temp password plaintext rimossa, redirect a forgot-password (OTP); `$0`→`€0`<br>✅ **[01.17.1]** (`06f157d`) — nginx `try_files =404` + `error_page /404.html`<br>✅ **[01.2.1]** (`dec104a`) — CSP allow-list Google Fonts (self-hosting resta follow-up)<br>✅ **[01.8.1]** (`e339bdd`) — CookieBanner rewrite difensivo (3 cause plausibili coperte)<br>✅ **[02.2.1]** (`004d25c`) — `setCustomValidity` EN su terms checkbox<br>✅ **[01.16.4]** (`bd7bf25`) — `security.txt` Preferred-Languages: en<br>✅ **[01.9.1]** + **[01.12.3]** (`beb7d27`) — blog i18n minimale con badge lingua (Option B)<br>✅ **[01.16.1]** — verified only, no fix needed<br>✅ **[02.3.2]** (`b766153`) — specialized 409 message per Gmail `+tag`<br>⏸️ **[02.4.5-4.8]** email deliverability (SPF/DKIM/DMARC/Reply-To/List-Unsubscribe) — **non fixati**, richiedono modifiche DNS + decisione architetturale. Da trattare in sessione dedicata<br>**Verifica differita**: laptop principale → testare login portal OTP in prod |
 
 ---
 
 ## Bug counter globale
 
-**Post batch fix 2026-04-26** (core repo, SentriKat-web pending):
+**Post batch fix 2026-04-26** (core + SentriKat-web, entrambi i batch completati, verifica differita):
 
-- 🔴 Bug: **23** (1 CRITICAL, 10 High) *(-6: 5 fix + 1 falso positivo; OTP CRITICAL resta, scoped al secondo repo)*
-- 🟡 Warning: 13
-- 🔵 Info/UX: 65
+- 🔴 Bug: **12** (0 CRITICAL ancora aperti dopo fix, 5 High non ancora tentati) *(-17 rispetto alle 29 di ieri: 5 core + 1 FP + 11 web)*
+- 🟡 Warning: **10** *(-3: 02.2.1, 02.4.2, 01.9.1 fixati)*
+- 🔵 Info/UX: **61** *(-4: 01.12.3, 01.16.1 verified, 01.16.4, 02.3.2 fixati)*
 - 🟢 OK passati: 100
-- ⏸️ Test bloccati: **6** *(-2: 03.11.2.9 e 03.11.4.5 sbloccati dopo i fix di questa sessione, da riverificare sul laptop principale)*
-- ✅ Fix applicati: **7** *(5 bug + 1 falso positivo + 1 batch consolidato)*
+- ⏸️ Test bloccati: **5** *(-3: 03.11.2.9 via 03.11.2.3, 03.11.4.5, 04.1.3 via web fix)*
+- ✅ Fix applicati: **19** *(7 core + 12 web)*, tutti **unverified** (pending rebuild + regression test sul laptop principale)
 
 *(aggiornati a mano ad ogni commit)*
 
@@ -329,16 +330,18 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 Test che non sono eseguibili finché non viene risolto un bug a monte. Da riprendere dopo la fase di fix.
 
-| Test ID | Fase/Area | Sommario | Bloccato da |
+**Legenda post-fix 2026-04-26**: `🔧` = fix applicato (unverified), pronto per re-test sul laptop principale. `⏸️` = ancora bloccato.
+
+| Test ID | Fase/Area | Sommario | Stato |
 |---|---|---|---|
-| ⏸️ 03.11.2.9 | 03 / LDAP login | Login di un utente LDAP seedato non può essere testato significativamente finché non c'è la pagina admin per "accettare/invitare" l'utente LDAP prima del login | [03.11.2.3] Sidebar LDAP Users / LDAP Groups sparita |
-| ⏸️ 03.11.4 (all) | 03 / Jira integration | Test funzionali Jira non eseguibili con testlab docker in `FLASK_ENV=production` (policy SSRF hardening ignora `ALLOW_PRIVATE_URLS`) | [03.11.4.5] + hardening policy in production mode |
-| ⏸️ 03.11.5 (all) | 03 / Webhook | Test funzionali Webhook out bloccati dalla stessa policy SSRF | [03.11.5.2] stesso root cause di 03.11.4.5 |
-| ⏸️ 03.11.6.4 | 03 / GitLab | Test funzionali GitLab bloccati dalla stessa policy SSRF | stesso root cause di 03.11.4.5 |
-| ⏸️ 03.11.6.8 | 03 / YouTrack | Saltato in questa sessione (pattern atteso uguale), test rinviato a post-fix | stesso root cause presunto |
-| ⏸️ 03.12.6–15 | 03 / Agent inventory | Agent install OK ma initial scan 403/401 con messaggio fuorviante "Invalid API key". Key attiva nel DB (`active=t`, usage_count=3). Root cause vero nascosto da messaggio generico | [03.12.14] + possibilmente license-server-upstream validation in DEMO |
-| ⏸️ 04.1.3 (Phase 04 intera) | 04 / Portal Customer OTP | OTP email non arriva nonostante response 200 OK. Regressione confermata: funzionava 7 giorni fa, rotto ≥ 2026-04-24. Intero portal customer (dashboard, licenses, downloads, support, checkout) non raggiungibile | PR #231 `wrap enqueue_webhook_event in try/except` sospettata principale |
-| ⏸️ 06.6.1 (dim 4 RBAC matrix) | 06 / App SaaS RBAC | Matrix role-based dei 3 users SaaS Starter non testabile: i 2 user creati (manager, user) non ricevono invite email (stesso cluster SMTP di 04.1.3). Impossibile loggare come non-admin per verificare sidebar/permissions | [06.4.1] invite email not delivered (same SMTP cluster as 04.1.3) |
+| 🔧 03.11.2.9 | 03 / LDAP login | Login di un utente LDAP seedato non può essere testato significativamente finché non c'è la pagina admin per "accettare/invitare" l'utente LDAP prima del login | **Unblocked** dopo fix [03.11.2.3] (commit `d44fcd0`). Re-test richiede rebuild on-prem docker |
+| 🔧 03.11.4 (all) | 03 / Jira integration | Test funzionali Jira non eseguibili con testlab docker in `FLASK_ENV=production` (policy SSRF hardening ignora `ALLOW_PRIVATE_URLS`) | **Unblocked parzialmente**: [03.11.4.5] fixato in log + UI hint (commit `4bf0afd`), la policy hardening resta by-design. Workaround: passare a `FLASK_ENV=development` per test locale |
+| 🔧 03.11.5 (all) | 03 / Webhook | Test funzionali Webhook out bloccati dalla stessa policy SSRF | **Unblocked** con stesso workaround di 03.11.4 |
+| 🔧 03.11.6.4 | 03 / GitLab | Test funzionali GitLab bloccati dalla stessa policy SSRF | **Unblocked** con stesso workaround |
+| 🔧 03.11.6.8 | 03 / YouTrack | Saltato in questa sessione (pattern atteso uguale), test rinviato a post-fix | **Unblocked** con stesso workaround |
+| ⏸️ 03.12.6–15 | 03 / Agent inventory | Agent install OK ma initial scan 403/401 con messaggio fuorviante "Invalid API key". Key attiva nel DB (`active=t`, usage_count=3). Root cause vero nascosto da messaggio generico | **Message migliorato** dopo [03.12.14] fix (commit `4327d27`) ma root cause reale (`[03.13.2]` Push Agents gated su Community) resta — upgrade a Professional richiesto per test completo |
+| 🔧 04.1.3 (Phase 04 intera) | 04 / Portal Customer OTP | OTP email non arriva nonostante response 200 OK. Regressione confermata: funzionava 7 giorni fa, rotto ≥ 2026-04-24. Intero portal customer (dashboard, licenses, downloads, support, checkout) non raggiungibile | **Unblocked** dopo fix SentriKat-web commit `524208b` (root cause: `send_email` swallow con `BackgroundTasks`, NON era PR #231). Re-test: login portal con OTP in prod dopo deploy |
+| 🔧 06.6.1 (dim 4 RBAC matrix) | 06 / App SaaS RBAC | Matrix role-based dei 3 users SaaS Starter non testabile: i 2 user creati (manager, user) non ricevono invite email (stesso cluster SMTP di 04.1.3) | **Unblocked** presunto dopo fix `524208b` (stesso cluster `send_email`). Re-test: inviare invite e verificare delivery |
 
 **Regola operativa**: quando un test fallisce ma è chiaro che dipende da un altro bug non ancora fixato, lo spostiamo qui invece di marcarlo come "bug autonomo" (evita falsi positivi sul conteggio bug). Riapriremo questi test in una seconda passata dopo la fase fix, in ordine di dipendenza (prima i fix bloccanti, poi i test sbloccati).
 

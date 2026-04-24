@@ -255,9 +255,40 @@ Alcuni bug potrebbero avere il fix **sia** in SentriKat-web **sia** in SentriKat
 
 ## Progress log (da aggiornare mano a mano dalla sessione SentriKat-web)
 
+Sessione SentriKat-web aperta **2026-04-26** su branch `claude/fix-sentrikat-e2e-handoff-gsI9M` (poi PR aperta dall'utente). **12/12 bug del handoff fixati**, 9 commit atomici, HEAD `b766153`.
+
 | Data | Bug ID | Commit SHA | Note |
 |---|---|---|---|
-| _pending_ | — | — | Sessione non ancora aperta |
+| 2026-04-26 | 04.1.3 | `524208b` | OTP CRITICAL: `logger.exception` in `send_email` + `await` sincrono in `/portal/auth/request-otp`, restituisce 500 on fail invece di 200 bugiardo. **Root cause reale**: `send_email` + `BackgroundTasks` catturavano ogni eccezione con `print(...)` → response sempre 200 anche su fallimento SMTP. **PR #231 NON era la causa** (nonostante sospetto nell'handoff) |
+| 2026-04-26 | 02.4.1 | `0f93867` | SaaS welcome email: rimossa temp password plaintext, redirect a flow forgot-password (OTP). File: `license-server/app/{core/email,api/trial,api/payments}.py` |
+| 2026-04-26 | 02.4.2 | `0f93867` | Welcome email: `$0` → `€0` (co-fix con 02.4.1) |
+| 2026-04-26 | 01.17.1 | `06f157d` | `landing/nginx.conf`: `try_files … =404` + `error_page /404.html` invece di fallback a `/` |
+| 2026-04-26 | 01.2.1 | `dec104a` | `nginx/sites/landing.conf` CSP: aggiunti `fonts.googleapis.com` in `style-src` + `fonts.gstatic.com` in `font-src`. Self-hosting fonts resta follow-up |
+| 2026-04-26 | 01.8.1 | `e339bdd` | `CookieBanner.astro`: rewrite difensivo — inline `style.display` + `localStorage` try/catch + `DOMContentLoaded` listener. Copre le 3 cause plausibili senza poter riprodurre |
+| 2026-04-26 | 02.2.1 | `004d25c` | `TrialSignup.astro`: `setCustomValidity("Please accept…")` EN sul terms checkbox invalid, bypassa il tooltip native browser locale-based |
+| 2026-04-26 | 01.16.4 | `bd7bf25` | `security.txt` (entrambe le copie): `Preferred-Languages: en` (era `en, it, de` su sito EN-only) |
+| 2026-04-26 | 01.9.1 | `beb7d27` | Blog i18n minimale (Option B): schema `lang`, frontmatter `lang: it` sul post IT, badge amber in index + layout |
+| 2026-04-26 | 01.12.3 | `beb7d27` | co-fix con 01.9.1 |
+| 2026-04-26 | 01.16.1 | — | Verified only: `astro.config.mjs` filtra `/impressum` correttamente, no fix needed |
+| 2026-04-26 | 02.3.2 | `b766153` | `trial.py` helper `_dup_signup_detail` → messaggio specifico `EMAIL_ALIAS_NOT_ACCEPTED` sul 409 con `+tag`; frontend specializza UI message. Interpretazione "specialize" scelta rispetto a "block upfront" (meno invasiva, mantiene dedup canonico) |
+
+### ⚠️ Non fixati — da discutere architetturalmente
+
+**[02.4.5–4.8] Email deliverability hardening** (SPF/DKIM/DMARC/Reply-To/List-Unsubscribe):
+- Classificati come `Info` nel handoff perché richiedono:
+  - Modifiche DNS (ops, non code) per SPF/DKIM/DMARC — fuori scope code-fix
+  - Test reali con `mail-tester.com`
+  - Decisione architetturale su Reply-To mailbox e endpoint `List-Unsubscribe` one-click RFC 8058
+- **Raccomandazione altra sessione**: trattarli in una sessione/issue dedicata, non nel batch fix
+- **TODO mio**: quando torni al laptop principale decidere se aprire issue separata o rimandare al testing round 2
+
+### Scelte di design che hanno richiesto giudizio (documentate dall'altra sessione)
+
+1. **[04.1.3]**: fix con propagazione sincrona (converti `request_otp` a `async def`, drop `BackgroundTasks`) per soddisfare criterio "500 con error specifico". Refactor contenuto a una route
+2. **[01.2.1]**: fallback allow-list CSP invece di self-hosting — consistente con disclosure già presente in `/privacy` verso Google Fonts. Self-hosting resta follow-up
+3. **[01.8.1]**: non riproducibile nel browser, rewrite difensivo che copre tutte e 3 le cause plausibili
+4. **[01.9.1]**: Option B (default del handoff) — badge IT + nota italic "This post is in Italian", senza i18n completo
+5. **[02.3.2]**: interpretazione "specialize message" invece di "block upfront"
 
 ---
 
