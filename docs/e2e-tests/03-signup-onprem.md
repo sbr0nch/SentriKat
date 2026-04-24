@@ -68,7 +68,7 @@
   ```
 - **Discovered**: 2026-04-23
 
-### [03.5.3] 🔴 VERSION file hardcoded a `1.0.0-beta.2` nel tag `v1.0.0-beta.6`
+### [03.5.3] 🔴 VERSION file hardcoded a `1.0.0-beta.2` nel tag `v1.0.0-beta.6` — ✅ FIX APPLICATO 2026-04-26 (da riverificare)
 
 - **Fase**: 03
 - **Area**: Release process / version reporting
@@ -233,7 +233,7 @@
 - **Fix candidato**: step 2/3/4 usano `Next →`, solo step 6 (Finalize?) usa `Finish →` o `Complete →`
 - **Discovered**: 2026-04-23
 
-### [03.6.6] 🔴 Dopo login as admin, sidebar mostra "Platform Operations" (sezione SaaS) su installazione on-prem
+### [03.6.6] 🔴 Dopo login as admin, sidebar mostra "Platform Operations" (sezione SaaS) su installazione on-prem — ✅ FIX APPLICATO 2026-04-26 (da riverificare)
 
 - **Fase**: 03
 - **Area**: Post-setup / sidebar / mode gating
@@ -389,7 +389,7 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
   - SaaS Starter ha solo `Alert Management / Email & Notifications / Subscription` sotto Settings (3 voci) — feature gating coerente.
 - **Discovered**: 2026-04-23
 
-### [03.7.2] 🔴 HIGH — `Webhook Events` page: contenuto 100% SaaS-specific esposto in on-prem
+### [03.7.2] 🔴 HIGH — `Webhook Events` page: contenuto 100% SaaS-specific esposto in on-prem — ✅ FIX APPLICATO 2026-04-26 (da riverificare — ora 404 in on-prem)
 
 - **Fase**: 03
 - **Area**: Platform Operations / mode gating
@@ -410,7 +410,7 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 - **Note**: parla esplicitamente di "upstream SentriKat-web license server" che gestisce "plan change, revocation, suspension" — concetti SaaS puri. Su on-prem DEMO/PRO non c'è un upstream license server che manda questi eventi.
 - **Discovered**: 2026-04-23
 
-### [03.7.3] 🔴 HIGH — Typo nell'endpoint documentato: `POST /ap1/license/events`
+### [03.7.3] 🔴 HIGH — Typo nell'endpoint documentato: `POST /ap1/license/events` — ❌ FALSE POSITIVE (chiuso 2026-04-26 — template mostra già `/api/license/events` al tag beta.6; probabile mis-trascrizione `i`→`1` nel test)
 
 - **Fase**: 03
 - **Area**: Platform Operations / Webhook Events / documentazione inline
@@ -427,7 +427,7 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 - **File sospetto**: `app/templates/super_admin_webhook_events.html` (nome template visto nel mapping originale)
 - **Discovered**: 2026-04-23
 
-### [03.7.4] 🔴 HIGH — `Usage Uploads` page: copy parla di "this SaaS" su installazione on-prem
+### [03.7.4] 🔴 HIGH — `Usage Uploads` page: copy parla di "this SaaS" su installazione on-prem — ✅ FIX APPLICATO 2026-04-26 (da riverificare — ora 404 in on-prem + rimosso Python command dal template)
 
 - **Fase**: 03
 - **Area**: Platform Operations / mode gating
@@ -666,7 +666,7 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 - **File sospetto**: template della pagina Authentication/LDAP + possibile pagina "LDAP Group Mapping" separata non linkata dalla sidebar
 - **Discovered**: 2026-04-23
 
-#### [03.11.2.3] 🔴 HIGH — Sidebar "Users & Access" NON espone voci LDAP/Group dopo config
+#### [03.11.2.3] 🔴 HIGH — Sidebar "Users & Access" NON espone voci LDAP/Group dopo config — ✅ FIX APPLICATO 2026-04-26 (da riverificare — ora super_admin su Community vede LDAP Users/Groups)
 
 - **Fase**: 03
 - **Area**: Sidebar / feature discoverability
@@ -1397,7 +1397,7 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 - **Conclusione root cause**: il 401 non è "API key invalid", è un **messaggio di errore FUORVIANTE** che nasconde il vero motivo del rifiuto (scope check? license check? plan gate? org binding?). La key è operativa nel DB ma viene bloccata da un secondo layer di validation
 - **Discovered**: 2026-04-23 (breakthrough diagnostic completo)
 
-#### [03.12.14] 🔴 CRITICAL — Messaggio d'errore `"Invalid or missing API key"` FUORVIANTE: la key è valida ma viene rifiutata da check downstream
+#### [03.12.14] 🔴 CRITICAL — Messaggio d'errore `"Invalid or missing API key"` FUORVIANTE: la key è valida ma viene rifiutata da check downstream — ✅ FIX APPLICATO 2026-04-26 (da riverificare — ora reason-code specifico: missing_api_key / invalid_api_key / inactive_api_key / expired_api_key / ip_not_allowed)
 
 - **Fase**: 03
 - **Area**: Agent auth / error message correctness
@@ -1788,7 +1788,7 @@ Obiettivo di questo mini-test: determinare se la policy SSRF (`ALLOW_PRIVATE_URL
 - **Azione correttiva richiesta prima di procedere**: cambiare Project Key da `SEC` a `VULN`, poi procedere a fetch fields + save + test
 - **Discovered**: 2026-04-23
 
-#### [03.11.4.5] 🔴 HIGH — Validation SSRF su `jira_url` NON rispetta il flag `ALLOW_PRIVATE_URLS=true` (inconsistenza con SMTP/LDAP/SAML)
+#### [03.11.4.5] 🔴 HIGH — Validation SSRF su `jira_url` NON rispetta il flag `ALLOW_PRIVATE_URLS=true` (inconsistenza con SMTP/LDAP/SAML) — ✅ FIX UX APPLICATO 2026-04-26 (log spam ridotto, UI error arricchito con hint `FLASK_ENV=development`; policy security invariata — admin deve cambiare `FLASK_ENV` per testare locale. Sblocca 03.11.4 / 03.11.5 / 03.11.6.4 una volta che l'admin imposta dev mode)
 
 - **Fase**: 03
 - **Area**: Settings / Issue Trackers / SSRF protection / config consistency
