@@ -18,6 +18,30 @@ L'utente ha detto `"per oggi mi fermo qui, ricordami domani dove eravamo e cosa 
 
 L'utente è tornato su un **laptop diverso** (viaggio). **Non ha l'on-prem Docker né il testlab** di ieri. Possiamo continuare solo su **superfici web prod** (sentrikat.com, portal, app.sentrikat.com, docs, community) + 7-dim su fasi 01/02/03 già fatte ma incomplete.
 
+### 🛑 SESSION END — 2026-04-25 (fine giornata sul laptop remoto)
+
+**Sessione chiusa a commit `6e5689a`**. Tutto il testabile oggi in browser-only è stato coperto.
+
+**Next session bootstrap — qualsiasi nuovo Claude legga questo file deve**:
+1. Leggere SUBITO la sezione HANDOFF (questa + quelle sopra) prima di qualsiasi azione
+2. Leggere il resto del master 00-INDEX.md per capire strategia complete (7-dim matrix, deployment scope labels, strategies A-G time-based)
+3. Scansionare la tabella fasi (sotto) + scope map retroactive per capire state actual
+4. Annunciare all'utente: (a) in quale fase siamo (b) counter bug (c) proposta di cosa fare
+
+**Aree rimaste da testare** (priorità decrescente):
+
+| Categoria | Test | Prereq |
+|---|---|---|
+| 🏢 **On-prem locale** (laptop principale) | Trigger manuali sync (CISA/EPSS/CPE — Strategia A), agent scan se license Pro OR Strategia F seed DB, compliance reports download con dati, backup/restore, all log viewer content, sub-tabs non ancora esplorati profondamente | Docker + testlab running |
+| 🔄 **Testlab integrations reali** | LDAP login E2E, SAML login via Keycloak, Jira/Webhook/GitLab con `FLASK_ENV=development` per bypass SSRF, Mailpit as SMTP, Syslog events reali | Docker + testlab |
+| 🔓 **Blocked backlog** (8 entries) | Ogni blocked dopo il rispettivo fix upstream | Fix prima |
+| 🏛 **Fase 05 Portal Admin** | Accesso `ADMIN_API_KEY` del license-server | Credenziale |
+| 🌐 **Tech debt 7-dim** Fase 01/02 | Cookie banner persistence, Turnstile failure, audit log integration, 2FA setup E2E, ecc. | Browser-only (qualsiasi laptop) |
+| 📚 **Docs content audit** | Page-by-page terminology/link/screenshot/tutorial consistency | Browser-only |
+| 🚀 **CI/CD pipeline** (16.5) | GitHub Actions workflow review, release process | GitHub admin access |
+
+**Counter finale sessione 2026-04-25**: 29 bug (1 CRITICAL, 10 High) / 13 warnings / 65 info / 100 OKs / 8 blocked. 39+ commits ahead di main su branch `claude/add-sentikat-e2e-tests-Cyd6M` (user farà PR quando vuole).
+
 **Regola user**: *"i test devono essere come sempre completi, ogni funzione. se stiamo controllando una pagina allora controlliamo tutto di quella pagina."* → applicare 7-dim a ogni pagina di oggi in poi.
 
 **Agenda sessione 2026-04-25** (decisa da claude, utente ha detto "basta che teniamo traccia di tutto"):
