@@ -287,11 +287,11 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 ## Bug counter globale
 
-- 🔴 Bug: 23 (1 CRITICAL)
-- 🟡 Warning: 10
-- 🔵 Info/UX: 55
-- 🟢 OK passati: 76
-- ⏸️ Test bloccati: 7
+- 🔴 Bug: 25 (1 CRITICAL, 7 High)
+- 🟡 Warning: 11
+- 🔵 Info/UX: 56
+- 🟢 OK passati: 80
+- ⏸️ Test bloccati: 8
 
 *(aggiornati a mano ad ogni commit)*
 
@@ -310,6 +310,7 @@ Test che non sono eseguibili finché non viene risolto un bug a monte. Da ripren
 | ⏸️ 03.11.6.8 | 03 / YouTrack | Saltato in questa sessione (pattern atteso uguale), test rinviato a post-fix | stesso root cause presunto |
 | ⏸️ 03.12.6–15 | 03 / Agent inventory | Agent install OK ma initial scan 403/401 con messaggio fuorviante "Invalid API key". Key attiva nel DB (`active=t`, usage_count=3). Root cause vero nascosto da messaggio generico | [03.12.14] + possibilmente license-server-upstream validation in DEMO |
 | ⏸️ 04.1.3 (Phase 04 intera) | 04 / Portal Customer OTP | OTP email non arriva nonostante response 200 OK. Regressione confermata: funzionava 7 giorni fa, rotto ≥ 2026-04-24. Intero portal customer (dashboard, licenses, downloads, support, checkout) non raggiungibile | PR #231 `wrap enqueue_webhook_event in try/except` sospettata principale |
+| ⏸️ 06.6.1 (dim 4 RBAC matrix) | 06 / App SaaS RBAC | Matrix role-based dei 3 users SaaS Starter non testabile: i 2 user creati (manager, user) non ricevono invite email (stesso cluster SMTP di 04.1.3). Impossibile loggare come non-admin per verificare sidebar/permissions | [06.4.1] invite email not delivered (same SMTP cluster as 04.1.3) |
 
 **Regola operativa**: quando un test fallisce ma è chiaro che dipende da un altro bug non ancora fixato, lo spostiamo qui invece di marcarlo come "bug autonomo" (evita falsi positivi sul conteggio bug). Riapriremo questi test in una seconda passata dopo la fase fix, in ordine di dipendenza (prima i fix bloccanti, poi i test sbloccati).
 

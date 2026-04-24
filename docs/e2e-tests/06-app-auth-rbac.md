@@ -1,0 +1,239 @@
+# Fase 06 — App SaaS core auth / RBAC / user management (`app.sentrikat.com`)
+
+> Test del prodotto SaaS core (Flask app in repo `sbr0nch/SentriKat` con `SENTRIKAT_MODE=saas`). Auth con password locale + force change al primo login (non OTP come portal). Include user management (All Users), RBAC matrix (super_admin/org_admin/manager/user).
+>
+> **Account disponibili su questo tenant Starter EA** (quota 3/3 users dopo oggi):
+> - `muscleaddiction49@gmail.com` — super_admin, password `TestPass123!` (creata in fase 02)
+> - `sentrikat@gmail.com` — role `manager` (creato oggi ma **email invite non arrivata** → non loggabile)
+> - Third user creato con role `user` (email invite non arrivata, stesso pattern)
+
+## Aree coperte
+
+| Area | Descrizione |
+|---|---|
+| 06.1 | Login happy path + session persistence |
+| 06.2 | Sidebar mapping super_admin Starter EA |
+| 06.3 | Users & Access — CRUD users |
+| 06.4 | User invite email delivery (NEW bug dedicated) |
+| 06.5 | Limit enforcement quota 3/3 users |
+| 06.6 | RBAC matrix dim 4 (role → sidebar + permissions) — ⏸️ BLOCKED da 06.4 |
+| 06.7 | State transitions user (disable/block/delete) — dim 5 |
+| 06.8 | Dashboard SaaS Starter dettaglio |
+| 06.9 | Assignments page |
+| 06.10 | Products sub-pages (List, Endpoints, Containers, Dependencies, Import Queue, SBOM Export, Exclusions) |
+| 06.11 | Settings → Alert Management |
+| 06.12 | Settings → Email & Notifications |
+| 06.13 | Settings → Subscription (già in 02.7.12, riprendere con 7-dim) |
+| 06.14 | Negative/edge: email malformate, role invalidi, XSS/SQL injection nei form |
+
+---
+
+## 06.1 — Login happy path ✅
+
+### [06.1.1] Login super_admin SaaS Starter ✅
+
+- **Fase**: 06 · **Area**: Login
+- **Deployment scope**: ☁️ SaaS
+- **Tipo**: 🟢 OK (dim 1 Happy)
+- **Actual**:
+  - Login `app.sentrikat.com/login` con `muscleaddiction49@gmail.com` + `TestPass123!` → dashboard
+  - Dashboard empty data (no CVE, no product — ambiente fresco Starter EA)
+  - Top-right: email + badge confermati
+- **Persistence (dim 2)**: session cookie persiste dal login di fase 02 — da verificare separatamente con logout+login
+- **Discovered**: 2026-04-25
+
+---
+
+## 06.2 — Sidebar super_admin SaaS Starter (baseline)
+
+### [06.2.1] Mappa sidebar SaaS Starter vs on-prem DEMO/Community ✅
+
+- **Fase**: 06 · **Area**: Sidebar mapping
+- **Deployment scope**: ☁️ SaaS
+- **Tipo**: 🟢 OK + 🔵 Info (mappatura comparativa)
+- **Mappa osservata (super_admin SaaS Starter EA)**:
+
+```
+Overview
+  - Dashboard
+  - Assignments
+
+Inventory
+  - Products ▼
+    - Products List
+    - Endpoints
+    - Containers
+    - Dependencies
+    - Import Queue
+    - SBOM Export
+    - Exclusions
+
+Management
+  - Users & Access ▼
+    - All Users
+    (NO "Organizations")
+
+Integrations
+  - Integrations ▼
+    - Agent Keys
+    - Agent Activity
+    (NO Scheduled Reports, NO Issue Trackers)
+
+System
+  - Settings ▼
+    - Alert Management
+    - Email & Notifications
+    - Subscription
+    (NO Authentication/LDAP/SAML, NO SIEM/Syslog, NO System, NO Compliance, NO Appearance, NO License, NO Health Checks, NO System Logs, NO Admin Guide)
+```
+
+- **Confronto con on-prem super_admin Community** [03.7.1]:
+
+| Voce | On-prem Community | SaaS Starter EA |
+|---|---|---|
+| Overview (Dashboard, Assignments) | ✅ | ✅ |
+| Products (7 sub) | ✅ | ✅ (identici) |
+| Organizations | ✅ | ❌ (single-tenant forced in SaaS Starter) |
+| All Users | ✅ | ✅ |
+| Agent Keys | ✅ | ✅ |
+| Agent Activity | ✅ | ✅ |
+| Scheduled Reports | ✅ | ❌ (Pro+ only atteso) |
+| Issue Trackers | ✅ | ❌ (Pro+) |
+| Authentication (LDAP/SAML) | ✅ | ❌ (LDAP Pro, SAML Business) |
+| SIEM / Syslog | ✅ | ❌ (Pro+) |
+| System (sub-tabs General/Security/Data Retention) | ✅ | ❌ |
+| Compliance Reports | ✅ | ❌ (NIS2/BOD Pro+) |
+| Appearance | ✅ | ❌ (white-label Business+) |
+| License | ✅ | ❌ (managed by billing on SaaS) |
+| Health Checks | ✅ | ❌ |
+| System Logs | ✅ | ❌ |
+| Admin Guide | ✅ | ❌ |
+| **Platform Operations** | ⚠️ visibile (bug [03.6.6]) | ✅ **non visibile** (correct!) |
+| Alert Management | ❌ (sotto altra voce in on-prem) | ✅ |
+| Email & Notifications | ❌ (sotto "Email (SMTP)" on-prem) | ✅ |
+| Subscription | ❌ (on-prem usa License) | ✅ |
+
+- **Osservazioni chiave**:
+  - ✅ **Platform Operations non è visible** su SaaS → conferma che [03.6.6] è bug **on-prem only** (su SaaS la logica gating funziona nella direzione giusta)
+  - ⚠️ **Su SaaS Starter il super_admin non può configurare niente di significativo**: no auth, no appearance, no health, no logs, no compliance. È un admin depotenziato rispetto a on-prem super_admin. Design decision o bug?
+  - Se `org_admin` (role più basso) su SaaS ha la **stessa** sidebar ridotta → `super_admin` e `org_admin` sono confusi in SaaS Starter (cross-ref [03.11.3.12] che diceva `manager == org_admin` su on-prem)
+- **Discovered**: 2026-04-25
+
+---
+
+## 06.3 — Users & Access CRUD
+
+### [06.3.1] Create user happy path ✅ (con caveat 06.4)
+
+- **Fase**: 06 · **Area**: Users & Access / dim 3 CRUD Create
+- **Deployment scope**: ☁️ SaaS
+- **Tipo**: 🟢 OK (create lato UI/DB) + ⏸️ BLOCKED (post-create email)
+- **Actual**:
+  - Bottone "Create User" visible nella pagina All Users
+  - Creazione user #2: email `sentrikat@gmail.com`, role `manager` → accettato, aggiunto alla lista con status (Pending/Invited atteso)
+  - Creazione user #3: simile, role `user` → accettato
+- **Cross-ref**: bug [06.4.1] per la mancata consegna email invite
+- **Dim 3 CRUD partial**: Create ✅, Read ✅, Update ⬜ (da testare edit form), Delete ⬜
+- **Discovered**: 2026-04-25
+
+### [06.3.2] 🟡 Alias email `+qualcosa` bloccati anche su admin invite
+
+- **Fase**: 06 · **Area**: Users & Access / admin invite validation
+- **Deployment scope**: ☁️ SaaS (e 🏢 on-prem presumibile, stessa validation)
+- **Tipo**: 🟡 Warning (UX di test + stretto)
+- **Severity**: Medium (limita testing + può bloccare admin enterprise che usano alias)
+- **Actual**: utente ha tentato `muscleaddiction49+manager@gmail.com` → **rifiutato**, costretto a usare email completamente separata (`sentrikat@gmail.com`)
+- **Cross-ref**: [02.3.2] alias bloccati su signup trial — stesso pattern esteso anche qui
+- **Issue**:
+  - Admin enterprise può legittimamente usare alias `+` (Microsoft 365 supporta, Gmail supporta, Outlook supporta) per categorizzare utenti (`accounting+cto@company.com`, `dev+john@company.com`)
+  - Bloccando gli alias SentriKat forza a usare email distinte — scomodo per team strutturati
+- **Razionale forse voluto**: prevenzione di "1 customer → N account gratis bypass" sul signup. Ma su **admin invite** (dove il quota limit è già enforced lato piano) questo razionale NON si applica
+- **Fix candidato (per fase fix)**: separare la validation. Alias block solo sul signup pubblico (`/api/v1/provision/trial`), ma NON sul flow admin invite (`/api/users`, che è già gated dal piano)
+- **Discovered**: 2026-04-25
+
+### [06.3.3] 🟢 Limit enforcement: 4° user rifiutato ✅
+
+- **Fase**: 06 · **Area**: Users & Access / dim 6 negative (limit)
+- **Deployment scope**: ☁️ SaaS
+- **Tipo**: 🟢 OK (dim 6)
+- **Actual**: con 3/3 users già creati, tentativo creare 4° → **bloccato** (utente conferma "anche il terzo funziona, e non posso crearne 4")
+- **Note**: messaggio d'errore esatto non catturato, da riprendere in un secondo passaggio
+- **Follow-up TODO 06.3.3a**: catturare messaggio esatto + verificare se è simile a "Demo version limit" di on-prem [03.14.20] o usa terminology SaaS-specific
+- **Discovered**: 2026-04-25
+
+### [06.3.4] ⬜ dim 3 Update / Delete user + dim 5 State transitions — da fare
+
+- **Status**: pending
+- **Test da eseguire** (stessa sessione, subito dopo):
+  - Edit user role (manager → user, user → manager)
+  - Delete user (conferma popup come [03.11.3.15]?)
+  - Disable/Block user (toggle?)
+  - Force password change sull'user
+- **Note**: i 2 users creati sono ancora "orfani" (no email invite ricevuta, non loggabili). Ma possiamo comunque testare le operazioni admin SU quegli utenti
+
+---
+
+## 06.4 — 🔴 HIGH — User invite email NON arriva (secondo flow email rotto, pattern `04.1.3`)
+
+### [06.4.1] 🔴 HIGH — Admin invite email non arriva
+
+- **Fase**: 06 · **Area**: User invite / email delivery
+- **Deployment scope**: ☁️ SaaS (core Flask app + SMTP prod upstream)
+- **Tipo**: 🔴 Bug
+- **Severity**: **High** (admin non può onboardare nuovi user → team adoption bloccato)
+- **Environment**: prod `app.sentrikat.com`
+- **Steps to reproduce**:
+  1. Login come super_admin (`muscleaddiction49@gmail.com`)
+  2. Users & Access → All Users → Create User
+  3. Compila: email `sentrikat@gmail.com`, role `manager`, submit
+  4. UI conferma "User created, invitation email sent" (o simile)
+  5. Click "Resend invite" → UI dice "spedita"
+- **Expected**: `sentrikat@gmail.com` riceve email con:
+  - Link di attivazione OR
+  - Credenziali temporanee (come fase 02.4.1) OR
+  - Link magic per set password iniziale
+- **Actual**: email **NON arriva** in nessun folder (inbox / spam / promotions — user conferma "non la vedo sull inbox in nessun luogo")
+- **Response server**: 200 OK, UI dice "sent" → **silent-fail pattern identico a [04.1.3]**
+- **Regressione pattern SMTP systemico — cluster di bug correlati**:
+
+| Bug | Flow | Scope | Status |
+|---|---|---|---|
+| [02.4.1] | Welcome email SaaS signup | 🔐 license-server | 🟢 funziona (ieri) |
+| [04.1.3] | Portal OTP login | 🔐 license-server | 🔴 CRITICAL non arriva (oggi) |
+| [06.4.1] | Admin invite SaaS user | ☁️ SaaS core app | 🔴 HIGH non arriva (oggi) |
+
+- **Analisi**: 2 flow email rotti + 1 funzionante. I 2 rotti hanno path diversi (license-server per portal, Flask core per invite). Suggerisce:
+  - Causa comune: SMTP **upstream** del tenant SaaS (Amazon SES quota esaurita, SendGrid API key scaduta, dominio blacklisted, bounce list contaminata)
+  - Oppure: regressione in un **modulo email comune** importato da entrambi i servizi
+  - Oppure: **configurazione SMTP prod** ruotata/dimenticata dopo un deploy
+- **Azione da suggerire all'utente**: controllare dashboard SES/SendGrid/MailerSend/Postmark (chiunque sia il provider) per:
+  - Bounce rate / complaint rate / suppression list → `sentrikat@gmail.com` potrebbe essere su suppression dopo bounces precedenti
+  - Send quota / rate limit
+  - API key validity
+- **Altra verifica**: `muscleaddiction49@gmail.com` (original signup) riceveva email in fase 02. Ora? Se adesso NON riceve più nemmeno `muscleaddiction49@gmail.com` → il problema è SMTP generale. Se riceve ancora → il problema è specifico `sentrikat@gmail.com` (suppression list) o flow-specific
+- **Impact on other scope**:
+  - Portal OTP bloccato (04.1.3)
+  - SaaS invite bloccato (06.4.1)
+  - Team expansion bloccata in SaaS
+  - **NON impatta** welcome email signup (02.4.1) che arrivava ieri — diverso trigger
+- **Status test**: **⏸️ BLOCKED** — dim 4 role-based matrix completa bloccata (non possiamo loggare come manager/user senza invite email)
+- **Discovered**: 2026-04-25
+
+---
+
+## 06.6 — RBAC matrix dim 4 ⏸️ BLOCKED
+
+### [06.6.1] ⏸️ BLOCKED — RBAC matrix completo rinviato
+
+- **Fase**: 06 · **Area**: RBAC dim 4
+- **Tipo**: ⏸️ Test bloccato
+- **Bloccato da**: [06.4.1] (invite email non arriva) → impossibile loggare come manager/user per vedere il loro punto di vista della sidebar + permissions
+- **Workaround**:
+  - A — (solo se tiene accesso DB prod): UPDATE diretto della password hash dei 2 user orfani per bypassare attivazione email
+  - B — aspettare fix di 06.4.1 / 04.1.3 (stessa regressione presumibile)
+  - C — testare `dim 4 partial` solo sul super_admin (già fatto implicitamente in 06.2.1 — sidebar super_admin conosciuta)
+- **Discovered**: 2026-04-25
+
+---
+
+*(continuerà con Dashboard, Products, Assignments, Settings — esplorazione pagine non-bloccate con 7-dim)*
