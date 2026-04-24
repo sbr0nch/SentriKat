@@ -236,4 +236,81 @@ System
 
 ---
 
-*(continuerà con Dashboard, Products, Assignments, Settings — esplorazione pagine non-bloccate con 7-dim)*
+## 06.8 — Dashboard SaaS Starter (batch 1)
+
+### [06.8.1] Dashboard empty state completo, tutti i widget coerenti ✅
+
+- **Deployment scope**: ☁️ SaaS
+- **Tipo**: 🟢 OK · **Dim**: 1 happy
+- **Widget mappati** (tutti empty come atteso):
+  - 4 cards CVE severity: `0-DAY (— matches)`, `CRITICAL (0)`, `HIGH (0)`, `MEDIUM (0)`
+  - Source filter: `All / Servers / Clients / Containers / Dependencies` → tab click aggiorna stat panel sotto
+  - Stats panel: Unique CVEs, Total Findings, Critical CVEs, Container Images, High CVEs, Medium+Low — tutti 0
+  - Priority Breakdown donut: "No data yet"
+  - Remediation Progress line chart: tooltip "Apr 24 — Acknowledged: 0 / Unacknowledged: 0"
+  - Remediation Actions: "No pending remediation actions"
+  - SLA Compliance: "No SLA policies configured" + `+ Set up SLA`
+  - Remediation Overview: "No data"
+  - Assignments: "No assignments yet. Use the [+] button in Remediation Actions to assign work"
+  - Vulnerability Trends: chart empty with `Last 30 days` + `By Severity` dropdown
+- **Console**: zero errori (utente conferma)
+- **Network**: tutti 200
+- **Discovered**: 2026-04-25
+
+### [06.8.2] 🔵 "Set up SLA" click → messaggio verde ma count resta 0 (UX ambiguity)
+
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🔵 Info · **Dim**: 3 CRUD
+- **Actual**: utente ha cliccato `+ Set up SLA` → UI mostra messaggio verde di successo, ma indicator dice ancora "0 SLA policies saved"
+- **Ipotesi**:
+  - Click con form vuoto → creata SLA "empty" che non conta
+  - Oppure messaggio verde è "form acknowledged" ma non save effettivo
+  - Oppure race condition: conteggio non refresh dopo save
+- **Follow-up TODO 06.8.2a**: ricliccare Set up SLA con almeno 1 campo popolato (es. name), verificare counter
+- **Discovered**: 2026-04-25
+
+## 06.9 — Assignments page ✅
+
+### [06.9.1] Assignments page struttura completa, empty state ✅
+
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🟢 OK · **Dim**: 1 happy
+- **Actual**:
+  - Header: "Remediation Assignments" + badges `Total 0` · `Overdue 0` · refresh icon
+  - Filtri: Search, Status (All), Priority (All), Assigned to, Sort (Due date), filter button
+  - Tabella: CVE · PRODUCT · ASSIGNEE · PRIORITY · STATUS · DUE DATE · TRACKER · ACTIONS
+  - Empty: "No assignments match the current filters"
+- **Dim 3 CRUD Create**: bottone "Create" non esplorato (con dati vuoti poco testabile — richiederebbe prima un CVE match reale)
+- **Follow-up TODO 06.9.1a**: aprire modal Create Assignment (anche senza dati) per screenshot form + fields validation
+- **Discovered**: 2026-04-25
+
+## 06.10 — Products sub-pages (batch 1 parziale — Products List + Endpoints)
+
+### [06.10.1] Products List empty state ✅
+
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🟢 OK · **Dim**: 1 happy
+- **Actual**: bottone `+ Add Product` visible, Columns dropdown, Search + 4 filtri (Statuses, CPE, Sources, Types). Empty: "No products added yet. Click Add Product to start tracking vulnerabilities"
+- **Discovered**: 2026-04-25
+
+### [06.10.2] 🔴 HIGH — Endpoints page: "Latest: linux: v1.0.0, macos: v1.0.0, windows: v1.0.0" HARDCODED
+
+- **Deployment scope**: ☁️ SaaS (+ 🏢 on-prem probabile, da verificare)
+- **Tipo**: 🔴 Bug
+- **Severity**: **High** (customer non scopre mai se c'è una nuova agent version disponibile)
+- **Actual** (dalla pagina Endpoints):
+  - Sezione `Agent Versions`: `0 CURRENT / 0 OUTDATED / 0 UNMANAGED`
+  - **Label "Latest: linux: v1.0.0, macos: v1.0.0, windows: v1.0.0"** — utente osserva che "spero non sia fisso deve in qualche modo nel saas seguire i release"
+- **Issue**: la versione `v1.0.0` sembra essere **hardcoded** nel frontend (o nel backend) invece di essere derivata dinamicamente dalle release GitHub (`v1.0.0-beta.6` è la release più recente con cui stiamo lavorando)
+- **Pattern correlato**: stesso root cause di [03.5.3] (`VERSION` file inchiodato a beta.2) e [03.14.9] (License page dice "Up to date beta.2"). **Terzo hardcode di versione** scoperto
+- **Impatto**:
+  - Customer installa agent `v1.0.0-beta.6` (magari) ma la pagina dice "Latest: v1.0.0" → agent appare come "CURRENT" (falso: è beta.6, latest è...?)
+  - Security patch release non promossa ai customer
+  - Contraddittorio con mappa architetturale che promette scheduled update + heartbeat check
+- **Fix candidato (per fase fix)**: la label "Latest" deve essere fetchata da un endpoint `/api/releases/latest` che query GitHub Releases API (o un cache interno aggiornato via `license_heartbeat` job ogni 12h)
+- **Follow-up TODO 06.10.2a**: verificare se la stessa label compare anche in on-prem → se sì aggiornare scope a `🏢☁️ both`
+- **Discovered**: 2026-04-25
+
+### [06.10.3] 🔵 NVD online/offline indicator fluttua dinamicamente
+
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🔵 Info (cross-ref [03.13.1])
+- **Actual**: durante la sessione il footer ha mostrato alternatamente `NVD offline` e `NVD Online`. Utente ha esplicitamente confermato: "ps ora nel footer nvd è di nuovo online"
+- **Valutazione**: conferma fault-tolerance del multi-source fallback funzionante anche su SaaS. Stesso pattern di on-prem
+- **Discovered**: 2026-04-25
