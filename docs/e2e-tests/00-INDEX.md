@@ -14,23 +14,31 @@ Se sei un nuovo Claude che apre questa sessione o se ci ritorniamo dopo una paus
 
 L'utente ha detto `"per oggi mi fermo qui, ricordami domani dove eravamo e cosa dobbiamo fare"` subito dopo aver aperto `https://portal.sentrikat.com` e scoperto che l'**OTP non arriva via email**. La fase 04 è stata aperta ma **bloccata al primo test**.
 
-**Cosa proporre all'utente quando riprende**:
+### 🟢 SESSION RESUMED — 2026-04-25 (laptop remoto, no docker + no testlab)
 
-1. **Prima di tutto**: verificare se il bug OTP è ancora presente. Rifare la prova su `https://portal.sentrikat.com`:
-   - Inserisci email `muscleaddiction49@gmail.com`
-   - Click Send OTP
-   - **Controlla spam folder Gmail** (non fatto nella sessione precedente — potrebbe essere che l'email finisse semplicemente in spam)
-   - Se NON arriva nemmeno in spam → bug [04.1.3] confermato ancora attivo → **opzione A**: passare a fase 05 (admin portal, auth diversa) o fase 06 (app.sentrikat.com, auth password)
-   - Se arriva in spam → declassare bug a 🟡 warning (deliverability) e proseguire fase 04 normale
-   - Se arriva normalmente → bug era intermittent / risolto → log come `intermittent fixed`
+L'utente è tornato su un **laptop diverso** (viaggio). **Non ha l'on-prem Docker né il testlab** di ieri. Possiamo continuare solo su **superfici web prod** (sentrikat.com, portal, app.sentrikat.com, docs, community) + 7-dim su fasi 01/02/03 già fatte ma incomplete.
 
-2. **Options per continuare** (utente ha già accettato strategia "Mixed"):
-   - **Opzione A (consigliata se 04 resta blocked)**: saltare a **Fase 05 Portal Admin** con bearer `ADMIN_API_KEY`. Non serve OTP. Apri `https://portal.sentrikat.com/admin` con l'API key generata dal license-server. Mappare le 25 pagine admin
-   - **Opzione B**: **Fase 06 app.sentrikat.com auth/RBAC/2FA matrix completa** — già abbiamo account admin locale + SAML user creato in fase 02/03. Test dim 4 Role-based, dim 5 state transitions, dim 6 negative
-   - **Opzione C**: **Second pass con seed DB fake data** (Strategia F) per popolare dashboard on-prem e testare compliance reports download, remediation UI, SLA enforcement
-   - **Opzione D**: **Trigger manuali on-prem** (Strategia A) — sequenza di click su "Sync CISA Now / Sync EPSS Now / Sync CPE Now / Send Email Alerts Now / Run Auto-Ack Now / Run Health Check Now" per popolare dati + validare che i job lavorino end-to-end
+**Regola user**: *"i test devono essere come sempre completi, ogni funzione. se stiamo controllando una pagina allora controlliamo tutto di quella pagina."* → applicare 7-dim a ogni pagina di oggi in poi.
 
-3. **Utente ha detto di voler fare PR su main** dopo questa sessione — ci sono ~25+ commit di docs `docs(e2e):*` da fare review e merge
+**Agenda sessione 2026-04-25** (decisa da claude, utente ha detto "basta che teniamo traccia di tutto"):
+1. **Retry OTP portal + spam check** (30s — chiudere o confermare bug `[04.1.3]`)
+2. **Fase 06 App SaaS auth/RBAC matrix completo** (`app.sentrikat.com`, credenziali già pronte da fase 02) — dim 4 role-based, dim 5 state transitions, dim 6 negative, dim 7 integration
+3. Se OTP funziona: **Fase 04 Portal Customer intero** (Dashboard, Account, Licenses, Downloads, Support, Checkout)
+4. Se OTP rotto: **Fase 05 Portal Admin** se l'utente ha bearer `ADMIN_API_KEY` (skip se non disponibile)
+5. **Debito tecnico Fase 01/02 7-dim** in background se c'è tempo
+6. `docs.sentrikat.com` e `community.sentrikat.com` (componenti minori ma da mappare)
+
+**Test rinviati** (richiedono docker/testlab del laptop precedente):
+- Tutti i trigger on-prem Strategia A
+- Tutte le integrazioni testlab (LDAP/SAML/Jira/Webhook/Syslog reali)
+- Seed DB fake data (Strategia F)
+- Agent install / scan (bloccato comunque dal license gate)
+- Compliance reports download con dati reali
+- Log viewer in-app / security.log content
+
+Questi test restano nel follow-up TODO + blocked backlog, li ripiglieremo quando torna al laptop principale.
+
+---
 
 ### Dov'eravamo (ultimo update: 2026-04-24, commit recenti `469d5f2` + successivi)
 
