@@ -171,6 +171,86 @@ System
   - Force password change sull'user
 - **Note**: i 2 users creati sono ancora "orfani" (no email invite ricevuta, non loggabili). Ma possiamo comunque testare le operazioni admin SU quegli utenti
 
+### [06.3.5] 🔴 HIGH — Azione "Force setup 2FA" → redirect a `/profile?setup_2fa=required` produce 404, auto-recupero al refresh
+
+- **Fase**: 06 · **Area**: Admin user actions / Setup 2FA redirect
+- **Deployment scope**: ☁️ SaaS
+- **Tipo**: 🔴 Bug
+- **Severity**: **High** (UX broken, potenziale data loss se il refresh non riparte, ma soprattutto admin confidence in 2FA flow compromessa — 2FA è security-critical)
+- **Steps to reproduce**:
+  1. Users & Access → All Users → edit user orfano
+  2. Azione "Force setup 2FA" (o equivalente toggle "Require 2FA")
+  3. Save / Confirm
+- **Expected**: redirect a `/profile` (o `/settings/security`) con banner "User X must setup 2FA at next login"
+- **Actual**:
+  - URL: `https://app.sentrikat.com/profile?setup_2fa=required` → **404 Not Found**
+  - **Auto-recupero**: dopo refresh della pagina (F5), l'app entra correttamente
+- **Interpretazione**:
+  - Possibile: il path `/profile` esiste ma non gestisce il query param `?setup_2fa=required`, che trigger un 404 nel router
+  - Oppure: redirect segue un path SPA client-side routing che non è registrato, refresh forza server-side render che invece funziona
+  - Oppure: flaky routing dovuto a async state hydration
+- **Impatto**:
+  - Admin fa azione critica (Force 2FA) → vede 404 → pensa che l'azione sia fallita → riesegue o richiede support
+  - Potenziale action non persisita (se il 404 abortisce il submit server-side)
+  - **MA** dato che refresh auto-risolve, probabilmente l'azione è andata a buon fine lato server, è solo la UX del redirect post-action rotta
+- **Fix candidato**: verificare il router client-side per handling del query param; alternativamente redirect pulito a `/profile` (senza query) dopo l'azione
+- **Follow-up TODO 06.3.5a**: verificare con DevTools Network se il server-side request ha ritornato 200/302 ma il client-side ha fatto render 404, oppure server ha ritornato 404 davvero
+- **Discovered**: 2026-04-25
+
+### [06.3.6] Dim 3 Update role user ✅
+
+- **Fase**: 06 · **Area**: Users / CRUD Update
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🟢 OK · **Dim**: 3 CRUD
+- **Actual**: edit user `sentrikat@gmail.com` role da `manager` → `user` → save → role aggiornato correttamente
+- **Discovered**: 2026-04-25
+
+### [06.3.7] Dim 5 State transitions Disable/Re-enable user ✅
+
+- **Fase**: 06 · **Area**: Users / state transitions
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🟢 OK · **Dim**: 5
+- **Actual**: toggle disable → user status cambiato; re-enable → ripristino OK
+- **Follow-up TODO 06.3.7a**: verificare comportamento end-to-end dopo unblock email: user disabled tenta login → rejected con messaggio chiaro?
+- **Discovered**: 2026-04-25
+
+### [06.3.8] Dim 5 Force Password Change admin action ✅ (funziona, con caveat 06.3.5 per 2FA)
+
+- **Fase**: 06 · **Area**: Users / admin force password change
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🟢 OK · **Dim**: 5
+- **Actual**: azione "Force password change" funziona, nessun redirect 404 (diverso dal Setup 2FA di 06.3.5)
+- **End-to-end verify**: impossibile ora — user orfano non può loggare per vedere se al login riceve request di password change. Rinviato dopo fix email cluster
+- **Discovered**: 2026-04-25
+
+### [06.3.9] Dim 6 Security — SQL/XSS injection protection user create form ✅
+
+- **Fase**: 06 · **Area**: Users create / input sanitization
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🟢 OK (positive security) · **Dim**: 6 negative
+- **Actual**:
+  - Name = `<script>alert('XSS')</script>` → **rifiutato** con messaggio "invalid"
+  - Email = `test'; DROP TABLE users;--@evil.com` → **rifiutato** con messaggio "invalid"
+- **Valutazione**: sanitization attiva, nessun input eseguito come HTML o SQL. **Good security posture** su form critico admin
+- **Follow-up TODO 06.3.9a** (non-urgent): test anche caratteri Unicode unusuali (zero-width joiner, right-to-left override), path traversal in full_name (`../../../etc/passwd`), LDAP injection syntax se formato email LDAP-like (`*)(|(uid=*)`). Più esotici, bassa priorità
+- **Discovered**: 2026-04-25
+
+### [06.3.10] Dim 6 Email validation robust (4 casi negativi) ✅
+
+- **Fase**: 06 · **Area**: Users create / email format validation
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🟢 OK · **Dim**: 6 negative
+- **Casi testati (tutti rifiutati con messaggi corretti)**:
+  - `notanemail` (senza @) → rifiutato
+  - `a@b` (dominio senza TLD) → rifiutato
+  - email vuota → rifiutato
+  - `muscleaddiction49@gmail.com` (duplicate) → rifiutato con messaggio appropriato
+- **Valutazione**: email validation solida (RFC 5321/5322 respect + duplicate check)
+- **Discovered**: 2026-04-25
+
+### [06.3.11] Delete user (dim 3) ✅ implicito
+
+- **Fase**: 06 · **Area**: Users / CRUD Delete
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🟢 OK · **Dim**: 3
+- **Actual**: delete di un user orfano (presumibile dai successivi test che hanno ri-creato un 4° slot libero)
+- **Follow-up TODO 06.3.11a**: catturare esplicitamente style del popup di conferma delete (modal branded vs `window.confirm` grezzo — vedi [03.11.3.15])
+- **Discovered**: 2026-04-25
+
 ---
 
 ## 06.4 — 🔴 HIGH — User invite email NON arriva (secondo flow email rotto, pattern `04.1.3`)

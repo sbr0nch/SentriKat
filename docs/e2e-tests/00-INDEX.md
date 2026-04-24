@@ -287,10 +287,10 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 ## Bug counter globale
 
-- 🔴 Bug: 27 (1 CRITICAL, 8 High)
+- 🔴 Bug: 28 (1 CRITICAL, 9 High)
 - 🟡 Warning: 12
 - 🔵 Info/UX: 61
-- 🟢 OK passati: 91
+- 🟢 OK passati: 97
 - ⏸️ Test bloccati: 8
 
 *(aggiornati a mano ad ogni commit)*
