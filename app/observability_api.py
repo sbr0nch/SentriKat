@@ -31,11 +31,19 @@ observability_bp = Blueprint('observability', __name__)
 def _require_super_admin():
     """Gate for the observability pages.
 
-    Uses the same session-based check as the rest of the super-admin
-    surface in this app. A non-super-admin gets a 403.
+    These pages surface cross-repo state (webhook events received from
+    the upstream SentriKat-web license server, usage metering uploads
+    sent to it). On on-prem installations there is no upstream license
+    server, so the pages are SaaS-only — a local super_admin on-prem
+    gets a 404, not a 403, to avoid hinting at the existence of routes
+    that do not apply to their deployment (see bug [03.6.6] / [03.7.2] /
+    [03.7.4]).
     """
+    from app.saas import is_saas_mode
     from app.models import User
     from app import db as app_db
+    if not is_saas_mode():
+        abort(404)
     user_id = session.get('user_id')
     if not user_id:
         abort(403)

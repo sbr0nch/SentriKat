@@ -664,7 +664,17 @@ def _queue_to_import_queue(organization_id, vendor, product_name, version, hostn
 def get_agent_api_key():
     """
     Validate agent API key from request header.
-    Returns (AgentApiKey, Organization) tuple or (None, None) if invalid.
+    Returns (AgentApiKey, Organization, failure) tuple. On success,
+    ``failure`` is None. On failure, ``failure`` is a dict describing
+    the specific reason so the caller can return a response that does
+    not conflate distinct problems.
+
+    Distinguishing between "missing header", "unknown key", "inactive
+    key", "expired key", and "IP not allowlisted" matters operationally:
+    conflating them into a generic "Invalid or missing API key" sent
+    admins on long debug goose-chases against a key that was actually
+    valid (see bug [03.12.14] — agent was rejected by a downstream
+    license check, but the client saw the misleading 401 string).
 
     Security checks:
     1. Key exists and is valid (active, not expired)
@@ -677,14 +687,24 @@ def get_agent_api_key():
     api_key = request.headers.get('X-Agent-Key')
     if not api_key:
         logger.warning(f"Agent auth failed: No X-Agent-Key header from {source_ip}")
-        return None, None
+        return None, None, {
+            'status': 401,
+            'error': 'missing_api_key',
+            'message': 'X-Agent-Key header is required.',
+            'hint': 'Include the X-Agent-Key header with your agent API key.',
+        }
 
     # Look up the key, transparently upgrading legacy hashes on first use.
     agent_key = AgentApiKey.find_by_raw_key(api_key)
 
     if not agent_key:
         logger.warning(f"Agent auth failed: Invalid API key from {source_ip}")
-        return None, None
+        return None, None, {
+            'status': 401,
+            'error': 'invalid_api_key',
+            'message': 'The API key is not recognized.',
+            'hint': 'Verify the key was copied correctly and is still active.',
+        }
 
     if not agent_key.is_valid():
         logger.warning(f"Agent auth failed: Expired/inactive key '{agent_key.name}' from {source_ip}")
@@ -698,7 +718,13 @@ def get_agent_api_key():
             user_agent=user_agent
         )
         db.session.commit()
-        return None, None
+        expired = agent_key.expires_at is not None and agent_key.expires_at <= datetime.utcnow()
+        return None, None, {
+            'status': 401,
+            'error': 'expired_api_key' if expired else 'inactive_api_key',
+            'message': 'The API key has expired.' if expired else 'The API key is inactive.',
+            'hint': 'Generate a new key in the admin UI and update the agent.',
+        }
 
     # ENFORCE IP ALLOWLIST (if configured)
     allowed_ips = agent_key.get_allowed_ips()
@@ -716,26 +742,29 @@ def get_agent_api_key():
             user_agent=user_agent
         )
         db.session.commit()
-        return None, None
+        return None, None, {
+            'status': 403,
+            'error': 'ip_not_allowed',
+            'message': 'Source IP is not in the allowlist configured for this API key.',
+            'hint': 'Add this host to the key’s allowed IPs or connect from an allowlisted host.',
+        }
 
     # Update usage stats
     agent_key.last_used_at = datetime.utcnow()
     agent_key.usage_count += 1
     db.session.commit()
 
-    return agent_key, agent_key.organization
+    return agent_key, agent_key.organization, None
 
 
 def agent_auth_required(f):
     """Decorator requiring valid agent API key."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        agent_key, organization = get_agent_api_key()
-        if not agent_key:
-            return jsonify({
-                'error': 'Invalid or missing API key',
-                'hint': 'Include X-Agent-Key header with your agent API key'
-            }), 401
+        agent_key, organization, failure = get_agent_api_key()
+        if failure is not None:
+            status = failure.pop('status', 401)
+            return jsonify(failure), status
 
         # Add to request context
         request.agent_key = agent_key

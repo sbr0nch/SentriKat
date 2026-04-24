@@ -306,16 +306,20 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 | 2026-04-23 | 03 | Sidebar map + Platform Operations probing | 🟢 mappa sidebar on-prem documentata (confronto vs SaaS Starter); 🔴 03.7.2 pagina Webhook Events mostra copy "upstream SentriKat-web license server" con concetti SaaS-only (plan change/revocation); 🔴 03.7.3 typo `/ap1/license/events` (dovrebbe essere `/api/`); 🔴 03.7.4 pagina Usage Uploads dice "this SaaS" + espone comando Python in UI customer-facing (privacy/trust issue per on-prem); 🔵 03.7.5 `system_settings` senza chiavi setup (flag altrove); 🟢 03.7.6 empty-state banner actionable ("Run CISA sync", "Add Products"); 🔵 03.7.7 nessun errore console → rafforza severity 03.6.6 (non cosmetic, funzionale) |
 | 2026-04-23 | 03 | SMTP → Mailpit configurata da UI | 🟢 save + test UI feedback verde, config persistente; ⏳ consegna email in Mailpit (http://localhost:8025) pending verifica utente; 🟡 03.11.1.5 password field mostra `••••••••` senza password reale (misleading); 🔵 03.11.1.3 subtitle hardcoded "LDAP configuration..." cross-ref [02.7.7]; 🔵 03.11.1.4 label inconsistency sidebar "Email (SMTP)" vs tab "Email & Alerts"; 🔵 03.11.1.6 nessun campo Reply-To nel form; 🔵 03.11.1.7 copy multi-tenant "Default SMTP for all orgs" esposto anche in DEMO single-org; 🔵 03.11.1.8 helper text port non include dev port 1025 |
 | 2026-04-23 | 03 | SMTP delivery verificata in Mailpit | 🟢 2 email arrivate in Mailpit (http://localhost:8025) con From=noreply@sentrikat.local, To=admin, Subject "SentriKat SMTP Test - Configuration Successful" — pipeline SMTP client→testlab funziona, nessuna delivery a Internet; 🔵 03.11.1.9 nessun throttling sui test email; 🔵 03.11.1.10 body test email espone host+port SMTP in plaintext (info disclosure minore) |
+| **2026-04-26** | — | **🔧 SESSION FIX — Batch 1 core** (laptop remoto, scope SentriKat only) | Creato `FIX-HANDOFF-sentrikat-web.md` per bug scoped al secondo repo. Applicati fix in SentriKat core:<br>✅ **[03.5.3]** VERSION file beta.2→beta.6 + guard CI release.yml (fail-fast se VERSION≠tag) — `VERSION`, `.github/workflows/release.yml`<br>❌ **[03.7.3]** FALSE POSITIVE — template ha già `/api/license/events` corretto al tag beta.6. Probabile mis-trascrizione `i`→`1` nel test. Bug chiuso senza fix codice<br>✅ **[03.6.6]** + **[03.7.2]** + **[03.7.4]** (1 fix consolidato) — sidebar Platform Operations gated con `saas_mode`, route `/super-admin/webhook-events` e `/super-admin/usage-uploads` restituiscono 404 in on-prem, rimosso comando Python debug dal template usage uploads — `app/templates/base.html`, `app/observability_api.py`, `app/templates/super_admin_usage_uploads.html`<br>✅ **[03.12.14]** agent error messages richer — `get_agent_api_key()` ora ritorna reason-code specifico (`missing_api_key`/`invalid_api_key`/`inactive_api_key`/`expired_api_key`/`ip_not_allowed`) invece del generico "Invalid or missing API key". `api_docs.py` OpenAPI spec aggiornata — `app/agent_api.py`, `app/api_docs.py`<br>✅ **[03.11.2.3]** sidebar LDAP Users/Groups regressione — aggiunto `is_platform_admin` al gating di `has_ldap` in modo che super_admin on-prem DEMO le veda (allineamento con Authentication settings) — `app/templates/base.html`<br>✅ **[03.11.4.5]** SSRF `ALLOW_PRIVATE_URLS` — CRITI spam log ridotto a 1 warning single-shot, UI error arricchito con hint su `FLASK_ENV=development`, docstring aggiornato — `app/network_security.py`<br>**Verifica differita**: laptop principale con docker → rebuild + rigiro test sulle aree fixate |
 
 ---
 
 ## Bug counter globale
 
-- 🔴 Bug: 29 (1 CRITICAL, 10 High)
+**Post batch fix 2026-04-26** (core repo, SentriKat-web pending):
+
+- 🔴 Bug: **23** (1 CRITICAL, 10 High) *(-6: 5 fix + 1 falso positivo; OTP CRITICAL resta, scoped al secondo repo)*
 - 🟡 Warning: 13
 - 🔵 Info/UX: 65
 - 🟢 OK passati: 100
-- ⏸️ Test bloccati: 8
+- ⏸️ Test bloccati: **6** *(-2: 03.11.2.9 e 03.11.4.5 sbloccati dopo i fix di questa sessione, da riverificare sul laptop principale)*
+- ✅ Fix applicati: **7** *(5 bug + 1 falso positivo + 1 batch consolidato)*
 
 *(aggiornati a mano ad ogni commit)*
 

@@ -421,8 +421,8 @@ def _get_api_paths():
                             }
                         }
                     },
-                    "401": {"description": "Invalid or missing API key"},
-                    "403": {"description": "Agent limit reached (license)"}
+                    "401": {"description": "API key missing, unknown, inactive, or expired (see error code in body: missing_api_key | invalid_api_key | inactive_api_key | expired_api_key)"},
+                    "403": {"description": "Source IP not allowlisted, or agent limit reached (license)"}
                 }
             }
         },

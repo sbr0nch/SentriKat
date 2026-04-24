@@ -14,18 +14,49 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
+# Cache the "private URLs ignored in production" warning so we log it once
+# at the first call instead of once per outbound URL validation. Without
+# this, admins saw a flood of CRITICAL lines in production any time the
+# misconfiguration was present (see bug [03.11.4.5]).
+_PROD_IGNORE_WARNING_EMITTED = False
+
 
 def _allow_private_urls():
-    """Check if private/internal URLs are allowed (for dev/test environments)."""
+    """Check if private/internal URLs are allowed (for dev/test environments).
+
+    In production (``FLASK_ENV=production``) the flag is deliberately
+    ignored regardless of its value — this hardens against an admin
+    accidentally enabling SSRF bypass on a prod box. The first time we
+    observe the misconfiguration we emit a warning so it surfaces in
+    log review; subsequent calls stay quiet.
+    """
+    global _PROD_IGNORE_WARNING_EMITTED
     allowed = (os.environ.get('ALLOW_PRIVATE_URLS', '').lower() == 'true' or
                os.environ.get('ALLOW_PRIVATE_JIRA_URL', '').lower() == 'true')
     if allowed and os.environ.get('FLASK_ENV') == 'production':
-        logger.critical(
-            "SECURITY WARNING: ALLOW_PRIVATE_URLS is enabled in production! "
-            "This disables SSRF protection. Ignoring the setting."
-        )
+        if not _PROD_IGNORE_WARNING_EMITTED:
+            logger.warning(
+                "ALLOW_PRIVATE_URLS is set but FLASK_ENV=production — the "
+                "flag is ignored as a hardening measure. If you are in a "
+                "test/docker environment, set FLASK_ENV=development."
+            )
+            _PROD_IGNORE_WARNING_EMITTED = True
         return False  # Never allow private URLs in production
     return allowed
+
+
+def private_urls_ignored_in_production():
+    """Return True when the admin set ALLOW_PRIVATE_URLS but we're in prod.
+
+    Call-sites that reject a URL for targeting a private network can use
+    this to enrich their error message (see bug [03.11.4.5]). It reports
+    the misconfiguration without leaking anything the admin can't
+    already see in their own ``.env``.
+    """
+    if os.environ.get('FLASK_ENV') != 'production':
+        return False
+    return (os.environ.get('ALLOW_PRIVATE_URLS', '').lower() == 'true' or
+            os.environ.get('ALLOW_PRIVATE_JIRA_URL', '').lower() == 'true')
 
 
 def is_ssrf_safe_url(url):
@@ -39,11 +70,12 @@ def is_ssrf_safe_url(url):
     - Reserved addresses
     - Cloud metadata endpoints (169.254.169.254, 169.254.170.2)
 
-    When the ALLOW_PRIVATE_URLS environment variable is set to 'true',
-    all private/internal network checks are bypassed. This is intended
-    for dev/test environments where services run on internal networks
-    (e.g. Docker containers using host.docker.internal). The variable
-    should never be set in production.
+    When ``ALLOW_PRIVATE_URLS=true`` AND ``FLASK_ENV=development`` the
+    private/internal network checks are bypassed. This is intended for
+    dev/test environments where services run on internal networks (e.g.
+    Docker containers using ``host.docker.internal``). In
+    ``FLASK_ENV=production`` the flag is deliberately ignored regardless
+    of its value as a hardening measure against accidental misconfig.
 
     Args:
         url: The URL to validate.
@@ -103,6 +135,9 @@ def validate_url_for_request(url, context=""):
 
     if not is_ssrf_safe_url(url):
         logger.warning(f"SSRF blocked: {context} attempted request to internal URL: {url}")
-        return False, "URL must not target internal or private network addresses"
+        msg = "URL must not target internal or private network addresses"
+        if private_urls_ignored_in_production():
+            msg += " (ALLOW_PRIVATE_URLS is set but only applies when FLASK_ENV=development)"
+        return False, msg
 
     return True, None
