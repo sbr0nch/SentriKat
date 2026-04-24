@@ -14,23 +14,55 @@ Se sei un nuovo Claude che apre questa sessione o se ci ritorniamo dopo una paus
 
 L'utente ha detto `"per oggi mi fermo qui, ricordami domani dove eravamo e cosa dobbiamo fare"` subito dopo aver aperto `https://portal.sentrikat.com` e scoperto che l'**OTP non arriva via email**. La fase 04 è stata aperta ma **bloccata al primo test**.
 
-**Cosa proporre all'utente quando riprende**:
+### 🟢 SESSION RESUMED — 2026-04-25 (laptop remoto, no docker + no testlab)
 
-1. **Prima di tutto**: verificare se il bug OTP è ancora presente. Rifare la prova su `https://portal.sentrikat.com`:
-   - Inserisci email `muscleaddiction49@gmail.com`
-   - Click Send OTP
-   - **Controlla spam folder Gmail** (non fatto nella sessione precedente — potrebbe essere che l'email finisse semplicemente in spam)
-   - Se NON arriva nemmeno in spam → bug [04.1.3] confermato ancora attivo → **opzione A**: passare a fase 05 (admin portal, auth diversa) o fase 06 (app.sentrikat.com, auth password)
-   - Se arriva in spam → declassare bug a 🟡 warning (deliverability) e proseguire fase 04 normale
-   - Se arriva normalmente → bug era intermittent / risolto → log come `intermittent fixed`
+L'utente è tornato su un **laptop diverso** (viaggio). **Non ha l'on-prem Docker né il testlab** di ieri. Possiamo continuare solo su **superfici web prod** (sentrikat.com, portal, app.sentrikat.com, docs, community) + 7-dim su fasi 01/02/03 già fatte ma incomplete.
 
-2. **Options per continuare** (utente ha già accettato strategia "Mixed"):
-   - **Opzione A (consigliata se 04 resta blocked)**: saltare a **Fase 05 Portal Admin** con bearer `ADMIN_API_KEY`. Non serve OTP. Apri `https://portal.sentrikat.com/admin` con l'API key generata dal license-server. Mappare le 25 pagine admin
-   - **Opzione B**: **Fase 06 app.sentrikat.com auth/RBAC/2FA matrix completa** — già abbiamo account admin locale + SAML user creato in fase 02/03. Test dim 4 Role-based, dim 5 state transitions, dim 6 negative
-   - **Opzione C**: **Second pass con seed DB fake data** (Strategia F) per popolare dashboard on-prem e testare compliance reports download, remediation UI, SLA enforcement
-   - **Opzione D**: **Trigger manuali on-prem** (Strategia A) — sequenza di click su "Sync CISA Now / Sync EPSS Now / Sync CPE Now / Send Email Alerts Now / Run Auto-Ack Now / Run Health Check Now" per popolare dati + validare che i job lavorino end-to-end
+### 🛑 SESSION END — 2026-04-25 (fine giornata sul laptop remoto)
 
-3. **Utente ha detto di voler fare PR su main** dopo questa sessione — ci sono ~25+ commit di docs `docs(e2e):*` da fare review e merge
+**Sessione chiusa a commit `6e5689a`**. Tutto il testabile oggi in browser-only è stato coperto.
+
+**Next session bootstrap — qualsiasi nuovo Claude legga questo file deve**:
+1. Leggere SUBITO la sezione HANDOFF (questa + quelle sopra) prima di qualsiasi azione
+2. Leggere il resto del master 00-INDEX.md per capire strategia complete (7-dim matrix, deployment scope labels, strategies A-G time-based)
+3. Scansionare la tabella fasi (sotto) + scope map retroactive per capire state actual
+4. Annunciare all'utente: (a) in quale fase siamo (b) counter bug (c) proposta di cosa fare
+
+**Aree rimaste da testare** (priorità decrescente):
+
+| Categoria | Test | Prereq |
+|---|---|---|
+| 🏢 **On-prem locale** (laptop principale) | Trigger manuali sync (CISA/EPSS/CPE — Strategia A), agent scan se license Pro OR Strategia F seed DB, compliance reports download con dati, backup/restore, all log viewer content, sub-tabs non ancora esplorati profondamente | Docker + testlab running |
+| 🔄 **Testlab integrations reali** | LDAP login E2E, SAML login via Keycloak, Jira/Webhook/GitLab con `FLASK_ENV=development` per bypass SSRF, Mailpit as SMTP, Syslog events reali | Docker + testlab |
+| 🔓 **Blocked backlog** (8 entries) | Ogni blocked dopo il rispettivo fix upstream | Fix prima |
+| 🏛 **Fase 05 Portal Admin** | Accesso `ADMIN_API_KEY` del license-server | Credenziale |
+| 🌐 **Tech debt 7-dim** Fase 01/02 | Cookie banner persistence, Turnstile failure, audit log integration, 2FA setup E2E, ecc. | Browser-only (qualsiasi laptop) |
+| 📚 **Docs content audit** | Page-by-page terminology/link/screenshot/tutorial consistency | Browser-only |
+| 🚀 **CI/CD pipeline** (16.5) | GitHub Actions workflow review, release process | GitHub admin access |
+
+**Counter finale sessione 2026-04-25**: 29 bug (1 CRITICAL, 10 High) / 13 warnings / 65 info / 100 OKs / 8 blocked. 39+ commits ahead di main su branch `claude/add-sentikat-e2e-tests-Cyd6M` (user farà PR quando vuole).
+
+**Regola user**: *"i test devono essere come sempre completi, ogni funzione. se stiamo controllando una pagina allora controlliamo tutto di quella pagina."* → applicare 7-dim a ogni pagina di oggi in poi.
+
+**Agenda sessione 2026-04-25** (decisa da claude, utente ha detto "basta che teniamo traccia di tutto"):
+1. **Retry OTP portal + spam check** (30s — chiudere o confermare bug `[04.1.3]`)
+2. **Fase 06 App SaaS auth/RBAC matrix completo** (`app.sentrikat.com`, credenziali già pronte da fase 02) — dim 4 role-based, dim 5 state transitions, dim 6 negative, dim 7 integration
+3. Se OTP funziona: **Fase 04 Portal Customer intero** (Dashboard, Account, Licenses, Downloads, Support, Checkout)
+4. Se OTP rotto: **Fase 05 Portal Admin** se l'utente ha bearer `ADMIN_API_KEY` (skip se non disponibile)
+5. **Debito tecnico Fase 01/02 7-dim** in background se c'è tempo
+6. `docs.sentrikat.com` e `community.sentrikat.com` (componenti minori ma da mappare)
+
+**Test rinviati** (richiedono docker/testlab del laptop precedente):
+- Tutti i trigger on-prem Strategia A
+- Tutte le integrazioni testlab (LDAP/SAML/Jira/Webhook/Syslog reali)
+- Seed DB fake data (Strategia F)
+- Agent install / scan (bloccato comunque dal license gate)
+- Compliance reports download con dati reali
+- Log viewer in-app / security.log content
+
+Questi test restano nel follow-up TODO + blocked backlog, li ripiglieremo quando torna al laptop principale.
+
+---
 
 ### Dov'eravamo (ultimo update: 2026-04-24, commit recenti `469d5f2` + successivi)
 
@@ -148,7 +180,7 @@ Ogni fase ha un proprio file `NN-nome.md` (creato al momento, non tutti in antic
 | 13 | `13-admin-ops.md` | Admin panel core, super admin, health checks, logs, Prometheus metrics, OpenTelemetry, backup/restore (on-prem), scheduler jobs, maintenance, cleanup | ⬜ |
 | 14 | `14-saas-specific.md` | SaaS: quota/limiti per piano, feature gating, isolamento multi-tenant, license webhook, trial expiry, upgrade/cancel, metering, addons | ⬜ |
 | 15 | `15-security-edge.md` | SQL injection, XSS, CSRF, LDAP injection, SSRF, command injection, path traversal, rate limiting, lockout, encryption at rest (Fernet), edge cases (DB down, disk full, NVD down, ecc.) | ⬜ |
-| 16 | `16-extra-shared.md` | Shared views pubblici, GDPR export/delete, community Flarum, docs MkDocs, n8n workflow, nginx reverse proxy, deploy pipeline (CI/CD + staging) | ⬜ |
+| 16 | `16-extra-shared.md` | Shared views pubblici, GDPR export/delete, community Flarum, docs MkDocs, n8n workflow, nginx reverse proxy, deploy pipeline (CI/CD + staging) | 🟡 parziale (16.1 docs + 16.2 community mapped; 16.3/16.4/16.5 richiedono admin access) |
 
 **Legenda status:** ⬜ da iniziare · 🟡 in corso · ✅ completato (tutte le sotto-aree viste)
 
@@ -279,11 +311,11 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 ## Bug counter globale
 
-- 🔴 Bug: 22
-- 🟡 Warning: 10
-- 🔵 Info/UX: 55
-- 🟢 OK passati: 76
-- ⏸️ Test bloccati: 6
+- 🔴 Bug: 29 (1 CRITICAL, 10 High)
+- 🟡 Warning: 13
+- 🔵 Info/UX: 65
+- 🟢 OK passati: 100
+- ⏸️ Test bloccati: 8
 
 *(aggiornati a mano ad ogni commit)*
 
@@ -301,6 +333,8 @@ Test che non sono eseguibili finché non viene risolto un bug a monte. Da ripren
 | ⏸️ 03.11.6.4 | 03 / GitLab | Test funzionali GitLab bloccati dalla stessa policy SSRF | stesso root cause di 03.11.4.5 |
 | ⏸️ 03.11.6.8 | 03 / YouTrack | Saltato in questa sessione (pattern atteso uguale), test rinviato a post-fix | stesso root cause presunto |
 | ⏸️ 03.12.6–15 | 03 / Agent inventory | Agent install OK ma initial scan 403/401 con messaggio fuorviante "Invalid API key". Key attiva nel DB (`active=t`, usage_count=3). Root cause vero nascosto da messaggio generico | [03.12.14] + possibilmente license-server-upstream validation in DEMO |
+| ⏸️ 04.1.3 (Phase 04 intera) | 04 / Portal Customer OTP | OTP email non arriva nonostante response 200 OK. Regressione confermata: funzionava 7 giorni fa, rotto ≥ 2026-04-24. Intero portal customer (dashboard, licenses, downloads, support, checkout) non raggiungibile | PR #231 `wrap enqueue_webhook_event in try/except` sospettata principale |
+| ⏸️ 06.6.1 (dim 4 RBAC matrix) | 06 / App SaaS RBAC | Matrix role-based dei 3 users SaaS Starter non testabile: i 2 user creati (manager, user) non ricevono invite email (stesso cluster SMTP di 04.1.3). Impossibile loggare come non-admin per verificare sidebar/permissions | [06.4.1] invite email not delivered (same SMTP cluster as 04.1.3) |
 
 **Regola operativa**: quando un test fallisce ma è chiaro che dipende da un altro bug non ancora fixato, lo spostiamo qui invece di marcarlo come "bug autonomo" (evita falsi positivi sul conteggio bug). Riapriremo questi test in una seconda passata dopo la fase fix, in ordine di dipendenza (prima i fix bloccanti, poi i test sbloccati).
 

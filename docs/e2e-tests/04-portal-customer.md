@@ -49,7 +49,7 @@
 - **Follow-up TODO 04.1.2a**: copiare il testo esatto del messaggio di errore e valutare contro best practice NIST / OWASP A07 Identification and Authentication Failures
 - **Discovered**: 2026-04-24
 
-### [04.1.3] 🔴 HIGH — OTP email NON arriva dopo request-otp (regressione ricorrente)
+### [04.1.3] 🔴 **CRITICAL** — OTP email NON arriva dopo request-otp (regressione confermata: funzionava 7 giorni fa)
 
 - **Fase**: 04
 - **Area**: Login OTP / email delivery
@@ -88,6 +88,30 @@
 - **Impact on other scope**: nessun impatto direct su SaaS app (ha auth diversa: password + force change), nessun impatto su on-prem (auth locale). Isolato al portal customer
 - **Discovered**: 2026-04-24
 - **Nota storica**: bug risolto in sessione precedente ma riapparso → implica che il fix non è stato durevole (rollback? deploy ha sovrascritto? regression test mancante su questo flow?)
+
+### [04.1.3 — confirmed 2026-04-25] ⚠️ Conferma + bisection del periodo di regressione
+
+- **Actions di diagnosi 2026-04-25** (session resumed):
+  1. ✅ Fresh incognito browser → `https://portal.sentrikat.com`
+  2. ✅ Inserita email `muscleaddiction49@gmail.com`
+  3. ✅ Click "Send OTP" — Network: `POST /api/v1/portal/auth/request-otp` → **200 OK**
+  4. ✅ Controllo Gmail: **Inbox**, **Spam/Junk**, **Promotions/Updates** → nessuna email da `noreply@sentrikat.com` con OTP
+  5. ✅ Click "Resend code" sul form OTP → stesso risultato, 200 OK ma no email
+- **Utente conferma**: *"non arriva, sì 200 [...] in passato c'erano tipo 7 giorni fa"* → regressione **confermata** con finestra bisection:
+  - ✅ Funzionava: ≤ 2026-04-18 (7 giorni fa)
+  - ❌ Non funziona: ≥ 2026-04-24 (ieri)
+  - Periodo sospetto: **2026-04-18 → 2026-04-24** (6 giorni)
+- **Commit sospetti in quella finestra** (da `SentriKat-web` GitHub, già raccolti in handoff):
+  - **2026-04-22** PR #231 `fix(license-server): wrap all enqueue_webhook_event call-sites in try/except` — il license-server è lo stesso processo che manda le email OTP. Il wrapping try/except può aver **nascosto** un'eccezione reale di email delivery, trasformando un 500 → 200 silent fail
+- **Hypothesis aggiornata**: PR #231 è il **prime suspect**. Il fix era sull'outbox webhook, ma probabilmente ha avvolto anche il send-email path. Se la funzione di send-email solleva un'eccezione (credenziali SMTP scadute, quota SES, rate limit SendGrid, bounce list), il try/except **swallow silently** e l'endpoint risponde 200 anche quando l'email non è partita
+- **Silent-fail pattern** è anti-pattern: meglio 500 + log error + response `{"error":"email_service_unavailable"}` che 200 OK bugiardo
+- **Severity escalated**: `High` → **CRITICAL** (un customer non può mai loggare nel portale in prod, in qualunque browser, qualunque email. Azienda bloccata sul flow customer principale)
+- **Status test**: **⏸️ BLOCKED** — fase 04 intera rinviata a post-fix
+- **Impact on other scope**:
+  - 🏛 portal customer → completely non-funzionale
+  - 🔐 license-server → silent-fail pattern da investigare ovunque ci siano try/except recenti
+  - ☁️ SaaS welcome email arrivava in fase 02.4 → quel flow è separato, non impattato
+  - 🏢 on-prem → non impattato (auth locale, no OTP)
 
 ### [04.1.4] Step UI post-request-otp visibile ✅
 
