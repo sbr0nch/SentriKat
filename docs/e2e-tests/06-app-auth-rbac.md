@@ -370,3 +370,142 @@ System
 - **Deployment scope**: ☁️ SaaS · **Tipo**: 🟢 OK
 - **Actual**: banner info "Excluded products are blocked from being imported by agents. When you delete a product with 'Exclude from future scans', it appears here. You can also manually add exclusions." Bottone `+ Add Exclusion`. Table: VENDOR · PRODUCT · VERSION · ORGANIZATION · EXCLUDED BY · REASON · DATE · ACTIONS. Empty: "No exclusions configured"
 - **Discovered**: 2026-04-25
+
+---
+
+## 06.11 — Settings → Alert Management (batch 3)
+
+### [06.11.1] Alert Management rendering + features ✅
+
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🟢 OK
+- **Content mappato**:
+  - **Webhooks section**: badge `Inactive` top-right, copy "No webhooks configured" + link "Configure Webhooks" (rimanda a Email & Notifications → Slack/Teams)
+  - **Alert Rules for TAKIRTNES** section:
+    - Banner: "Your plan includes one organization. Configure the alert rules that apply to it. 0-Day and active-exploitation alerts (CISA KEV / EUVD) are always enabled and cannot be turned off."
+    - Riga singola organization: CRITICAL ✅ · HIGH ☐ · NEW CVE ✅ · RANSOMWARE ✅ · ALERT MODE dropdown "New Only" · DELIVERY badges `NO EMAILS` + `NO SMTP` (giallo) · edit icon in Actions
+  - **Alert Delivery History**:
+    - Filtri: All Types · All Statuses · date from `mm/dd/yyyy` · date to `mm/dd/yyyy` · clear X
+    - Table: DATE/TIME · ORGANIZATION · TYPE · STATUS · MATCHES · RECIPIENTS · ERROR
+    - Empty: "No alert history found" + "No records"
+    - Auto-refresh: 60s
+- **Feature positive**:
+  - ✅ `0-Day + active-exploitation always-on` — smart security default (non disabilitabile = critico sempre notificato)
+  - ✅ Per-org alert rules (coerente anche con 1 org sul plan)
+  - ✅ Delivery badge immediato (`NO EMAILS`, `NO SMTP`) → admin vede subito stato canale
+  - ✅ Alert history 60s refresh con error visibility
+- **Discovered**: 2026-04-25
+
+### [06.11.2] 🔴 HIGH — Alert Management manca dalla tab bar Settings (sidebar 3 voci, tab 2 voci)
+
+- **Fase**: 06 · **Area**: Settings navigation / UI consistency
+- **Deployment scope**: ☁️ SaaS
+- **Tipo**: 🔴 Bug
+- **Severity**: **High** (navigation broken, UX disorientante)
+- **Actual**:
+  - Sidebar → System → Settings espande 3 voci: `Alert Management`, `Email & Notifications`, `Subscription`
+  - Dentro la pagina **Alert Management**: NO tab bar in cima (pagina standalone)
+  - Dentro la pagina **Email & Notifications**: tab bar in cima con 2 tabs → `Email & Notifications` (selected) + `Subscription`
+  - Dentro la pagina **Subscription**: tab bar con 2 tabs → `Email & Notifications` + `Subscription` (selected)
+- **Issue**: **Alert Management non è raggiungibile da tab bar**. L'admin che è su Email & Notifications o Subscription non vede alcun tab `Alert Management` → l'unico modo per tornarci è via sidebar → "sembra che sia una pagina di un'altra sezione"
+- **User osservazione esplicita**: `"come vedi alert management non fa appartire le tab, e dalle altre due sezioni nelle tab in alto non c'è alert management. però nel menu sidebar sono tutte e 3 insieme"`
+- **Fix candidato**: aggiungere `Alert Management` come terza tab nella tab bar di Settings (attualmente solo 2). Così le 3 voci sidebar e le 3 tab combaciano
+- **Cross-ref [02.7.8]**: breadcrumb "Home / Administration" inconsistente su SaaS, stessa area navigation rotta
+- **Discovered**: 2026-04-25
+
+### [06.11.3] 🔵 Info — Delivery badges `NO EMAILS` / `NO SMTP` visibili per quick diagnosis
+
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🔵 Info
+- **Actual**: le righe alert rules mostrano badge stato canale (`NO EMAILS` = nessun destinatario configurato; `NO SMTP` = no SMTP configured)
+- **Valutazione**: UX eccellente per diagnosi rapida — l'admin vede subito se i canali di delivery sono OK
+- **Discovered**: 2026-04-25
+
+### [06.11.4] 🔵 i18n — Alert Delivery History usa `mm/dd/yyyy` (US) mentre altri form usano `tt.mm.jjjj` (DE)
+
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🔵 Info (cluster i18n)
+- **Actual**: filtri date range della Alert Delivery History mostrano placeholder `mm/dd/yyyy` (US style)
+- **Cluster i18n browser-native update**:
+  - [02.2.1] tooltip validation DE
+  - [03.12.3] date picker agent key DE (`tt.mm.jjjj`)
+  - [03.14.4] audit logs date DE
+  - [03.14.17] file picker logo DE (`Datei auswählen`)
+  - [06.11.4] alert delivery date **US** (`mm/dd/yyyy`) ← **diverso locale!**
+- **Nota**: qui il form mostra US format invece che DE → suggerisce che il placeholder è **esplicitamente settato dal frontend** (non lasciato al browser native), ma con locale US. Mentre gli altri date input sono browser-native. **Incoerenza interna al prodotto**: dove lo imposta manualmente usa US, dove lo lascia al browser risolve a DE (browser locale user)
+- **Fix candidato**: standardizzare su **ISO 8601** (`YYYY-MM-DD`) come già fa [03.14.13] General settings "Date Format: 2024-01-15 14:30 (ISO)"
+- **Discovered**: 2026-04-25
+
+---
+
+## 06.12 — Settings → Email & Notifications
+
+### [06.12.1] 🔴 CRITICAL (cross-ref) — "Managed Email Delivery: no SMTP config needed" MA i flow email sono rotti ([04.1.3] + [06.4.1])
+
+- **Fase**: 06 · **Area**: Email infrastructure / cross-ref
+- **Deployment scope**: ☁️ SaaS (managed infrastructure upstream)
+- **Tipo**: 🔴 Bug (cross-ref)
+- **Severity**: **CRITICAL** (già marcato in 04.1.3)
+- **Actual** (pagina Email & Notifications):
+  - Banner verde tranquillizzante: `"Managed Email Delivery — Email alerts, reports, and notifications are sent automatically by the SentriKat platform. No SMTP configuration needed."`
+  - **Sender**: `From: SentriKat Alerts <noreply@alerts.sentrikat.com>`
+  - **Monthly Email Quota**: `0 / 200 emails used this month (starter plan)` → nessuna email spedita questo mese! Il quota count conferma che **zero emails sono partite**
+- **Implicazione chiave**: il quota 0/200 conferma che il problema [04.1.3] + [06.4.1] è **realmente una silent-fail server-side** — se le email fossero partite ma rimbalzate, il counter sarebbe ≥ 1. Invece è 0. Significa che il send **non è nemmeno tentato** o fallisce prima del count
+- **Sender discovery**: `noreply@alerts.sentrikat.com` (subdomain `alerts.`) differente da:
+  - Fase 02 welcome: `noreply@sentrikat.com` (no subdomain)
+  - Probabile ipotesi: `alerts.sentrikat.com` è il subdomain per alert/invite/OTP (nuovo setup SMTP?), mentre `sentrikat.com` serviva welcome/provisioning. **Se le credenziali DNS/SPF/DKIM del subdomain `alerts.` non sono setup correttamente o sono state modificate recentemente** → silent fail consistente solo su quei flow
+- **Cross-check azione suggerita**: lookup DNS/SPF/DKIM/DMARC del subdomain `alerts.sentrikat.com`:
+  ```
+  dig TXT alerts.sentrikat.com | grep -E "spf|dkim"
+  nslookup -type=TXT _dmarc.alerts.sentrikat.com
+  ```
+  Se SPF/DKIM mancanti o broken sul subdomain → email bloccate upstream
+- **Impact on other scope**: conferma che il cluster email (portal OTP + invite + alerts) è **CENTRALIZZATO** sulla managed infrastructure `alerts.sentrikat.com`. Il fix in questo subdomain risolve tutto il cluster
+- **Discovered**: 2026-04-25 (diagnosi breakthrough)
+
+### [06.12.2] Email & Notifications features ✅
+
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🟢 OK (features mapped)
+- **Content**:
+  - **Email Delivery** section (già coperto in 06.12.1)
+  - **Reply-To** input: default placeholder `support@yourcompany.com` (vedi [06.12.3])
+  - **Monthly Email Quota**: `0 / 200 emails` (Starter plan quota)
+  - **Notification Integrations**:
+    - **Slack Integration**: toggle `Enable Slack Notifications` + `Slack Webhook URL` input + `Test` button — info: "Create an incoming webhook in your Slack workspace settings"
+    - **Microsoft Teams Integration**: toggle `Enable Teams Notifications` (scrolled, presumibile stessa struttura Slack)
+- **Valutazione**: Slack + Teams integrations disponibili **out-of-the-box** su Starter (non gated Pro+ come Issue Trackers). Good UX
+- **Discovered**: 2026-04-25
+
+### [06.12.3] 🟡 Reply-To default placeholder `support@yourcompany.com` può essere lasciato fittizio
+
+- **Fase**: 06 · **Area**: Email reply-to config
+- **Deployment scope**: ☁️ SaaS
+- **Tipo**: 🟡 Warning
+- **Severity**: Medium (if customer hits reply → email sent to nonexistent address)
+- **Actual**: il campo Reply-To ha placeholder `support@yourcompany.com` ma se l'admin non compila rimane placeholder → nessun "Reply-To" effettivo
+- **Issue**:
+  - Se customer riceve alert email e hit `Reply` → arriva a `noreply@alerts.sentrikat.com` (il From) → nero, nessuno legge
+  - Se placeholder venisse salvato letteralmente → email a dominio `yourcompany.com` (dominio non esistente → bounce)
+- **Fix candidato**:
+  - Validazione: impedire save con valore vuoto
+  - Oppure: default intelligente a email admin dell'org (es. `sotadenis94@gmail.com`) invece di placeholder
+  - Oppure: warning banner se Reply-To non configurato e alert rules attive
+- **Cross-ref [02.4.6] follow-up** TODO welcome email reply-to: stesso tema
+- **Discovered**: 2026-04-25
+
+---
+
+## 06.13 — Settings → Subscription (cross-ref [02.7.6] — [02.7.12])
+
+### [06.13.1] Subscription page contenuto già mappato in [02.7.6] — [02.7.12]
+
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🟢 OK (cross-ref) + 🔵 Info
+- **Re-check rapido oggi**:
+  - Current Plan: Starter · ACTIVE · Monthly · Renews 23 May 2026 (stessa data di [02.7.6] → 30 gg dal signup iniziale)
+  - Plan Limits: 10 agents / 3 users / Unlimited products / 2 API keys / 500 MB storage (coerente)
+  - Features Included matrix: Email Alerts ✅, Webhooks ✅, NIS2/DORA+BOD ❌, Push Agents ✅, Multi-Tenant ❌, LDAP/AD ❌, White-Labeling ❌, Issue Trackers ❌, Backup&Restore ❌, SAML SSO ❌, API Access ✅, SIEM Integration ❌, Audit Log Export ❌
+  - Paid Add-on: Compliance Pack (PCI-DSS + ISO 27001 + SOC 2) — NOT PURCHASED + banner "Upgrade to Pro/Business/Enterprise first to unlock add-on eligibility"
+  - Need more capacity? — `View Plans` CTA footer
+- **Osservazione — discrepanza con fase 02.7.12**: oggi Features Included dice **Push Agents ✅** su Starter, mentre l'agent era bloccato con messaggio `"Push Agents require a Professional license"` ([03.13.2] on-prem Community). Quindi:
+  - **SaaS Starter**: Push Agents INCLUSO (dice ✅)
+  - **On-prem Community**: Push Agents ESCLUSO (errore runtime)
+  - Questa è **asimmetria intenzionale** (SaaS paga un canone, on-prem Community è free-with-limit) oppure **nuovo bug** di inconsistenza tier-mapping
+- **Follow-up TODO 06.13.1a**: sul SaaS Starter, dopo fix del cluster email, creare un agent key + deploy + vedere se su **SaaS** l'agent riesce a pushare (mentre on-prem Community NO). Se funziona → conferma asimmetria intenzionale, se fallisce con stesso messaggio → bug gating SaaS
+- **Discovered (re-check)**: 2026-04-25
