@@ -314,3 +314,59 @@ System
 - **Actual**: durante la sessione il footer ha mostrato alternatamente `NVD offline` e `NVD Online`. Utente ha esplicitamente confermato: "ps ora nel footer nvd è di nuovo online"
 - **Valutazione**: conferma fault-tolerance del multi-source fallback funzionante anche su SaaS. Stesso pattern di on-prem
 - **Discovered**: 2026-04-25
+
+## 06.10 (continua) — Products sub-pages batch 2 (Containers, Dependencies, Import Queue, SBOM Export, Exclusions)
+
+### [06.10.4] Containers empty state ✅
+
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🟢 OK
+- **Actual**: header "Container Security — Container image vulnerabilities from Trivy scans". 5 stat cards (Images 0, Critical 0, High 0, Total Vulns 0, Fixable 0). Search + All severities + All fix status filters. Empty: "No container images found. Container scans from push agents will appear here."
+- **Nota feature gating**: "**push agents**" è Pro+ (vedi [03.13.2]), quindi Starter Community può vedere la pagina ma non popolarla
+- **Discovered**: 2026-04-25
+
+### [06.10.5] Dependencies empty state ✅
+
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🟢 OK
+- **Actual**: header "Code libraries, extensions, and their vulnerability status". 4 stat cards (Dependencies 0, Extensions 0, Ecosystems 0, With Vulnerabilities 0). Search + All types + All ecosystems + All statuses. Empty: "No dependencies found. Enable extension or dependency scanning on your agent API keys to see data here."
+- **Link a [03.12.1]**: la pagina rimanda esplicitamente all'Agent Keys "Scan Capabilities" (OS / Extensions / Code Dependencies toggles)
+- **Discovered**: 2026-04-25
+
+### [06.10.6] Import Queue empty state ✅
+
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🟢 OK
+- **Actual**:
+  - Info banner blue: "Software discovered from agents and integrations appears here for review before being added to your product inventory."
+  - Bulk actions: `Approve Selected`, `Reject Selected`, `Approve All`, `Reject All`
+  - Filter: All Categories / All Vendors / 25 per page / Pending
+  - Table: SOFTWARE · VERSION · ORGANIZATION · CATEGORY · CRITICALITY · SOURCE · REPORTED BY · ACTIONS
+  - Empty: "No items in queue"
+- **Valutazione**: governance pattern correct (review before import, bulk actions)
+- **Discovered**: 2026-04-25
+
+### [06.10.7] SBOM Export page ricca ✅ + follow-up feature gating da verificare
+
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🟢 OK (rendering) + 🔵 Info (gating da confermare)
+- **Actual**:
+  - Header "Software Bill of Materials" con banner educational: "Each format serves a different ecosystem: CycloneDX (OWASP/AppSec), SPDX (Linux Foundation/ISO 5962), STIX 2.1 (OASIS for threat-intel sharing)"
+  - **3 format cards** con descrizione tecnica + bottone `Download JSON`:
+    - CycloneDX 1.5 — `components[]` + `vulnerabilities[]` CVSS. Compatible Dependency-Track, Sonatype, GitHub Dependabot, Snyk
+    - SPDX 2.3 — `packages[]`, preferred for license compliance (ISO/IEC 5962)
+    - STIX 2.1 — `vulnerability` SDOs + `software` SCOs + `relationship` SROs. ISACs, MISP, CISA AIS
+  - Endpoint paths esposti: `/api/sbom/export/cyclonedx`, `/api/sbom/export/spdx`, `/api/sbom/export/stix21`
+  - **CLI / CI pipeline usage** section con 2 esempi curl:
+    ```
+    curl -sk -H "Cookie: session=$SESSION" https://app.sentrikat.com/api/sbom/export/cyclonedx -o sbom-cdx.json
+    curl -sk -H "X-API-Key: $SENTRIKAT_API_KEY" https://app.sentrikat.com/api/sbom/export/spdx -o sbom-spdx.json
+    ```
+  - **Rate limit banner** giallo: "10 exports per hour per user. Exports larger than the per-bundle cap return HTTP 413 — filter with `?product_ids=1,2,3` or contact support for streaming exports."
+- **Follow-up TODO 06.10.7a — URGENTE verifica gating**: cliccare `Download JSON` per uno dei 3 formati anche con inventory vuoto. Atteso:
+  - Se 200 OK + JSON valido → SBOM è feature universale (Starter included) → conferma commit `e769ce9 fix(plans): declare sbom_export in seeded plans so /api/sbom/* isn't 403`
+  - Se 403 "upgrade required" → gating invertito, bug: la pagina è visible ma la funzione bloccata
+- **Valutazione UX**: **pagina eccellente** — 3 formati + endpoint espliciti + CLI examples production-ready + rate limit info. Best practice documentation
+- **Discovered**: 2026-04-25
+
+### [06.10.8] Exclusions empty state ✅
+
+- **Deployment scope**: ☁️ SaaS · **Tipo**: 🟢 OK
+- **Actual**: banner info "Excluded products are blocked from being imported by agents. When you delete a product with 'Exclude from future scans', it appears here. You can also manually add exclusions." Bottone `+ Add Exclusion`. Table: VENDOR · PRODUCT · VERSION · ORGANIZATION · EXCLUDED BY · REASON · DATE · ACTIONS. Empty: "No exclusions configured"
+- **Discovered**: 2026-04-25
