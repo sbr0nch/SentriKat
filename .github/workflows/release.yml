@@ -74,7 +74,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Write VERSION file so the app knows its version
+      # Guard: the VERSION file committed at the tagged ref MUST match
+      # the tag itself. Previously the next step silently overwrote VERSION
+      # at build time, which meant anyone cloning the tag got a stale value
+      # (see bug [03.5.3] — beta.6 tag still carried beta.2 in VERSION).
+      # Fail fast here so the release author goes back and commits the bump.
+      - name: Verify VERSION file matches release tag
+        run: |
+          EXPECTED="${GITHUB_REF_NAME#v}"
+          ACTUAL="$(cat VERSION | tr -d '[:space:]')"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::VERSION file is '$ACTUAL' but tag is '$EXPECTED'."
+            echo "::error::Bump VERSION and re-tag before releasing."
+            exit 1
+          fi
+          echo "VERSION file matches tag: $EXPECTED"
+
+      # Kept as a safety net in case the guard above is ever bypassed;
+      # if the guard passes this is a no-op.
       - name: Set VERSION file
         run: echo "${GITHUB_REF_NAME#v}" > VERSION
 
