@@ -156,7 +156,7 @@ Ogni fase ha un proprio file `NN-nome.md` (creato al momento, non tutti in antic
 | 13 | `13-admin-ops.md` | Admin panel core, super admin, health checks, logs, Prometheus metrics, OpenTelemetry, backup/restore (on-prem), scheduler jobs, maintenance, cleanup | ⬜ |
 | 14 | `14-saas-specific.md` | SaaS: quota/limiti per piano, feature gating, isolamento multi-tenant, license webhook, trial expiry, upgrade/cancel, metering, addons | ⬜ |
 | 15 | `15-security-edge.md` | SQL injection, XSS, CSRF, LDAP injection, SSRF, command injection, path traversal, rate limiting, lockout, encryption at rest (Fernet), edge cases (DB down, disk full, NVD down, ecc.) | ⬜ |
-| 16 | `16-extra-shared.md` | Shared views pubblici, GDPR export/delete, community Flarum, docs MkDocs, n8n workflow, nginx reverse proxy, deploy pipeline (CI/CD + staging) | ⬜ |
+| 16 | `16-extra-shared.md` | Shared views pubblici, GDPR export/delete, community Flarum, docs MkDocs, n8n workflow, nginx reverse proxy, deploy pipeline (CI/CD + staging) | 🟡 parziale (16.1 docs + 16.2 community mapped; 16.3/16.4/16.5 richiedono admin access) |
 
 **Legenda status:** ⬜ da iniziare · 🟡 in corso · ✅ completato (tutte le sotto-aree viste)
 
@@ -287,10 +287,10 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 ## Bug counter globale
 
-- 🔴 Bug: 28 (1 CRITICAL, 9 High)
-- 🟡 Warning: 12
-- 🔵 Info/UX: 61
-- 🟢 OK passati: 97
+- 🔴 Bug: 29 (1 CRITICAL, 10 High)
+- 🟡 Warning: 13
+- 🔵 Info/UX: 65
+- 🟢 OK passati: 100
 - ⏸️ Test bloccati: 8
 
 *(aggiornati a mano ad ogni commit)*
