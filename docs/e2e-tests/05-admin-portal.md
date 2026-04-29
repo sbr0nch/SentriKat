@@ -30,10 +30,12 @@
 | 05.17 | `/admin/feedback` | 🔵 1 info (possibile mancanza dedup), 🟢 2 entry seed |
 | 05.18 | `/admin/licenses` (POST-EA) | 🟢 OK (empty as expected) |
 | 05.19 | `/admin/activations` (POST-EA) | 🔵 1 info (UX redundancy), 🟢 OK empty |
+| 05.20 | `/admin/pricing` (Pricing Calculator) | 🔵 2 info (purpose docs, terminology) |
+| 05.21 | `/admin/plans` (Subscription Plans) | 🔴 1 HIGH (price mismatch 3 fonti), 🔵 1 info (`-1` placeholder leak) |
 
 ## Pagine ancora NON aperte (sidebar)
 
-EA Tenants, Webhook Outbox, Usage Metrics, Pricing (READ-ONLY), Plans, Audit Log (visibile via Settings → "Go to Audit Log"), Status & Incidents sub-views.
+EA Tenants, Webhook Outbox, Usage Metrics, Audit Log dedicato (visibile via Settings → "Go to Audit Log").
 
 ---
 
@@ -602,16 +604,139 @@ Entrambe mostrano 0 entries dopo OTP login fresh. Stesso bug HIGH già tracked c
 
 ---
 
+## 05.20 — `/admin/pricing` (Pricing Calculator)
+
+> Sessione 2026-04-29. Tool sales-side per calcolare quote customer.
+
+### Findings
+
+- 🟢 **Form**: Edition (Free/Starter/Professional/Business/Enterprise), Subscription Years (1/2/3), Extra Agents (above 10 included), Priority Support (Yes/No).
+- 🟢 **Output card**: Base Annual, Agent Add-on, Support Add-on, Discount %, Discounted Annual, Duration, Total Price.
+- 🟢 **Default Professional 0 extra agent / 1 year / no priority** → `EUR 4999.00`.
+- 🟢 **Discount tiers** sotto: 1 Year 0%, 2 Years 10%, 3 Years 15% — coerente con landing page positioning.
+- 🟢 **SaaS Plans Reference** tabella in fondo: Starter €59/mo €590/yr 25 agents 3 users; Pro €249/mo €2490/yr 100 agents 10 users; Business €649/mo €6490/yr 500 agents 50 users.
+- 🔵 **`[05.20.1]`** Purpose ambiguo (vedi sotto).
+- 🔵 **`[05.20.2]`** Terminologia inconsistente "Pro" vs "Professional".
+
+### `[05.20.1]` 🔵 **INFO/UX** — Purpose della pagina poco chiaro: "non capisco a cosa serva" (utente)
+
+**Sintomo**:
+- Pagina marcata `READ-ONLY` in sidebar e contiene 2 logiche separate (Calculator dinamico + SaaS Plans Reference statico).
+- Nessuna intro/help-text che spiega: "Use this to quote on-prem deals" o "This shows what the customer-facing pricing page should display".
+- Sovrapposizione concettuale con `/admin/plans` (lì plan card) e con `sentrikat.com/pricing` (la landing page pubblica).
+
+**Impatto**: super-admin nuovo o sales team confusi su quale strumento usare per quote → rischio quote errate o inconsistenti vs sito pubblico.
+
+**Suggerimento**: header con "Per quotare deal on-prem custom (>10 agents, multi-year). Per pricing SaaS standard, vedi /admin/plans."
+
+**Severity = INFO**. Deployment scope: `🌐 portal admin`.
+
+### `[05.20.2]` 🔵 **INFO/UX** — Terminologia inconsistente: "Professional" (Edition dropdown) vs "Pro" (Reference table)
+
+**Sintomo**: Edition dropdown ha valori `FREE/STARTER/PROFESSIONAL/BUSINESS/ENTERPRISE`. La tabella SaaS Plans Reference sotto ha row `Starter / Pro / Business`. Stesso plan, due nomi.
+
+**Impatto**: micro, ma quando il sales team copia/incolla in un email è una segnalazione "qual è il nome ufficiale?" ripetuta.
+
+**Severity = INFO**. Deployment scope: `🌐 portal admin`.
+
+---
+
+## 05.21 — `/admin/plans` (Subscription Plans — read-only code reference)
+
+> Sessione 2026-04-29. **🔴 BUG HIGH**: prezzi divergenti tra 3 fonti di verità.
+
+### Findings
+
+- 🟢 **Header**: titolo "Subscription Plans", testo top-right "Plans are defined in code — read-only view".
+- 🟢 **5 plan card**: Free, Starter, Professional, Business, Enterprise.
+- 🟢 **Prezzi/quote dichiarati**:
+  - Free: `Free` · Agents 3 · Users 1 · Orgs 1 · Products 25 · features: `push_agents`
+  - Starter: `€59/mo` · Agents 10 · Users 3 · Orgs 1 · Products `-1` · features: api_access, email_alerts, push_agents, webhooks
+  - Professional: `€199/mo` · Agents 25 · Users 5 · Orgs 1 · Products `-1` · features: api_access, audit_export, compliance_reports, email_alerts, jira_integration, push_agents, sbom_export, siem_integration, webhooks
+  - Business: `€499/mo` · Agents 50 · Users 10 · Orgs 10 · Products `-1` · adds: backup_restore, ldap, multi_org, sso, white_label
+  - Enterprise: `€999/mo` · Agents `-1` · Users `-1` · Orgs `-1` · Products `-1` · stesso featureset Business
+- 🔴 **`[05.21.1]`** **HIGH** — prezzi/quote divergono da `/admin/pricing` Calculator e Reference (vedi sotto).
+- 🔵 **`[05.21.2]`** Placeholder `-1` per "Unlimited" leakka in UI come testo letterale.
+
+### `[05.21.1]` 🔴 **HIGH** — Triple source-of-truth divergence: Plans vs Pricing Calculator vs Reference
+
+**Sintomo** (Professional plan come esempio canonico):
+
+| Fonte | Mensile | Annuale | Agenti | Users |
+|---|---|---|---|---|
+| `/admin/plans` (code-defined) | **€199/mo** | €2388/yr | 25 | 5 |
+| `/admin/pricing` Calculator output (default Pro 0 extra agent 1 yr no support) | n/d | **EUR 4999.00** | 10 incl + addon | n/d |
+| `/admin/pricing` SaaS Plans Reference table | **€249/mo** | €2490/yr | 100 | 10 |
+
+3 fonti, **3 prezzi diversi** (ratio 4999 : 2490 : 2388 → quasi **2× spread**), **3 quote di agents diverse** (25 vs 10 vs 100).
+
+Stesso pattern presumibile per gli altri plan (Business/Enterprise non confrontabili perché Calculator non li mostra in reference).
+
+**Impatto** (CRITICAL trasversale):
+- **Sales team** usa Calculator → quota customer **EUR 4999** per Professional.
+- **Customer** apre landing `sentrikat.com/pricing` (servita da Plans probabilmente) → vede **€199/mo** = €2388/yr.
+- **Deal salta** appena customer fa il confronto: o sales sembra aver gonfiato, o il sito sembra ingannevole.
+- **Consistency promise**: il principio cardine `"Zero coverage parziale è accettabile"` di CLAUDE.md vale anche per pricing — un solo numero sbagliato erode fiducia totale.
+
+**Sospetto root cause**:
+- Plans page legge da Pydantic model in `SentriKat-web/license-server` (tag "defined in code").
+- Pricing Calculator legge da `server_config` (tag "all values loaded from server config" sotto il titolo) — probabilmente file YAML/JSON deployato separatamente.
+- SaaS Plans Reference table — terza fonte hardcoded nel template del Calculator stesso.
+- Drift inevitabile in assenza di single source of truth.
+
+**Fix prescriptivo**:
+1. Una sola sorgente: il Pydantic model in license-server (Plans page diventa autorevole).
+2. Pricing Calculator legge dallo stesso model (no `server_config` separato).
+3. Reference table eliminata (o generata dinamica dal model).
+4. Test CI: `make pricing-consistency-check` che fallisce se i 3 numeri divergono.
+
+**Severity = HIGH** (CRITICAL borderline) per l'impatto commerciale diretto. Deployment scope: `🌐 portal admin` + `🔐 license-server` + 🌐 landing page (cross-repo, propagation a `SentriKat-web/landing` da verificare).
+
+### `[05.21.2]` 🔵 **INFO/UX** — `-1` placeholder per "Unlimited" leakka come testo letterale
+
+**Sintomo**:
+- Card Enterprise: `Agents: -1 · Users: -1 · Orgs: -1 · Products: -1` invece di `Unlimited` / `∞`.
+- Card Starter/Professional/Business: `Products: -1` (Free dice `Products: 25` correttamente).
+
+**Impatto**: cosmetico ma fa sembrare il prodotto bacato/in beta. Customer/sales che screenshotta la card per discussion vede un -1 invasivo.
+
+**Suggerimento**: template formatter `value if value > 0 else "Unlimited"`.
+
+**Severity = INFO**. Deployment scope: `🌐 portal admin`.
+
+### Test follow-up
+
+- Cross-ref customer-facing landing `sentrikat.com/pricing`: quale numero mostra per Pro/Professional? Diventa 4ª fonte.
+- Cross-ref `/admin/pricing` con Edition=Free → calculator deve mostrare 0 (verifica edge case).
+- Cross-ref `[02.4.2]` warm-email USD/EUR: deve usare gli stessi numeri.
+
+---
+
+## Re-verify rapido — Releases / KB Mappings / Data Sources (sezioni 05.1/05.2/05.3)
+
+> Sessione 2026-04-29 sera. Re-verify post screenshot, niente di nuovo da aggiungere ma osservazioni che confermano stato.
+
+- **`/admin/releases`** (`05.1`): tutto come `[05.1.1]` (Total Releases `0`, Latest Version `-`). 0 release ingestate via GitHub sync nonostante VERSION inchiodato a beta.2/beta.6 (cluster `[03.5.3]`). CTA `Sync from GitHub` + `Manual Release` presenti. **Stato: bug `[05.1.1]` ancora aperto**, da fixare via release ingest.
+- **`/admin/kb`** (`05.2`): 64,749 mapping totali, tutti published, 0 pending review, 0 contributors. **Status NVD Sync: `unreachable (today)`** in colore arancione/warning — **conferma `[05.2.1]`** (NVD probe unreachable). Filter chip "Community" + "All Status".
+- **`/admin/datasources`** (`05.3`): 1 totale, 0 healthy, 1 down "Critical" (label `Unknown` / status UNKNOWN). **Conferma `[05.3.1]`** (data source non identificato). Cross-ref `[05.4.1]` (status page disonesta).
+
+Niente da aggiornare nei doc precedenti, sono ancora gli stessi bug.
+
+---
+
 ## Riepilogo apertura Fase 05
 
-- **Bug aperti**: 9 (di cui 8 HIGH `[05.1.1]` `[05.3.1]` `[05.4.1]` `[05.5.1]` ✅ `[05.6.1]` ✅ `[05.8.1]` `[05.9.1]` `[05.13.1]`, 2 WARN `[05.2.1]` `[05.5.2]` `[05.8.2]`). ✅ = verified 2026-04-29.
-- **Info/governance**: 4 (`[05.1.2]` `[05.6.2]` `[05.7.1]` `[05.14.1]`).
-- **OK**: 4 + 5 nuove pagine 7-dim happy (NVD sync, runbook, role matrix, quick actions + customers/leads/demo-requests/newsletter compose-side/support-tickets shell).
-- **Pagine ancora da aprire**: ~12 (vedi sidebar — EA Tenants, Webhook Outbox, Usage Metrics, Response Templates, Customer Health, Feedback, Licenses POST-EA, Activations POST-EA, Pricing READ-ONLY, Plans, Audit Log, Status sub-views).
+- **Bug aperti**: 10 (di cui 9 HIGH `[05.1.1]` `[05.3.1]` `[05.4.1]` `[05.5.1]` ✅ `[05.6.1]` ✅ `[05.8.1]` `[05.9.1]` `[05.13.1]` `[05.21.1]`, 2 WARN `[05.2.1]` `[05.5.2]` `[05.8.2]`). ✅ = verified 2026-04-29.
+- **Info/governance**: 9 (`[05.1.2]` `[05.6.2]` `[05.7.1]` `[05.14.1]` `[05.16.1]` `[05.17.1]` `[05.19.1]` `[05.20.1]`+`[05.20.2]` `[05.21.2]`).
+- **OK**: 4 + 10 nuove pagine 7-dim happy (NVD sync, runbook, role matrix, quick actions + customers/leads/demo-requests/newsletter compose-side/support-tickets shell + response-templates/customer-health/feedback/licenses-POST-EA/activations-POST-EA/pricing/plans).
+- **Pagine ancora da aprire**: ~4 (EA Tenants, Webhook Outbox, Usage Metrics, Audit Log dedicato).
 
 ### Cluster bug correlati
 
 - **Audit logging rotto**: `[05.5.1]` (audit log vuoto) + `[05.6.1]` (last_login non scritto) → root cause comune, probabilmente middleware audit non agganciato.
 - **Status page disonesta**: `[05.4.1]` (status verde) + `[05.3.1]` (datasource down) → status page manuale, non legge probe automatici.
 - **UI inconsistencies su retention**: `[05.5.2]` (365d vs 730d) → almeno una pagina mostra valori obsoleti.
+- **Pricing source-of-truth split** (NUOVO): `[05.21.1]` (HIGH 3 fonti) + `[05.20.1]` (purpose ambiguo) + `[05.20.2]` ("Pro" vs "Professional") → manca single source of truth nel pricing model. Cross-repo: anche landing page (`SentriKat-web/landing/sentrikat.com/pricing`) potenziale 4ª fonte da verificare.
+- **Auth-fail su admin endpoints** (NUOVO): `[05.13.1]` newsletter 403 "Invalid admin key" → diverso da `[05.9.1]` CSP cluster (già fixato), nuova classe di bug auth header sul license-server FastAPI.
+- **Empty state cosmetic leaks** (NUOVO): `[05.14.1]` (`badge-green` literal) + `[05.21.2]` (`-1` literal per Unlimited) + `[05.16.1]` (semantica "healthy" su zero-data) + `[05.19.1]` (triple "no installs"). Cluster di template polish da risolvere insieme.
 
