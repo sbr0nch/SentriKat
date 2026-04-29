@@ -156,12 +156,10 @@ EA Tenants, Webhook Outbox, Usage Metrics, Leads, Demo Requests, Newsletter, Sup
 ### Findings
 
 - 🟢 **Permissions matrix** ben strutturata e leggibile. Differenziazione coerente: Super Admin = Full ovunque; Admin = Full su tutto tranne nessun accesso a "Settings"; Support/Sales/Ops/Viewer con scopi limitati. ✅
-- 🔴 **[05.6.1] Last Login `-` per super-admin attualmente loggato** (HIGH — ✅ VERIFIED 2026-04-29)
-  - L'utente `admin-sentrikat / sotadenis94@gmail.com / SUPER ADMIN / ACTIVE` ha `Last Login: -` → mai aggiornato.
-  - Stiamo navigando come quell'utente in questo momento. La login deve aver settato il campo.
-  - **Re-test 2026-04-29**: dopo OTP login fresh, `/admin/users` mostra ancora `Last Login: -` → bug confermato HIGH.
-  - Diagnosi: stessa causa di [05.5.1] — auth flow non scrive `last_login_at` né emette evento audit.
-  - Impatto: impossibile sapere quando un super-admin si è loggato l'ultima volta → security blind spot.
+- 🟢 **[05.6.1] Last Login `-` per super-admin attualmente loggato** (HIGH — ✅✅ FIXED + VERIFIED post-deploy `23ce9da`)
+  - **Era**: `Last Login: -` per super-admin in `/admin/users`, anche dopo OTP login fresh.
+  - **Fix `sentrikat-web` commit `31805d6`**: `admin.py:171` ora scrive `user.last_login_at = datetime.utcnow()` su ogni successful `/admin/auth/login` (e `portal.py:373` per OTP customer).
+  - **✅ VERIFIED 2026-04-29 (utente)**: dopo logout/login fresh, `/admin/users` mostra timestamp del login corrente. Bug chiuso definitivamente.
 
 - 🔵 **[05.6.2] Super-admin di produzione usa email gmail personale** (INFO/governance)
   - Email: `sotadenis94@gmail.com`. Per una piattaforma B2B in fase Early Access è un governance smell:
