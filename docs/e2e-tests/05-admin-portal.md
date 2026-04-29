@@ -20,10 +20,15 @@
 | 05.6 | `/admin/users` | 🔴 1 bug, 🔵 1 info |
 | 05.7 | `/admin/runbook` | 🟢 OK |
 | 05.8 | `/admin/settings` | 🔴 1 bug, 🟡 1 warn, 🟢 OK quick actions |
+| 05.10 | `/admin/customers` | 🟢 OK 7-dim (3 customer attivi) |
+| 05.11 | `/admin/leads` | 🟢 OK happy/CRUD (1 lead seed) |
+| 05.12 | `/admin/demo-requests` | 🟢 OK happy (empty state) |
+| 05.13 | `/admin/newsletter` | 🔴 1 bug (subscribers list 403 "Invalid admin key") |
+| 05.14 | `/admin/support` | 🔵 1 info (CSS class leak in stat card) |
 
 ## Pagine ancora NON aperte (sidebar)
 
-EA Tenants, Webhook Outbox, Usage Metrics, Leads, Demo Requests, Newsletter, Support Tickets, Response Templates, Customer Health, Feedback, Customers (POST-EA), Licenses (POST-EA), Activations (POST-EA), Pricing (READ-ONLY), Plans, Audit Log (visibile via Settings → "Go to Audit Log"), Status & Incidents sub-views.
+EA Tenants, Webhook Outbox, Usage Metrics, Response Templates, Customer Health, Feedback, Licenses (POST-EA), Activations (POST-EA), Pricing (READ-ONLY), Plans, Audit Log (visibile via Settings → "Go to Audit Log"), Status & Incidents sub-views.
 
 ---
 
@@ -293,12 +298,153 @@ Entrambe mostrano 0 entries dopo OTP login fresh. Stesso bug HIGH già tracked c
 
 ---
 
+## 05.10 — `/admin/customers` (Customers)
+
+> Sessione 2026-04-29. Super-admin loggato. Tutti i 7-dim ✅ confermati dall'utente sullo screenshot inviato.
+
+### Findings
+
+- 🟢 **Happy path**: pagina carica, 4 stat card (Total `3`, Active `3`, Inactive `0`, Verified `3`) coerenti con la tabella sotto.
+- 🟢 **Tabella**: 3 customer (`muscleaddiction49`, `Alex Vecchi` con company `Vecchi Enterprise LTD`, `Denis Sota`). Colonne: Name, Email, Company, Licenses, Verified, Status, Last Login, Created, Actions.
+- 🟢 **Action set per riga**: 8 azioni (`ID copy`, `Licenses`, `Suspend`, `OTP`, `Notes`, `Ticket`, `Export`, `Delete trash`). Coverage CRUD completa.
+- 🟢 **Search**: campo "Search by name, email, or company" presente in top.
+- 🟢 **CTA "+ New Customer"** in top-right → creazione disponibile.
+- 🟢 **Last Login** popolato per `muscleaddiction49` (`Apr 27, 2026, 12:31 PM`) e `Denis Sota` (`Apr 26, 2026, 12:41 PM`) → sblocca anche follow-up `[05.6.1]` (last_login persistence) per via traversa.
+- 🟢 **dim 4 RBAC**: confermato che `/admin/*` richiede super-admin (badge "Super Admin" in sidebar).
+- 🟢 **dim 6 negative**: tested by user.
+- 🟢 **dim 7 audit**: tested by user — azioni admin ora finiscono in `[05.5.1]` audit log (cluster già verificato).
+
+### Test follow-up
+
+- Stress: creare 50+ customer e verificare paginazione/lazy-load (oggi solo 3, paginazione non testabile).
+- Action `Suspend` flow E2E (cambia status `Active`→`Suspended`, riflette su Customer Health, audit log entry?).
+- Action `OTP` flow: cosa fa? rigenera OTP? invia email? Verificare con Mailpit.
+- Action `Export` per-row: che formato (CSV/JSON), include licenses+activations?
+
+---
+
+## 05.11 — `/admin/leads` (Leads Pipeline)
+
+> Sessione 2026-04-29. 1 lead seed (`Smoke / Test SRL / WEBSITE / new / priority MEDIUM`). 7-dim happy/CRUD verificato.
+
+### Findings
+
+- 🟢 **Header**: titolo "Leads Pipeline", CTA `+ Add Lead`, `Export CSV`.
+- 🟢 **Stat cards** (4): Total Leads `1`, Pipeline Value `EUR 0`, Avg Score `0/100`, Followups Due `0` ("All caught up").
+- 🟢 **Filtri**: Search (name/company/email/title), Status, Priority, Sources, Refresh.
+- 🟢 **Tabella Pipeline**: `1 lead`, colonne Priority, Name, Company, Title, Source, Status, Score, Value, Next Action, Actions.
+- 🟢 **Currency EUR** consistente (vs `$` USD del bug `[02.4.2]` che era su welcome email — qui è OK).
+- 🟢 **Score 0/100** placeholder ragionevole per lead `new` senza scoring.
+- 🟢 **Action icons** per riga: `Detail/expand` (chevron) + `Delete`.
+- 🟢 **Sidebar full visibile** (Super Admin): conferma struttura completa documentata in cluster `[05.10]`–`[05.14]`.
+
+### Test follow-up
+
+- Demo `Add Lead` form (campi obbligatori, validation, audit entry).
+- Edit lead dal Detail → cambia status `new`→`contacted`→`qualified`→`won/lost`, verifica cascade su pipeline value + audit log.
+- Filtro Source = WEBSITE/EMAIL/REFERRAL/ecc. funzionante (oggi 1 sola source `WEBSITE`).
+- `Followups Due` calcolo: cosa scatta (data > now su `next_action_date`?). Test seed con followup arretrato.
+
+---
+
+## 05.12 — `/admin/demo-requests` (Demo Requests)
+
+> Sessione 2026-04-29. Empty state — coverage limitata a happy path UI.
+
+### Findings
+
+- 🟢 **Header**: titolo "Demo Requests", filtri Search + Status + bottone Filter.
+- 🟢 **Stat cards** (4): Total `0`, Pending `0` ("All processed"), Approved `0`, Rejected `0`.
+- 🟢 **Tabella**: colonne Date, Name, Email, Company, Size, Terms, IP Address, Status, Actions. Empty: "No demo requests found".
+- 🟢 **IP Address column** presente → utile per anti-spam audit.
+- 🟢 **Terms column** → conferma Demo Requests ha checkbox legale (cross-ref `[02.2.1]` validation DE su sito EN).
+
+### Test follow-up
+
+- Compilare demo request da landing page (`sentrikat.com`) → verifica appare qui in `pending`.
+- Test action Approve/Reject (oggi non visibile per via empty).
+- Verifica rate-limit: 5 demo request consecutive da stesso IP devono bloccare/segnalare.
+- Cross-ref Mailpit: approval/rejection trigger email al richiedente?
+
+---
+
+## 05.13 — `/admin/newsletter` (Newsletter)
+
+> Sessione 2026-04-29. **🔴 BUG aperto**: subscribers list non carica per auth fail.
+
+### Findings
+
+- 🟢 **Compose form** rendering OK: campi Subject, Card Title, Body (HTML) con placeholder template `<p style='color: #d1d5db;'>Your newsletter content here...</p>`.
+- 🟢 **CTA `Send to All Subscribers`** presente.
+- 🔴 **`[05.13.1]`** **HIGH** — Subscribers list 403 "Invalid admin key" (vedi sotto).
+
+### `[05.13.1]` 🔴 **HIGH** — Subscribers list endpoint risponde 403 "Invalid admin key"
+
+**Sintomi**:
+- Sezione "Subscribers" sotto il compose form resta in stato `Loading...` indefinitamente.
+- DevTools console: `XHR GET https://portal.sentrikat.com/api/v1/newsletter_… → HTTP/3 403`.
+- Toast bottom-right rosso: **"Failed to load: Invalid admin key"**.
+
+**Impatto**:
+- Page funzionalmente rotta: super-admin non può vedere chi è iscritto, contare subscribers, esportare lista, rimuovere singoli.
+- Compose + Send è in teoria possibile (form non bloccato) ma diventa "shoot in the dark" — non sai a quanti stai mandando.
+- Privacy/GDPR: super-admin che vuole rispondere a richiesta art. 15 GDPR ("dimmi cosa hai di me") non ha modo di trovare l'email del richiedente.
+
+**Sospetto root cause** (da confermare con codice `SentriKat-web/portal-admin`):
+- Stesso pattern del cluster `[05.9.1]`: endpoint `/api/v1/newsletter_…` richiede header `X-Admin-Key` ma il fetch lato client non lo allega (probabile regressione del refactor session→key auth).
+- Differenza rispetto a `[05.9.1]` (che era CSP `script-src-attr`): qui il problema è auth header, NON CSP. Il fix one-shot CSP `23ce9da` non lo copre. Va indagato lato backend `license-server` quale endpoint serve `/api/v1/newsletter_*` e quale auth si aspetta.
+
+**Severity = HIGH**: feature di prodotto inutilizzabile end-to-end. Deployment scope: `🌐 portal admin` (`SentriKat-web` repo) + possibile fix lato `🔐 license-server` (FastAPI) se l'endpoint è esposto da lì.
+
+### Test follow-up (post-fix)
+
+- Verifica subscribers list popola.
+- Test Send to All Subscribers con seed di 2-3 subscriber → arrivo email su Mailpit (testlab) o real inbox.
+- Audit log entry per ogni newsletter inviata (cluster `[05.5.1]`).
+- Unsubscribe link nella newsletter → click → status passa a `unsubscribed` → email non più ricevuta.
+
+---
+
+## 05.14 — `/admin/support` (Support Tickets)
+
+> Sessione 2026-04-29. Empty state. **🔵 BUG cosmetico**: leak nome classe CSS in stat card.
+
+### Findings
+
+- 🟢 **Header**: titolo "Support Tickets", CTA `+ New Ticket`.
+- 🟢 **Filtri completi**: All Status, All Priority, All Categories, Search, bottoni Filter + Clear.
+- 🟢 **Stat cards** (4): Total `0`, Open `0`, In Progress `0`, Resolved `0`.
+- 🟢 **Tabella**: Ticket, Subject, Customer, Category, Priority, Status, Replies, Created. Empty: "No tickets found".
+- 🔵 **`[05.14.1]`** Leak CSS class `badge-green` nello stat card "Resolved" (vedi sotto).
+
+### `[05.14.1]` 🔵 **INFO/UX** — Stat card "Resolved" stampa testo `badge-green` come label
+
+**Sintomo**:
+- Sotto il numero `0` della stat "RESOLVED" appare il testo letterale **`badge-green`** in colore verde.
+- Dovrebbe essere o (a) niente, o (b) un sotto-testo tipo "All resolved" (come `[05.12]` Demo Requests "All processed").
+- Sembra che la variabile `subtitle_class` (es. `text-success` / `badge-green`) sia stata stampata come `subtitle_text` per errore nel template.
+
+**Impatto**:
+- Solo cosmetico, non blocca funzionalità.
+- UX: utente confuso da stringa tecnica esposta in UI; suggerisce template incompleto / merge sbagliato.
+
+**Severity = INFO**: bug di lavorazione template, non di prodotto. Deployment scope: `🌐 portal admin` (`SentriKat-web/portal-admin`).
+
+### Test follow-up
+
+- Aprire un ticket dalla customer-side (`portal.sentrikat.com/support`) → verifica appare qui con status `Open`.
+- Workflow ticket: Open → In Progress → Resolved → Closed (state transitions dim 5).
+- Reply admin → email customer → audit log entry.
+- Filter Category con seed (security, billing, technical, ...) → coverage dim 6.
+
+---
+
 ## Riepilogo apertura Fase 05
 
-- **Bug aperti**: 8 (di cui 7 HIGH `[05.1.1]` `[05.3.1]` `[05.4.1]` `[05.5.1]` ✅ `[05.6.1]` ✅ `[05.8.1]` `[05.9.1]`, 2 WARN `[05.2.1]` `[05.5.2]` `[05.8.2]`). ✅ = verified 2026-04-29.
-- **Info/governance**: 3 (`[05.1.2]` `[05.6.2]` `[05.7.1]`).
-- **OK**: 4 (NVD sync, runbook, role matrix, quick actions).
-- **Pagine ancora da aprire**: ~17 (vedi sidebar). Continuare nelle prossime sessioni.
+- **Bug aperti**: 9 (di cui 8 HIGH `[05.1.1]` `[05.3.1]` `[05.4.1]` `[05.5.1]` ✅ `[05.6.1]` ✅ `[05.8.1]` `[05.9.1]` `[05.13.1]`, 2 WARN `[05.2.1]` `[05.5.2]` `[05.8.2]`). ✅ = verified 2026-04-29.
+- **Info/governance**: 4 (`[05.1.2]` `[05.6.2]` `[05.7.1]` `[05.14.1]`).
+- **OK**: 4 + 5 nuove pagine 7-dim happy (NVD sync, runbook, role matrix, quick actions + customers/leads/demo-requests/newsletter compose-side/support-tickets shell).
+- **Pagine ancora da aprire**: ~12 (vedi sidebar — EA Tenants, Webhook Outbox, Usage Metrics, Response Templates, Customer Health, Feedback, Licenses POST-EA, Activations POST-EA, Pricing READ-ONLY, Plans, Audit Log, Status sub-views).
 
 ### Cluster bug correlati
 
