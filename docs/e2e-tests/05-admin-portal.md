@@ -126,14 +126,10 @@ EA Tenants, Webhook Outbox, Usage Metrics, Leads, Demo Requests, Newsletter, Sup
 
 ### Findings
 
-- 🔴 **[05.5.1] Centralized Logs completamente vuoto durante una sessione admin attiva** (HIGH — ✅ VERIFIED 2026-04-29)
-  - Total: **0** · Audit: 0 · Activation: 0 · SaaS: 0 · Today: 0.
-  - Stiamo aprendo `/admin/logs` da una sessione super-admin autenticata in questo momento → l'evento `admin.login` (oltre a tutte le navigazioni admin) **dovrebbe** apparire come audit log entry.
-  - **Re-test 2026-04-29**: dopo logout (vedi [05.9.1] — sign out non funziona, ma OTP login fresh sì) → audit log ancora vuoto. Bug confermato HIGH.
-  - Confermato anche su `/admin/audit` (vedi 05.9): Total Events 0, Today 0, This Week 0, This Month 0 — DUE pagine diverse di audit, entrambe vuote.
-  - Diagnosi probabile: l'audit logger non scrive su questo storage (forse scrive su file/Docker logs ma non sul DB letto da questa pagina), oppure il middleware audit non è agganciato alle route admin/auth.
-  - Impatto: zero traceability di azioni admin. Compliance issue (SOC2/GDPR richiedono audit trail di accessi privilegiati).
-  - Correlato a [05.6.1] (last login `-`).
+- 🟢 **[05.5.1] Centralized Logs completamente vuoto durante una sessione admin attiva** (HIGH — ✅✅ FIXED + VERIFIED post-deploy `23ce9da`)
+  - **Era**: `/admin/logs` Total/Audit/Activation/SaaS = 0 anche durante sessione admin attiva.
+  - **Fix `sentrikat-web` commit `31805d6`**: `/admin/auth/login` emette `LOGIN_SUCCESS` / `LOGIN_FAILED` con `details.reason` su ogni outcome via `log_admin_action`. `/admin/users` POST/PATCH/DELETE emettono `ADMIN_ACTION` con operatore + target.
+  - **✅ VERIFIED 2026-04-29 (utente)**: dopo deploy 23ce9da + login fresh, `/admin/logs` e `/admin/audit` ora popolati. **Comportamento confermato by-design**: gli eventi audit sono scritti SOLO per accessi via account (login UI), NON per chiamate via `ADMIN_API_KEY` programmatica. Corretto: l'API key è un agent secret e non ha "user identity" da loggare nello user audit trail.
 
 - 🟡 **[05.5.2] Retention policy mostrata qui (365d audit) ≠ retention policy in `/admin/settings` (730 DAYS audit)** (WARN)
   - Banner qui: *"Retention Policy: Activation logs: 90 days · Audit logs: **365 days** · SaaS logs: 90 days · System logs: 30 days (Docker)"*.
