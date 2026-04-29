@@ -250,9 +250,11 @@ EA Tenants, Webhook Outbox, Usage Metrics, Leads, Demo Requests, Newsletter, Sup
 
 ## 05.9 — Bug trovati durante re-test 2026-04-29
 
-### `[05.9.1]` Sign Out **non funziona** — CSP `script-src-attr` blocca inline handler (HIGH/CRITICAL)
+### `[05.9.1]` 🔴🔴 **CRITICAL** — Intera UI admin morta ai click: CSP `script-src-attr` blocca TUTTI gli inline handler
 
-- Cliccando "Sign Out" in basso a sinistra del sidebar admin: nulla succede. Console browser mostra ripetuti errori CSP:
+**ESCALATION 2026-04-29**: scoperto che NON è solo "Sign Out" — utente conferma che **tutti** i bottoni dell'admin sono incliccabili: Export CSV/JSON, campanellina notifiche, Sign Out, e per estensione presumibilmente anche `+ New User`, `+ New Incident`, `Probe`, `Sync from GitHub`, `Sync NVD`, `Sync Now`, `Probe All`, `Filter`, `Clear`, `Edit`, `Disable`, `Delete`, `Reset All Uptime History`, `Run Cleanup Now`, `Refresh`, `Go to Audit Log`, `+ Manual Release`, `Schedule Maintenance`. **L'intero portal admin è in pratica read-only forzato**, ma per bug, non per design.
+
+- Console browser mostra ripetuti errori CSP su ogni click:
   ```
   Content-Security-Policy: Le impostazioni della pagina hanno bloccato l'esecuzione
   di un gestore eventi (script-src-attr) in quanto viola la seguente direttiva:
@@ -260,13 +262,30 @@ EA Tenants, Webhook Outbox, Usage Metrics, Leads, Demo Requests, Newsletter, Sup
   Considerare l'utilizzo di un hash ("sha256-y0nKik4dM+1fXZh10edAXaR/Ck6G362K0i51lEfsER4=")
   insieme a "unsafe-hashes". admin:702:7
   ```
-  + 3 warning identici con hash diverso (`sha256-7X/TEBMYawkpLTmqph9jNMqmP7vLvBcPZkLBLwPk8G8=`).
-- Diagnosi: il bottone "Sign Out" usa un `onclick="..."` inline (HTML attribute event handler), ma il CSP del portal admin non ha `'unsafe-inline'` o gli hash necessari nella direttiva `script-src-attr`/`script-src`. Conseguenza: il logout non parte mai.
-- File coinvolto (dal log): `admin:702:7` → `/admin/<page>` template HTML.
-- Impatto: **session non chiudibile dalla UI**. Per fare logout l'utente deve chiudere il browser o cancellare i cookie a mano. Security issue: in caso di laptop condiviso/perso, il super-admin resta loggato.
-- Correlato a [04.2.1] CSP portal regression già fixato lato customer — qui il regression è sull'admin.
-- Fix proposto: rimuovere `onclick=""` inline e legare l'evento via JS esterno con il nonce corretto (`<script nonce="...">document.querySelector('#sign-out').addEventListener('click', ...)</script>`), oppure usare un form POST a `/admin/logout` con il submit button.
-- Repro: aprire `/admin/<qualsiasi>`, click "Sign Out" → nessuna azione, console F12 mostra il warning CSP.
+  + warning identici con hash diversi (`sha256-7X/TEBMYawkpLTmqph9jNMqmP7vLvBcPZkLBLwPk8G8=`, ecc.) — ogni hash corrisponde a un `onclick=""` distinto in pagina.
+- Diagnosi: il template HTML del portal admin usa `onclick=""` inline (HTML attribute event handler) su tutti i bottoni, ma il CSP del portal admin ha `script-src 'self' 'nonce-...'` SENZA `'unsafe-inline'` né `'unsafe-hashes'` con gli sha corretti, e senza `script-src-attr 'unsafe-inline'`. Conseguenza: tutti gli handler inline sono bloccati silenziosamente.
+- File coinvolto (dal log): `admin:702:7` → uno dei template Jinja `/admin/<page>.html` o un layout/partial condiviso. Linea 702 è probabilmente in un layout comune (sidebar/header).
+- Impatto:
+  - **Session non chiudibile**.
+  - **Nessuna azione amministrativa eseguibile dalla UI** (sync, probe, CRUD, export, manutenzione).
+  - L'unico modo per amministrare è API diretta con `ADMIN_API_KEY` o accesso DB.
+  - In Early Access con un solo super-admin → operatività zero dalla UI.
+- Correlato a [04.2.1] CSP portal regression (lato customer, già fixato in `42d7ea0`) — stesso pattern, qui sull'admin layout.
+- Fix proposto (in ordine di preferenza):
+  1. Sostituire tutti gli `onclick=""` inline con `data-action="..."` + un singolo `<script nonce="{{ csp_nonce }}">` esterno che legge `data-action` e fa `addEventListener` (pattern unobtrusive JS).
+  2. Oppure: aggiungere `'unsafe-hashes'` + lo sha256 di ogni handler nella CSP (fragile, hash da rigenerare ad ogni cambio).
+  3. Sconsigliato: aggiungere `'unsafe-inline'` (rompe la security posture, motivo originale del CSP nonce-based).
+- Repro: aprire `/admin/<qualsiasi>`, click "Sign Out" o qualunque bottone → nessuna azione, console F12 mostra warning CSP.
+
+**⏸️ BLOCKING**: i seguenti test follow-up sono BLOCCATI da [05.9.1] finché non viene fixato:
+- 05.1: click "Sync from GitHub" / "+ Manual Release"
+- 05.2: click "Sync NVD" / search filter
+- 05.3: click "Probe" / "Probe All Sources"
+- 05.4: click "+ New Incident" / "Schedule Maintenance" / "Reset All Uptime History"
+- 05.5: click "CSV" / "JSON" export, click "Filter"
+- 05.6: click "+ New User" / "Edit" / "Disable" / "Delete"
+- 05.8: click ogni Quick Action / "Run Cleanup Now" / "Refresh"
+- Sign Out (universale)
 
 ### `/admin/audit` — pagina **dedicata audit log**, anch'essa vuota (HIGH — stesso root cause di [05.5.1])
 
