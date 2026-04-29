@@ -169,7 +169,7 @@ Ogni fase ha un proprio file `NN-nome.md` (creato al momento, non tutti in antic
 | 02 | `02-signup-saas.md` | Signup SaaS: form Early Access, capacity check, `/api/v1/provision/trial`, Stripe checkout, webhook, bridge provisioning → `app.sentrikat.com` | ✅ 90% (2 bug, 2 warn, 13 info, 13 OK; 4 sotto-aree rimandate a fase 05 admin) |
 | 03 | `03-signup-onprem.md` | Signup on-prem: lead/contact sales, acquisto license, download binario, install Docker, setup wizard, attivazione RSA, hardware lock | 🟡 in corso (install OK, wizard step 1 OK, 1 bug HIGH version, 2 warn log level/rate-limiter) |
 | 04 | `04-portal-customer.md` | `portal.sentrikat.com` customer: OTP login, dashboard, account, licenze, downloads, support/feedback, checkout, upgrade, logout | ⬜ |
-| 05 | `05-portal-admin.md` | `portal.sentrikat.com` admin: 25 pagine admin (customers, licenses, plans, leads, demo-requests, feedback, audit, logs, usage-metrics, ecc.) | ⬜ |
+| 05 | `05-admin-portal.md` | `portal.sentrikat.com` admin: 25 pagine admin (customers, licenses, plans, leads, demo-requests, feedback, audit, logs, usage-metrics, ecc.) | 🟡 8/25 pagine aperte (releases/kb/datasources/status/logs/users/runbook/settings) — 5 High + 2 Warn + 3 Info + 4 OK |
 | 06 | `06-app-auth-rbac.md` | `app.sentrikat.com` auth: local, LDAP/AD, SAML 2.0, TOTP 2FA, session, password reset, RBAC (super_admin/org_admin/manager/user) | ⬜ |
 | 07 | `07-agents-inventory.md` | Agent: download script Win/Linux/macOS, deploy, API key, inventory, heartbeat, job processing, asset mgmt, container scan, dependency scan (sentrikat-scan CLI) | ⬜ |
 | 08 | `08-scanning-matching.md` | Vuln matching: CISA KEV sync, NVD/CVE.org/ENISA fallback, CPE 4-tier mapping, 3-phase filter (derivatives/history-guard/noise), backport detection (OSV/RedHat/MSRC/Debian), EPSS | ⬜ |
@@ -316,15 +316,15 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 ## Bug counter globale
 
-**Post verify round 1 — 2026-04-26 fine giornata** (rebuild + test prod):
+**Post Phase 05 opening — 2026-04-29** (PC casa, docker+testlab):
 
-- 🔴 Bug aperti: **13** *(-1 nuovo bug sub `[04.2.2]` Chart.js, +1 nuovo bug `[04.2.1]` poi fixato → net 12 + 1 sub-bug aperto)*
-- 🟡 Warning: 10
-- 🔵 Info/UX: 61
-- 🟢 OK passati: 100
-- ⏸️ Test bloccati: 5 (residui solo on-prem dependencies)
-- ✅ Fix applicati: **20** *(7 core + 13 web — incluso `[04.2.1]` di oggi)*
-- ✅✅ Fix VERIFIED: **9** su 20 *(round 1 completato: 8 batch + [04.2.1] CSP)*. Restano da verificare: `[02.4.1]/[02.4.2]` welcome email (browser, ricabbia 5 min) + 7 fix core on-prem (richiedono laptop principale con docker)
+- 🔴 Bug aperti: **19** *(13 da round 1 + 6 nuovi HIGH da Fase 05: `[05.1.1]` `[05.3.1]` `[05.4.1]` `[05.5.1]` `[05.6.1]` `[05.8.1]`)*
+- 🟡 Warning: **13** *(10 da prima + 3 nuovi: `[05.2.1]` `[05.5.2]` `[05.8.2]`)*
+- 🔵 Info/UX: **64** *(61 + 3 nuovi: `[05.1.2]` `[05.6.2]` `[05.7.1]`)*
+- 🟢 OK passati: **104** *(100 + 4 nuovi da Fase 05: NVD sync healthy, runbook, role matrix, quick actions)*
+- ⏸️ Test bloccati: 5 (residui solo on-prem dependencies — sbloccabili oggi)
+- ✅ Fix applicati: **20** *(7 core + 13 web)*
+- ✅✅ Fix VERIFIED: **9** su 20. Restano da verificare: `[02.4.1]/[02.4.2]` welcome email + 7 fix core on-prem → **eseguibili OGGI sul PC casa**.
 
 *(aggiornati a mano ad ogni commit)*
 
@@ -446,7 +446,10 @@ Raccolta delle cose che **vanno provate** ma che non abbiamo testato funzionalme
 - Tutto da testare: login OTP, dashboard, licenze, downloads, support, checkout, upgrade, logout
 
 ### Fase 05 — Portal Admin
-- Tutto da testare: 25 pagine admin
+- 8/25 pagine aperte 2026-04-28/29 (PC casa con docker+testlab disponibili) — vedi `05-admin-portal.md`
+- Bug aperti: `[05.1.1]` releases vuoto vs health, `[05.3.1]` data source Unknown DOWN, `[05.4.1]` status disonesto, `[05.5.1]` audit log vuoto, `[05.6.1]` last_login non scritto, `[05.8.1]` RSA_PRIVATE_KEY=NOT SET
+- Cluster identificati: audit logging rotto ([05.5.1]+[05.6.1]), status page non integra probe ([05.4.1]+[05.3.1]), retention UI inconsistente ([05.5.2])
+- Pagine ancora da aprire (~17): EA Tenants, Webhook Outbox, Usage Metrics, Leads, Demo Requests, Newsletter, Support Tickets, Response Templates, Customer Health, Feedback, Customers (POST-EA), Licenses (POST-EA), Activations (POST-EA), Pricing (READ-ONLY), Plans, Audit Log dedicated view
 
 ### Fase 06+
 - Fase 06 App core auth/RBAC/2FA
