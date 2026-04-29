@@ -580,12 +580,21 @@ def check_match(vulnerability, product):
     # Try keyword matching
     if use_keyword:
         if match_type == 'auto':
-            # In 'auto' mode: if the product HAS a CPE, CPE is authoritative.
-            # Do NOT fall back to keyword matching, even if CPE didn't match.
-            # This prevents false positives where CPE correctly says "not affected"
-            # but vendor_product fallback matches on vendor name alone.
-            # Only use keyword matching for products WITHOUT CPE configured.
+            # In 'auto' mode: when the product has a CPE, CPE is authoritative
+            # ONLY IF the vulnerability has been NVD-enriched (cpe_data populated).
+            # When cpe_data is NULL the CPE is not "authoritative says no", it is
+            # "CPE missing because enrichment hasn't run yet". Falling back to
+            # keyword matching here recovers the ~65% of CVEs that haven't been
+            # enriched (see bug [03.14.32]).
+            #
+            # Behaviour for CVEs WITH cpe_data is unchanged: CPE result stands
+            # (no false positives introduced).
+            #
+            # Products WITHOUT CPE always use keyword (legacy behaviour).
             if not product_has_cpe:
+                keyword_reasons, keyword_method, keyword_confidence = check_keyword_match(vulnerability, product)
+            elif not vulnerability.cpe_data:
+                # CPE missing on the vulnerability → fall back to keyword
                 keyword_reasons, keyword_method, keyword_confidence = check_keyword_match(vulnerability, product)
         elif cpe_reasons:
             pass  # Skip keyword matching, CPE matched

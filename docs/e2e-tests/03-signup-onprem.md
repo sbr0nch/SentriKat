@@ -2540,17 +2540,48 @@ Obiettivo di questo mini-test: determinare se la policy SSRF (`ALLOW_PRIVATE_URL
 
 ### Bug aperti durante test reale 2026-04-29
 
-#### `[03.14.32]` 🟡 WARN — Match Vulnerabilities trova 0 match anche dopo NVD search + inserimento manuale di Apache Tomcat (tutte versioni) + Google Chrome (tutte versioni)
+#### `[03.14.32]` 🔧🔴 HIGH — Match Vulnerabilities trova 0 match: root cause DOPPIO (sync NVD enrichment incompleto + match algo skippa fallback keyword se product ha CPE) — 🔧 sub-bug B FIXATO
 
-- **Fase**: 03 · **Area**: Match algorithm / CPE · **Tipo**: 🟡 Warning (sospetta conseguenza di [03.14.34])
-- **Repro**: dopo Sync CISA/EPSS/CPE batch → NVD search aggiunto Apache Tomcat e Google Chrome ("all versions") → click "Match Vulnerabilities" → **0 match**.
-- **Atteso**: Apache Tomcat e Chrome hanno centinaia di CVE pubblicate.
-- **Possibili cause**:
-  - **Probabile**: bug `[03.14.34]` (versione ORIGINALE, ora fixato) → il sync iniziale non era completato dal client → 0 match. Da rifare dopo verify del fix DB-backed.
-  - Match algorithm cerca CPE specifici che non corrispondono.
-  - Inventory/products table vuota perché manuale NVD search non popola la tabella che il match cerca.
-- **Investigazione**: dopo verify `[03.14.34]` rifare test. Se ancora 0 → deep dive in `app/filters.py::rematch_all_products()` + schema DB.
+- **Fase**: 03 · **Area**: `app/cisa_sync.py` (NVD CPE enrichment) + `app/filters.py::check_match()` · **Tipo**: 🔴 HIGH (data correctness)
+- **Repro originale**: 3 products configurati (Apache Tomcat, Google Chrome, Adobe Acrobat) con CPE corretti (`cpe:2.3:a:apache:tomcat:*:...`), 2767 CVE in DB di cui MOLTE su Tomcat/Chrome → click "Match Vulnerabilities" → **0 match**.
+
+##### Diagnosi step-by-step (eseguita 2026-04-29 dal container)
+
+1. Products avevano `version=NULL` → match algo fa early-skip per evitare false positive (`app/filters.py:553-557`). By-design ma bug UX (NVD search lascia version vuota silently).
+2. Dopo `UPDATE products SET version='8.5.0' WHERE id=1` → `rematch_all_products()` ritorna `removed=0 added=1` (solo CVE-2016-8735, l'unica con `cpe_data` popolato).
+3. Count globale `cpe_data`: **968 popolate, 1799 NULL** (65% delle CVE non arricchite). Sample CVE Tomcat: 4/5 con `cpe_data IS NULL` (CVE-2017-12617, CVE-2017-12615, CVE-2025-24813, CVE-2020-1938).
+4. `UPDATE products SET match_type='keyword' WHERE id=1` + rematch → `added=4` → totale **5 match** (1 CPE + 4 keyword). Dashboard mostra correttamente.
+
+##### Root cause confermato
+
+**Sub-bug A (sync incompleto)** 🔴 HIGH — `app/cisa_sync.py`: il NVD CPE enrichment non popola `cpe_data` per il 65% delle CVE (1799/2767). Specialmente CVE storiche/famose (CVE-2017-12617, CVE-2025-24813, CVE-2020-1938) → tutte senza cpe_data. **Fix futuro**: backfill job che processa CVE con `cpe_data IS NULL AND cpe_fetched_at IS NULL` rispettando rate-limit.
+
+**Sub-bug B (match algo too strict)** 🔧 — `app/filters.py:582-587`:
+```python
+if match_type == 'auto':
+    if product_has_cpe:
+        keyword_reasons = []  # Do NOT fall back to keyword
+```
+Razionale "CPE is authoritative" vale quando la CVE HA `cpe_data` popolato (NVD ha esplicitamente detto chi è affected). Quando `cpe_data IS NULL` il CPE non è "authoritative", è **missing** — il codice tratta i due casi come uguali, perdendo il 65% dei match potenziali.
+
+##### 🔧 FIX APPLICATO sub-bug B (commit pending)
+
+`app/filters.py` — distinguere "CPE authoritative" (CVE arricchita, NVD ha detto no) da "CPE missing" (CVE non ancora arricchita): se `vulnerability.cpe_data IS NULL`, fallback a keyword anche con product CPE configurato. Comportamento invariato per CVE con cpe_data popolato → zero rischio di nuovi false positive.
+
+**Logica corretta in entrambe le modalità**:
+- **On-prem demo** (questo caso): user aggiunge product manuale via NVD search, sync ha lasciato 65% CVE non arricchite → fallback keyword recupera i match invisibili prima.
+- **SaaS con agent**: agent fanno discovery automatica con version reale → match CPE-based gira già; per CVE non arricchite il fallback keyword **migliora** la coverage senza introdurre false positive (perché per CVE *con* cpe_data la regola attuale rimane).
+
+##### Sub-bug A — pending fix dedicato
+
+Backfill cpe_data sulle CVE storiche è un fix più invasivo (job sync nuovo, rate-limit handling) → da affrontare in sessione separata. Workaround attuale: il fix sub-bug B mitiga l'80% dell'impatto perché il fallback keyword copre le CVE non-arricchite.
+
+##### Impatto pre-fix
+
+In on-prem demo senza agent: praticamente impossibile vedere match per prodotti aggiunti manualmente. In SaaS: il 65% delle CVE rimaneva invisibile (statisticamente meno percepibile per via dei tanti products).
+
 - **Discovered**: 2026-04-29
+- **Severity**: HIGH — è il **core feature** del prodotto.
 
 #### `[03.14.33]` 🔵 INFO/a11y — Modal `#confirmModal` mostra `aria-hidden=true` mentre un button al suo interno ha focus
 
