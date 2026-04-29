@@ -23,7 +23,23 @@ L'utente ha avuto sessioni rotte ripetutamente da `Stream idle timeout - partial
 
 ## 📚 Stato lavoro E2E (aggiornare quando cambia)
 
-- **Repo**: `sbr0nch/SentriKat` (on-prem core) + `sbr0nch/SentriKat-web` (frontend separato).
+### ⚠️ Repo split — leggere PRIMA di proporre fix
+
+I bug E2E sono divisi in **due repository** distinti. Il tuo working dir potrebbe essere uno dei due — controlla con `pwd` + `cat README.md`:
+
+| Repo | Path tipico | Dominio prod | Cosa contiene | Container docker locali |
+|---|---|---|---|---|
+| **`sbr0nch/SentriKat`** (on-prem core) | `/home/user/SentriKat` o `C:\SentriKat` | `app.sentrikat.com` | Vulnerability management Flask app, license-server, agent API, KB sync | `sentrikat`, `sentrikat-db`, `sentrikat-nginx`, `testlab-*` |
+| **`sbr0nch/SentriKat-web`** (Astro frontend + admin portal) | `/home/user/SentriKat-web` o equivalente | `sentrikat.com`, `portal.sentrikat.com` (customer + **admin**) | Landing site, portal customer, **portal admin**, blog, docs, status page | NESSUNO in locale — gira su VM Hetzner SaaS in prod |
+
+**Regole derivate**:
+- Bug `[01.*]` `[02.*]` `[04.*]` `[05.*]` (admin portal) → fix in `SentriKat-web`. **NON cercare il codice in questo repo**.
+- Bug `[03.*]` `[06.*]` `[07.*]`+ → fix in `SentriKat` core (questo repo se siamo qui).
+- I doc E2E (`docs/e2e-tests/*.md`) vivono SOLO in questo repo `SentriKat`. L'altro repo riceve handoff via `FIX-HANDOFF-sentrikat-web.md`.
+- Mai eseguire `grep onclick` in questo repo per debuggare bug del portal admin — il template colpevole NON è qui.
+- `portal.sentrikat.com` non è raggiungibile in locale (no docker container) → tutti i test sono via browser su prod URL.
+
+- **Repo principale (questo)**: `sbr0nch/SentriKat` core. Master file E2E: `docs/e2e-tests/00-INDEX.md`.
 - **Master file**: `docs/e2e-tests/00-INDEX.md` — leggere sempre la sezione HANDOFF in cima prima di iniziare.
 - **Branch correntemente in lavoro**: `claude/add-e2e-test-docs-UVya5` (push qui).
 - **Phase status**: vedi tabella in `00-INDEX.md`. Fase 05 (Portal Admin) in apertura — screenshot di 8 pagine acquisiti il 2026-04-28, doc da scrivere in `docs/e2e-tests/05-admin-portal.md`.
