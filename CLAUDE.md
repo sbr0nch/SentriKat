@@ -59,6 +59,7 @@ I bug E2E sono divisi in **due repository** distinti. Il tuo working dir potrebb
 - **Bug ID**: formato `[FF.S.B]` o `[FF.S.B.N]` (Fase.Sezione.Bug.SubBug). Mai rinumerare retroattivamente.
 - **Severity icon**: 🔴 HIGH/CRITICAL · 🟡 MEDIUM/WARN · 🔵 INFO · 🟢 OK · ⏸️ BLOCKED · 🔧 fix applicato unverified · ✅ verified.
 - **No PR auto**: non creare PR se non richiesto esplicitamente. Push sì, PR no.
+- **Workflow git utente**: l'utente apre PR `claude/*` → review → merge su `main` → poi pulla da `main` sui suoi laptop. NON proporre `git pull origin claude/<branch>` se non strettamente necessario; è meglio aspettare che il commit arrivi su `main` via PR. Se il fix urge (es. serve per testare nel container locale), avvisare l'utente che è una scorciatoia temporanea.
 
 ---
 
