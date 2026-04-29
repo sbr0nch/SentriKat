@@ -2481,3 +2481,71 @@ Obiettivo di questo mini-test: determinare se la policy SSRF (`ALLOW_PRIVATE_URL
 - **Valutazione**: accettabile (`1025` è dev/testlab, non port production standard). Helper è accurato per uso produzione.
 - **Discovered**: 2026-04-23
 
+---
+
+## 03.14 — Settings tabs: click reali sui Sync/Alert triggers (Strategia A) — 2026-04-29
+
+**Sessione PC casa con docker on-prem fresh (image post-fix `[03.11.4.5]`, `FLASK_ENV=production`, `ALLOW_PRIVATE_URLS=true`, `SAAS_MODE=unset`).** Eseguiti i 6+ click batch che il master `00-INDEX.md` segnalava come "HIGH — senza questi la feature non è validata".
+
+### Findings
+
+#### `[03.14.0]` 🔵 INFO — `/admin-panel` redirige automaticamente a `/all-users` invece di aprirsi sul tab default
+
+- **Fase**: 03 · **Area**: Admin Panel / routing · **Tipo**: 🔵 Info (UX)
+- **Actual**: aprendo `http://localhost/admin-panel` si finisce su `/all-users`. La pagina admin-panel ha hash anchors (`#settings:sync`, `#integrations:pushAgents` ecc.) ma senza hash il backend redireziona altrove.
+- **Valutazione**: probabilmente il default landing per super-admin è la pagina Users. Non è bug ma confonde la prima volta.
+- **Discovered**: 2026-04-29
+
+#### `[03.14.1]` 🟢 OK — Sync CISA KEV Now → toast verde (dim 1 happy path)
+
+- **Endpoint**: `POST /api/sync` (`@admin_required`, `5/min` rate-limit)
+- **Discovered**: 2026-04-29
+
+#### `[03.14.2]` 🟢 OK — Sync EPSS Scores Now → toast verde
+
+- **Endpoint**: `POST /api/sync/epss`
+- **Discovered**: 2026-04-29
+
+#### `[03.14.3]` 🟢 OK — Sync CPE Dictionary Now → toast verde
+
+- **Discovered**: 2026-04-29
+
+#### `[03.14.4]` 🟢 OK — Run Auto-Acknowledge Now → toast verde
+
+- **Discovered**: 2026-04-29
+
+#### `[03.14.5]` 🟢 OK — Send Email Alerts Now: code path validato, 0 delivery per absence CVE (skip by-design)
+
+- **Endpoint**: `POST /api/alerts/trigger-critical`
+- **Output utente**:
+  ```
+  Alert Results — Organizations processed: 1, Emails sent: 0, Skipped: 1, Errors: 0
+  default: No unacknowledged CVEs
+  ```
+- **Valutazione**: il job è **arrivato fino al check `unacknowledged_cves > 0`** senza essere bloccato dalla SSRF policy → fix `[03.11.4.5]` efficace anche qui. Per validare la DELIVERY vera serve almeno 1 CVE matched (vedi follow-up Strategia F).
+
+#### `[03.14.6]` 🟢 OK — Send Webhook Alerts Now: code path validato, 0 delivery per absence CVE
+
+- **Endpoint**: `POST /api/alerts/trigger-webhooks`
+- **Output**: identico a [03.14.5], `Webhooks sent: 0`, `default: No unacknowledged critical/high CVEs`.
+
+#### `[03.14.7]` ✅ VERIFY DEFINITIVO `[03.11.4.5]` — Test Connection webhook in production mode
+
+- **Repro**: Settings → Integrations → Generic Webhook con URL `http://host.docker.internal:8800/<token>` (precedentemente `localhost:8800` → sbagliato se chiamato dal container) → Save → click **Test** (singolo, NON il batch alerts) → **toast verde** + request appare in webhook-tester (`http://localhost:8800`).
+- **Stato**: insieme al verify Jira di prima (`http://host.docker.internal:8080`, project key `VULN`), questo chiude `[03.11.4.5]` su tutti i tracker URL-based. ✅✅
+- **Discovered**: 2026-04-29
+
+#### `[03.14.8]` 🔵 INFO — UI permette `localhost:<port>` come Webhook URL ma fallisce a runtime con "External service error" generico
+
+- **Fase**: 03 · **Area**: Settings / Webhook / UX · **Tipo**: 🔵 Info (DX)
+- **Actual**: configurando Webhook URL = `http://localhost:8800/<token>`, save passa ma Test fallisce con toast rosso "External service error" senza spiegare che `localhost` dentro un container non punta al testlab host.
+- **Suggerimento**: se l'app rileva `localhost` o `127.x` E il deployment è in container, mostrare hint inline: *"In Docker use `host.docker.internal` to reach services on the host (e.g. testlab)."*
+- **Discovered**: 2026-04-29
+
+### Test follow-up Fase 03.14 (rinviati, dipendono da CVE matched in DB)
+
+- [ ] **Strategia F seed CVE**: inserire fake CVE matched a fake product → cliccare Send Email/Webhook Alerts Now → verificare delivery (Mailpit + webhook-tester).
+- [ ] **7-dim dim 6 negative**: webhook URL malformata, port out-of-range, dominio inesistente — error UX.
+- [ ] **7-dim dim 7 audit**: dopo ogni click sync/trigger verificare che `audit.log` (file) o `/api/admin/logs` mostri la entry corrispondente.
+- [ ] **7-dim dim 5 state**: scheduler interval triggers (Enable Automatic Sync) — verificare che il next-scheduled si popoli e dopo prossimo run il last-sync si aggiorni.
+
