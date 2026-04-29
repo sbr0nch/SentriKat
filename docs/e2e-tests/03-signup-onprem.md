@@ -2581,6 +2581,15 @@ Obiettivo di questo mini-test: determinare se la policy SSRF (`ALLOW_PRIVATE_URL
 - **✅ VERIFIED 2026-04-29 PC casa**: dopo rebuild docker, console F12 silente (no più 404 ricorrenti), polling riceve `{"status":"running","step":3,"percent":42,...}` correttamente, `psql` mostra la riga `progress:sync_<id>` aggiornata in tempo reale.
 - **Bonus bug `[03.14.34.1]`** ⏸️ aperto: il client `pollProgress` non ha **max retries** → con un job che non parte mai correttamente, 404 continua all'infinito senza mai dare up. Aggiungere stop dopo N tentativi consecutivi 404 (es. 5). Severity Low (defense-in-depth).
 
+#### `[03.14.36]` 🔧🔴 HIGH — Rate limit default (200/hour) tira giù il polling progress su sync lunghi (HTTP 429) — 🔧 FIX APPLICATO
+
+- **Fase**: 03 · **Area**: Flask-Limiter / endpoint `/api/progress/<job_id>` · **Tipo**: 🔴 HIGH (UX)
+- **Sintomo**: dopo ~6 minuti dall'inizio di un sync lungo (CISA + NVD CPE enrichment, anonymous rate limit NVD = molto lento), il browser ha iniziato a ricevere `HTTP 429 TOO MANY REQUESTS` su ogni `GET /api/progress/sync_<id>`. Banner di progresso si congela al valore precedente.
+- **Root cause**: `app/__init__.py:24` definisce `default_limits=["1000 per day", "200 per hour"]` per Flask-Limiter. Il polling client a 2s = 1800 calls/h, supera 200/h dopo ~6 min → 429 ricorrenti finché la finestra non si riarma.
+- **🔧 Fix applicato** (commit `4b7bc7d` 2026-04-29): `@limiter.limit("120/minute")` esplicito su `get_progress(job_id)` e `get_active_progress()` in `app/routes.py:5152` e `5164`. 120/min = 7200/h, abbondante per qualsiasi cadenza di polling ragionevole, mantenendo bound contro abuse.
+- **Da verificare**: dopo rebuild container, polling deve continuare per tutta la durata di un sync di 30+ min senza ricevere 429.
+- **Discovered**: 2026-04-29
+
 #### `[03.14.35]` 🔵 INFO — Bottone Sync ridiventa cliccabile dopo refresh anche se un sync è in corso
 
 - **Fase**: 03 · **Area**: admin-panel UI / state · **Tipo**: 🔵 Info (UX)
