@@ -2590,6 +2590,19 @@ Obiettivo di questo mini-test: determinare se la policy SSRF (`ALLOW_PRIVATE_URL
 - **Da verificare**: dopo rebuild container, polling deve continuare per tutta la durata di un sync di 30+ min senza ricevere 429.
 - **Discovered**: 2026-04-29
 
+#### `[03.14.37]` 🟡 WARN — Save NVD API Key fallisce con "Connection timeout - Key was not saved" durante un sync attivo
+
+- **Fase**: 03 · **Area**: Settings → Sync → NVD API Key save / validation race · **Tipo**: 🟡 Warning (UX + race condition)
+- **Repro**: con un sync CISA/NVD in corso (anonymous, ~25-40 min con NVD CPE enrichment), aprire Settings → Sync → incollare una NVD API key valida (test fatto su NIST) → click Save → toast rosso *"Invalid NVD API Key: Connection timeout - check network/proxy settings. Key was not saved."*
+- **Root cause** (`app/settings_api.py:790-817`): `_validate_nvd_api_key()` fa `GET https://services.nvd.nist.gov/rest/json/cpes/2.0?keywordSearch=test` con `timeout=15`. La nuova key è la prima call autenticata, ma se il sync in corso sta saturando lo slot anonymous (e NVD rate-limit applica spesso per IP non per key) la richiesta di test va in timeout → save annullato.
+- **Workaround attuale**: aspettare che il sync finisca, poi rifare il save. Funziona ma è frustrante: quando un sync impiega 30 min, l'utente tipicamente vuole proprio mettere la API key per accelerarlo.
+- **Fix proposto**:
+  1. **Validation opzionale**: aggiungere checkbox "Save without testing the key (advanced)" che bypassa `_validate_nvd_api_key()` e salva direttamente. Re-test alla prossima sync.
+  2. **Aumentare timeout**: 15s → 30-60s, con retry su timeout transient.
+  3. **Non bloccare il save** sulla validation: salvare comunque, marcare la key come "untested", testare in background al prossimo sync.
+- **Severity**: Medium. Non perde dati ma blocca un'operazione legittima durante un'altra operazione legittima.
+- **Discovered**: 2026-04-29
+
 #### `[03.14.35]` 🔵 INFO — Bottone Sync ridiventa cliccabile dopo refresh anche se un sync è in corso
 
 - **Fase**: 03 · **Area**: admin-panel UI / state · **Tipo**: 🔵 Info (UX)
