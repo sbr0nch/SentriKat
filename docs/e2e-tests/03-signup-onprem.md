@@ -2483,38 +2483,34 @@ Obiettivo di questo mini-test: determinare se la policy SSRF (`ALLOW_PRIVATE_URL
 
 ---
 
-## 03.14 — Settings tabs: click reali sui Sync/Alert triggers (Strategia A) — 2026-04-29
+## 03.14 (sezione 2) — Settings tabs: click reali sui Sync/Alert triggers (Strategia A) — 2026-04-29
+
+> **Nota numerazione**: i bug `[03.14.1]`–`[03.14.22]` sono già usati nella sezione 03.14 originale (sopra). Questa seconda batteria riparte da `[03.14.23]` per evitare collisioni.
 
 **Sessione PC casa con docker on-prem fresh (image post-fix `[03.11.4.5]`, `FLASK_ENV=production`, `ALLOW_PRIVATE_URLS=true`, `SAAS_MODE=unset`).** Eseguiti i 6+ click batch che il master `00-INDEX.md` segnalava come "HIGH — senza questi la feature non è validata".
 
-### Findings
+### Findings — click batch
 
-#### `[03.14.0]` 🔵 INFO — `/admin-panel` redirige automaticamente a `/all-users` invece di aprirsi sul tab default
+#### `[03.14.23]` 🔵 INFO — `/admin-panel` redirige automaticamente a `/all-users` invece di aprirsi sul tab default
 
 - **Fase**: 03 · **Area**: Admin Panel / routing · **Tipo**: 🔵 Info (UX)
 - **Actual**: aprendo `http://localhost/admin-panel` si finisce su `/all-users`. La pagina admin-panel ha hash anchors (`#settings:sync`, `#integrations:pushAgents` ecc.) ma senza hash il backend redireziona altrove.
 - **Valutazione**: probabilmente il default landing per super-admin è la pagina Users. Non è bug ma confonde la prima volta.
 - **Discovered**: 2026-04-29
 
-#### `[03.14.1]` 🟢 OK — Sync CISA KEV Now → toast verde (dim 1 happy path)
+#### `[03.14.24]` 🟢 OK — Sync CISA KEV Now → toast verde (dim 1 happy path)
 
-- **Endpoint**: `POST /api/sync` (`@admin_required`, `5/min` rate-limit)
-- **Discovered**: 2026-04-29
+- **Endpoint**: `POST /api/sync` (`@admin_required`, `5/min` rate-limit). Discovered 2026-04-29.
 
-#### `[03.14.2]` 🟢 OK — Sync EPSS Scores Now → toast verde
+#### `[03.14.25]` 🟢 OK — Sync EPSS Scores Now → toast verde
 
-- **Endpoint**: `POST /api/sync/epss`
-- **Discovered**: 2026-04-29
+- **Endpoint**: `POST /api/sync/epss`. Discovered 2026-04-29.
 
-#### `[03.14.3]` 🟢 OK — Sync CPE Dictionary Now → toast verde
+#### `[03.14.26]` 🟢 OK — Sync CPE Dictionary Now → toast verde. Discovered 2026-04-29.
 
-- **Discovered**: 2026-04-29
+#### `[03.14.27]` 🟢 OK — Run Auto-Acknowledge Now → toast verde. Discovered 2026-04-29.
 
-#### `[03.14.4]` 🟢 OK — Run Auto-Acknowledge Now → toast verde
-
-- **Discovered**: 2026-04-29
-
-#### `[03.14.5]` 🟢 OK — Send Email Alerts Now: code path validato, 0 delivery per absence CVE (skip by-design)
+#### `[03.14.28]` 🟢 OK — Send Email Alerts Now: code path validato, 0 delivery per absence CVE (skip by-design)
 
 - **Endpoint**: `POST /api/alerts/trigger-critical`
 - **Output utente**:
@@ -2524,81 +2520,81 @@ Obiettivo di questo mini-test: determinare se la policy SSRF (`ALLOW_PRIVATE_URL
   ```
 - **Valutazione**: il job è **arrivato fino al check `unacknowledged_cves > 0`** senza essere bloccato dalla SSRF policy → fix `[03.11.4.5]` efficace anche qui. Per validare la DELIVERY vera serve almeno 1 CVE matched (vedi follow-up Strategia F).
 
-#### `[03.14.6]` 🟢 OK — Send Webhook Alerts Now: code path validato, 0 delivery per absence CVE
+#### `[03.14.29]` 🟢 OK — Send Webhook Alerts Now: code path validato, 0 delivery per absence CVE
 
 - **Endpoint**: `POST /api/alerts/trigger-webhooks`
-- **Output**: identico a [03.14.5], `Webhooks sent: 0`, `default: No unacknowledged critical/high CVEs`.
+- **Output**: identico a [03.14.28], `Webhooks sent: 0`, `default: No unacknowledged critical/high CVEs`.
 
-#### `[03.14.7]` ✅ VERIFY DEFINITIVO `[03.11.4.5]` — Test Connection webhook in production mode
+#### `[03.14.30]` ✅ VERIFY DEFINITIVO `[03.11.4.5]` — Test Connection webhook in production mode
 
 - **Repro**: Settings → Integrations → Generic Webhook con URL `http://host.docker.internal:8800/<token>` (precedentemente `localhost:8800` → sbagliato se chiamato dal container) → Save → click **Test** (singolo, NON il batch alerts) → **toast verde** + request appare in webhook-tester (`http://localhost:8800`).
-- **Stato**: insieme al verify Jira di prima (`http://host.docker.internal:8080`, project key `VULN`), questo chiude `[03.11.4.5]` su tutti i tracker URL-based. ✅✅
+- **Stato**: insieme al verify Jira (`http://host.docker.internal:8080`, project key `VULN`), questo chiude `[03.11.4.5]` su tutti i tracker URL-based. ✅✅
 - **Discovered**: 2026-04-29
 
-#### `[03.14.8]` 🔵 INFO — UI permette `localhost:<port>` come Webhook URL ma fallisce a runtime con "External service error" generico
+#### `[03.14.31]` 🔵 INFO — UI permette `localhost:<port>` come Webhook URL ma fallisce a runtime con "External service error" generico
 
 - **Fase**: 03 · **Area**: Settings / Webhook / UX · **Tipo**: 🔵 Info (DX)
 - **Actual**: configurando Webhook URL = `http://localhost:8800/<token>`, save passa ma Test fallisce con toast rosso "External service error" senza spiegare che `localhost` dentro un container non punta al testlab host.
 - **Suggerimento**: se l'app rileva `localhost` o `127.x` E il deployment è in container, mostrare hint inline: *"In Docker use `host.docker.internal` to reach services on the host (e.g. testlab)."*
 - **Discovered**: 2026-04-29
 
-### Test follow-up Fase 03.14 (rinviati, dipendono da CVE matched in DB)
+### Bug aperti durante test reale 2026-04-29
 
-- [ ] **Strategia F seed CVE**: inserire fake CVE matched a fake product → cliccare Send Email/Webhook Alerts Now → verificare delivery (Mailpit + webhook-tester).
-- [ ] **7-dim dim 6 negative**: webhook URL malformata, port out-of-range, dominio inesistente — error UX.
-- [ ] **7-dim dim 7 audit**: dopo ogni click sync/trigger verificare che `audit.log` (file) o `/api/admin/logs` mostri la entry corrispondente.
-- [ ] **7-dim dim 5 state**: scheduler interval triggers (Enable Automatic Sync) — verificare che il next-scheduled si popoli e dopo prossimo run il last-sync si aggiorni.
+#### `[03.14.32]` 🟡 WARN — Match Vulnerabilities trova 0 match anche dopo NVD search + inserimento manuale di Apache Tomcat (tutte versioni) + Google Chrome (tutte versioni)
 
----
-
-## 03.14 (post-batch) — bug aperti durante test reale 2026-04-29
-
-#### `[03.14.9]` 🟡 WARN — Match Vulnerabilities trova 0 match anche dopo NVD search + inserimento manuale di Apache Tomcat (tutte versioni) + Google Chrome (tutte versioni)
-
-- **Fase**: 03 · **Area**: Match algorithm / CPE
-- **Tipo**: 🟡 Warning (può essere conseguenza di [03.14.11])
-- **Repro**: dopo Sync CISA/EPSS/CPE batch → NVD search aggiunto Apache Tomcat e Google Chrome (entrambi "all versions") → click "Match Vulnerabilities" da admin tools → risultato: **0 match**.
-- **Atteso**: Apache Tomcat ha centinaia di CVE pubblicate, Google Chrome anche. Almeno qualche match dovrebbe apparire.
+- **Fase**: 03 · **Area**: Match algorithm / CPE · **Tipo**: 🟡 Warning (sospetta conseguenza di [03.14.34])
+- **Repro**: dopo Sync CISA/EPSS/CPE batch → NVD search aggiunto Apache Tomcat e Google Chrome ("all versions") → click "Match Vulnerabilities" → **0 match**.
+- **Atteso**: Apache Tomcat e Chrome hanno centinaia di CVE pubblicate.
 - **Possibili cause**:
-  - **Probabile**: bug `[03.14.11]` polling 404 → il sync iniziale non è davvero completato dal punto di vista del client → DB non ha dati → 0 match.
-  - Match algorithm cerca CPE specifici che non corrispondono a quelli inseriti.
+  - **Probabile**: bug `[03.14.34]` (versione ORIGINALE, ora fixato) → il sync iniziale non era completato dal client → 0 match. Da rifare dopo verify del fix DB-backed.
+  - Match algorithm cerca CPE specifici che non corrispondono.
   - Inventory/products table vuota perché manuale NVD search non popola la tabella che il match cerca.
-- **Investigazione**: dopo fix [03.14.11], rifare test. Se ancora 0 → deep dive in `app/filters.py::rematch_all_products()` + schema DB.
+- **Investigazione**: dopo verify `[03.14.34]` rifare test. Se ancora 0 → deep dive in `app/filters.py::rematch_all_products()` + schema DB.
 - **Discovered**: 2026-04-29
 
-#### `[03.14.10]` 🔵 INFO/a11y — Modal `#confirmModal` mostra `aria-hidden=true` mentre un button al suo interno ha focus
+#### `[03.14.33]` 🔵 INFO/a11y — Modal `#confirmModal` mostra `aria-hidden=true` mentre un button al suo interno ha focus
 
-- **Fase**: 03 · **Area**: Bootstrap modal / accessibility
-- **Tipo**: 🔵 Info (a11y regression)
+- **Fase**: 03 · **Area**: Bootstrap modal / accessibility · **Tipo**: 🔵 Info (a11y regression)
 - **Console warning**:
   ```
   Blocked aria-hidden on an element because its descendant retained focus.
   Element with focus: <button.btn btn-primary#confirmModalButton>
   Ancestor with aria-hidden: <div.modal fade#confirmModal>
   ```
-- **Diagnosi**: Bootstrap modal non gestisce correttamente il focus return prima di applicare `aria-hidden=true` quando si chiude. Suggerimento del browser: usare `inert` invece di `aria-hidden`. Bug a11y standard di Bootstrap 5.3.
+- **Diagnosi**: Bootstrap modal non gestisce correttamente il focus return prima di applicare `aria-hidden=true` alla chiusura. Suggerimento del browser: usare `inert` invece di `aria-hidden`. Bug a11y standard di Bootstrap 5.3.
 - **Severity**: Low (assistive technology users impacted, ma WCAG warning non error).
-- **Fix possibile**: chiamare `.blur()` sul button prima di nascondere il modal, o aggiornare a Bootstrap 5.3.3+ che ha fix upstream.
+- **Fix possibile**: `.blur()` sul button prima di nascondere il modal, o aggiornare a Bootstrap 5.3.3+ che ha fix upstream.
 - **Discovered**: 2026-04-29
 
-#### `[03.14.11]` 🔴 HIGH — Progress tracking rotto in multi-worker gunicorn (404 ricorrenti su `/api/progress/<job_id>`)
+#### `[03.14.34]` 🔧🔴 HIGH — Progress tracking rotto in multi-worker gunicorn (404 ricorrenti su `/api/progress/<job_id>`) — 🔧 FIX APPLICATO
 
 - **Fase**: 03 · **Area**: `app/progress.py` + gunicorn workers · **Tipo**: 🔴 HIGH (infrastruttura)
-- **Sintomo**: dopo click "Sync CISA KEV Now", il client invoca polling `GET /api/progress/sync_1777467956` ogni ~2s e riceve **sempre HTTP 404 NOT FOUND**, infinitamente. Il polling NON si ferma mai → memory leak `setInterval`. Banner UI di progresso resta loaded all'infinito.
+- **Sintomo**: dopo click "Sync CISA KEV Now", il client invocava polling `GET /api/progress/sync_<id>` ogni ~2s e riceveva **sempre HTTP 404 NOT FOUND**, infinitamente. Il polling NON si fermava mai → memory leak `setInterval`. Banner UI di progresso restava loaded all'infinito.
 - **Root cause**:
-  - `app/progress.py` mantiene `_progress = {}` come dict **in-memory module-level** con `_lock` threading.
-  - `gunicorn.conf.py` usa **multi-worker** (default `min(cpu*2+1, 16)` → tipicamente 3-5).
-  - Ogni gunicorn worker ha il SUO `_progress` dict (anche con `preload_app`, dopo il fork i dict divergono).
-  - `POST /api/sync` arriva al worker A → crea `sync_1777467956` nel suo dict.
-  - `GET /api/progress/sync_1777467956` viene routed (nginx upstream/round-robin) al worker B/C/D → nel loro `_progress` quel job non c'è mai stato → `prog.get(job_id)` → None → **404**.
-  - Il sync vero probabilmente completa nel worker A ma il client non lo saprà mai.
-- **Conseguenza diretta**: spiega probabilmente anche `[03.14.9]` (0 match): il client, non ricevendo mai un terminal status, non aggiorna la UI con i risultati del sync (anche se il DB è popolato lato server).
-- **Conseguenza indiretta**: i toast verdi di [03.14.1]–[03.14.4] dicono "Sync started" non "Sync completed" — quindi il successo apparente era solo "thread starting", non actual completion.
-- **Fix proposto** (in ordine di preferenza):
-  1. **Spostare progress su Redis** — soluzione standard per shared state cross-worker. Verificare se l'app ha già Redis (caching/rate-limit) → riusare quella connection.
-  2. **Spostare progress su DB** (`SystemSettings` table o nuova `job_progress` table). Più persistente ma più costoso (ogni update = INSERT/UPDATE).
-  3. **Workaround temporaneo**: `GUNICORN_WORKERS=1` in `.env` → degrada performance ma sblocca la UI. Adatto per single-tenant on-prem demo.
-- **Severity**: HIGH per UX (UI feedback inutilizzabile per qualsiasi job lungo: sync, scan, import), MEDIUM per dati (sync completa lato server). 
-- **Bonus bug `[03.14.11.1]`**: il client `pollProgress` non ha **max retries** → 404 continua all'infinito senza mai dare up. Aggiungere stop dopo N tentativi consecutivi 404 (es. 5).
+  - `app/progress.py` manteneva `_progress = {}` come dict **in-memory module-level** con `_lock` threading.
+  - `gunicorn.conf.py` usa multi-worker (default `min(cpu*2+1, 16)` → tipicamente 3-5).
+  - Ogni gunicorn worker aveva il SUO `_progress` dict (anche con `preload_app`, dopo il fork i dict divergono).
+  - `POST /api/sync` arriva al worker A → crea il job nel suo dict. `GET /api/progress/<id>` viene routed (round-robin) al worker B/C/D → quel job non esiste → **404**.
+- **Conseguenza diretta**: spiega probabilmente anche `[03.14.32]` (0 match): il client, non ricevendo mai un terminal status, non aggiornava la UI con i risultati del sync.
+- **🔧 Fix applicato** (commit `a0830cd` 2026-04-29): riscritto `app/progress.py` come **DB-backed** usando la tabella `system_settings` esistente (key=`progress:<job_id>`, category=`progress`, organization_id=NULL, value=JSON). Tutti i worker leggono dallo stesso storage Postgres → cross-worker visibility garantita. **Nessuna nuova dipendenza** (no Redis), nessuna migration nuova (riusa schema esistente). Trade-off: ~10 INSERT/UPDATE per long-running sync (volume trascurabile) vs in-memory speed.
+- **Perché DB e non Redis**: SentriKat è on-prem SMB (1-50 utenti, 1 sync ogni N ore). Il vantaggio Redis (microsecondi vs millisecondi) è irrilevante; lo svantaggio (un container in più che il cliente deve gestire) è significativo. DB Postgres è già lì.
+- **✅ VERIFIED 2026-04-29 PC casa**: dopo rebuild docker, console F12 silente (no più 404 ricorrenti), polling riceve `{"status":"running","step":3,"percent":42,...}` correttamente, `psql` mostra la riga `progress:sync_<id>` aggiornata in tempo reale.
+- **Bonus bug `[03.14.34.1]`** ⏸️ aperto: il client `pollProgress` non ha **max retries** → con un job che non parte mai correttamente, 404 continua all'infinito senza mai dare up. Aggiungere stop dopo N tentativi consecutivi 404 (es. 5). Severity Low (defense-in-depth).
+
+#### `[03.14.35]` 🔵 INFO — Bottone Sync ridiventa cliccabile dopo refresh anche se un sync è in corso
+
+- **Fase**: 03 · **Area**: admin-panel UI / state · **Tipo**: 🔵 Info (UX)
+- **Repro**: click "Sync CISA KEV Now" → sync parte → refresh pagina dashboard → bottone Sync è di nuovo cliccabile come se non fosse in corso nulla.
+- **Backend OK**: `routes.py:5118-5119` rifiuta con HTTP 409 se un sync `sync_*` è già attivo (`A sync is already running`). Non c'è rischio di doppio job.
+- **UX issue**: la UI dovrebbe al page load fare `GET /api/progress/active` e disabilitare il bottone se appare un job `sync_*` running, mostrando il banner di progresso ripreso.
+- **Severity**: Low. Non blocca, ma confonde.
 - **Discovered**: 2026-04-29
+
+### Test follow-up Fase 03.14 (rinviati, dipendono da CVE matched in DB)
+
+- [ ] **Strategia F seed CVE**: inserire fake CVE matched a fake product → cliccare Send Email/Webhook Alerts Now → verificare delivery (Mailpit + webhook-tester).
+- [ ] **7-dim dim 6 negative**: webhook URL malformata, port out-of-range, dominio inesistente — error UX.
+- [ ] **7-dim dim 7 audit**: dopo ogni click sync/trigger verificare che `audit.log` o `/api/admin/logs` mostri la entry.
+- [ ] **7-dim dim 5 state**: scheduler interval triggers (Enable Automatic Sync) — verificare next-scheduled + last-sync.
+- [ ] **NVD API key**: registrare key gratis su https://nvd.nist.gov/developers/request-an-api-key e inserirla in Settings → Sync per 10× speed sync.
 
