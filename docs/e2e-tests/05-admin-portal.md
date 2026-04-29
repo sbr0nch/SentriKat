@@ -120,4 +120,139 @@ EA Tenants, Webhook Outbox, Usage Metrics, Leads, Demo Requests, Newsletter, Sup
 
 ---
 
-> Sezioni 05.5–05.8 in commit successivo (vedi [05.5] Logs, [05.6] Users, [05.7] Runbook, [05.8] Settings).
+## 05.5 — `/admin/logs` (Centralized Logs)
+
+**Layout**: filtri (All Sources · All Actions · All Actors · Search · Actor email · IP address · date range) + 5 KPI tile (Total/Audit/Activation/SaaS/Today) + banner "Retention Policy" + tabella "All Logs".
+
+### Findings
+
+- 🔴 **[05.5.1] Centralized Logs completamente vuoto durante una sessione admin attiva** (HIGH)
+  - Total: **0** · Audit: 0 · Activation: 0 · SaaS: 0 · Today: 0.
+  - Stiamo aprendo `/admin/logs` da una sessione super-admin autenticata in questo momento → l'evento `admin.login` (oltre a tutte le navigazioni admin) **dovrebbe** apparire come audit log entry.
+  - Diagnosi probabile: l'audit logger non scrive su questo storage (forse scrive su file/Docker logs ma non sul DB letto da questa pagina), oppure il middleware audit non è agganciato alle route admin.
+  - Impatto: zero traceability di azioni admin. Compliance issue (SOC2/GDPR richiedono audit trail di accessi privilegiati).
+  - Correlato a [05.6.1] (last login `-`).
+
+- 🟡 **[05.5.2] Retention policy mostrata qui (365d audit) ≠ retention policy in `/admin/settings` (730 DAYS audit)** (WARN)
+  - Banner qui: *"Retention Policy: Activation logs: 90 days · Audit logs: **365 days** · SaaS logs: 90 days · System logs: 30 days (Docker)"*.
+  - In `/admin/settings` → Data Retention Policy: Audit Logs **730 DAYS**.
+  - Una delle due UI è mentendo, oppure leggono da config diverse. Va riconciliato.
+
+### Test follow-up
+
+- [ ] Generare un evento ovvio (logout + re-login) e ricaricare `/admin/logs` → vedere se appare. Se NO → bug confermato HIGH.
+- [ ] Provare ogni filtro (Source/Action/Actor/IP/date) per verificare che query funzioni.
+- [ ] Cliccare "CSV" e "JSON" export → verificare contenuto + audit log entry per l'export.
+- [ ] Verificare DB on-prem: `SELECT COUNT(*) FROM audit_log;` per capire se è il logger morto o solo la UI.
+
+---
+
+## 05.6 — `/admin/users` (Admin Users)
+
+**Layout**: 3 KPI tile (Total Users, Active, Super Admins) + tabella "Team Members" + tabella "Role Permissions" (matrice Area × Role: Super Admin / Admin / Support / Sales / Ops / Viewer).
+
+### Findings
+
+- 🟢 **Permissions matrix** ben strutturata e leggibile. Differenziazione coerente: Super Admin = Full ovunque; Admin = Full su tutto tranne nessun accesso a "Settings"; Support/Sales/Ops/Viewer con scopi limitati. ✅
+- 🔴 **[05.6.1] Last Login `-` per super-admin attualmente loggato** (HIGH)
+  - L'utente `admin-sentrikat / sotadenis94@gmail.com / SUPER ADMIN / ACTIVE` ha `Last Login: -` → mai aggiornato.
+  - Stiamo navigando come quell'utente in questo momento. La login deve aver settato il campo.
+  - Diagnosi: stessa causa di [05.5.1] — auth flow non scrive `last_login_at` né emette evento audit.
+  - Impatto: impossibile sapere quando un super-admin si è loggato l'ultima volta → security blind spot.
+
+- 🔵 **[05.6.2] Super-admin di produzione usa email gmail personale** (INFO/governance)
+  - Email: `sotadenis94@gmail.com`. Per una piattaforma B2B in fase Early Access è un governance smell:
+    - Se il dominio gmail viene compromesso, perde accesso il founder + l'azienda.
+    - Audit/compliance preferiscono `admin@sentrikat.com` con MFA enforced.
+  - Action: creare almeno un secondo super-admin su email aziendale, e migrare il primario su email custodial (questa è una decisione utente, non un bug del codice).
+
+### Test follow-up
+
+- [ ] Cliccare "+ New User" → creare admin secondario, verificare email invito + che appaia in tabella.
+- [ ] Cliccare "Edit" / "Disable" / "Delete" sull'utente esistente → testare CRUD (dim 3). ⚠️ NON disabilitarsi da soli → testare con il secondo user.
+- [ ] 7-dim dim 4 RBAC: loggarsi come ogni ruolo e verificare che la matrice di Role Permissions sia rispettata effettivamente (es. un Viewer può aprire `/admin/customers` in read?).
+- [ ] 7-dim dim 6: invite con email malformata, ruolo invalido, lockout dopo N failed login.
+
+---
+
+## 05.7 — `/admin/runbook` (Architecture Runbook)
+
+**Layout**: documento embedded "SentriKat Architecture & Scaling Runbook" con sezioni: 1. Overview · 2. Architecture at a glance (sub: 2.1 Component topology) · …
+
+### Findings
+
+- 🟢 **OK** — runbook visibile, ben formattato, dichiara "single source of truth" + "Golden rule: if this document and the code disagree, the code wins". Buona pratica.
+- 🔵 **[05.7.1] Missing "Last updated" date / changelog** (INFO)
+  - Il banner dice *"Keep in sync with production. Update on every infra / contract PR."* ma **non** mostra l'ultima data di aggiornamento né l'autore. Senza quel timestamp, la "golden rule" è retorica.
+  - Action: aggiungere footer con `Last updated: <YYYY-MM-DD>` + link al commit GitHub che lo ha modificato.
+
+### Test follow-up
+
+- [ ] Scrollare tutto il runbook → verificare che le sezioni 2.1 (Component topology), 9 (Change log) siano popolate e coerenti con `app.sentrikat.com` + `portal.sentrikat.com`.
+- [ ] Verificare se il runbook è solo lettura o se admin può editarlo da UI (dim 3 CRUD).
+
+---
+
+## 05.8 — `/admin/settings` (Settings)
+
+**Layout**: header con riga summary (`v1` / `Apr 27 2026, 12:46 PM` / `Connected` / `3` / `-` / `-`) + 4 sezioni:
+
+1. **Environment Configuration** — tabella var → status (CONFIGURED / NOT SET).
+2. **Quick Actions** — 4 card: Sync GitHub Releases · Sync NVD Database · Probe Data Sources · Export Audit Log.
+3. **Data Retention Policy** — tabella log type → retention/total/expiring/oldest entry/notes.
+4. **SaaS & Cloud Migration Readiness** (parzialmente visibile).
+
+### Env Configuration osservata
+
+| Variable | Status |
+|---|---|
+| `ADMIN_API_KEY` | CONFIGURED |
+| `DATABASE_URL` | CONFIGURED |
+| `RESEND_API_KEY` | CONFIGURED |
+| `EMAIL_FROM` | CONFIGURED |
+| `GITHUB_TOKEN` | CONFIGURED |
+| `GITHUB_REPO` | CONFIGURED |
+| `PUBLIC_API_URL` | CONFIGURED |
+| `RSA_PRIVATE_KEY` | **NOT SET** 🔴 |
+| `NVD_API_KEY` | **NOT SET** 🟡 |
+| `STRIPE_SECRET_KEY` | CONFIGURED |
+| `STRIPE_WEBHOOK_SECRET` | CONFIGURED |
+
+### Findings
+
+- 🔴 **[05.8.1] `RSA_PRIVATE_KEY = NOT SET` in produzione** (HIGH)
+  - Se il license server firma le license con questa chiave (vedi `AGENT_SIGNING.md` / `docs/ADMIN_GUIDE.md`), allora le license generate sono **non firmate** o il sign step è failed silently.
+  - Possibile spiegazione benigna: la chiave è stata spostata in DB (vault) invece che in env, e il check qui non riflette. → Da verificare nel codice.
+  - Impatto se davvero non firmata: agent può rifiutare la license, oppure non c'è proof of authenticity → rischio di license forgery.
+  - Correlato: in [03.5.3] / [03.12.14] abbiamo testato license activation → se ha funzionato, allora la chiave è da qualche altra parte. Il bug qui è la UI che dice "NOT SET" senza distinguere "non in env, ma in vault".
+
+- 🟡 **[05.8.2] `NVD_API_KEY = NOT SET`** (WARN)
+  - NVD sync risulta HEALTHY (vedi 05.2) → significa che senza API key NIST applica rate limit basso (5 req / 30s anonymous vs 50 req / 30s authenticated).
+  - Impatto: sync iniziale lento, possibili throttling intermittenti. Non blocca, ma da configurare prima di scalare.
+
+- 🟢 **[05.8.3] Quick Actions ben progettati** — 4 azioni con label chiara + descrizione + bottone unico ("Sync Now" / "Probe All" / "Go to Audit Log"). Mantenere questo pattern. ✅
+- 🟢 **[05.8.4] Data Retention Policy** — tabella chiara con retention per tipo log + nota "Cleanup schedule: Daily at 03:00 UTC · Last checked: Apr 27 2026". ✅ (ma vedi mismatch [05.5.2]).
+
+### Test follow-up
+
+- [ ] Cliccare ogni Quick Action → verificare che parta il job, audit log entry, success/error feedback.
+- [ ] "Run Cleanup Now" (in Data Retention) → ⚠️ destructive, verificare modal di conferma + audit log.
+- [ ] 7-dim dim 4: verificare che SOLO Super Admin veda `/admin/settings` (la matrice in 05.6 dice Settings = Full solo per Super Admin).
+- [ ] Indagare nel codice: `RSA_PRIVATE_KEY` lookup — env-only o anche DB/vault? Aggiornare la UI per riflettere "configured via vault" se applicabile.
+- [ ] Scrollare sotto "SaaS & Cloud Migration Readiness" → mappare contenuto in un nuovo sub-finding.
+
+---
+
+## Riepilogo apertura Fase 05
+
+- **Bug aperti**: 7 (di cui 5 HIGH `[05.1.1]` `[05.3.1]` `[05.4.1]` `[05.5.1]` `[05.6.1]` `[05.8.1]`, 2 WARN `[05.2.1]` `[05.5.2]` `[05.8.2]`).
+- **Info/governance**: 3 (`[05.1.2]` `[05.6.2]` `[05.7.1]`).
+- **OK**: 4 (NVD sync, runbook, role matrix, quick actions).
+- **Pagine ancora da aprire**: ~17 (vedi sidebar). Continuare nelle prossime sessioni.
+
+### Cluster bug correlati
+
+- **Audit logging rotto**: `[05.5.1]` (audit log vuoto) + `[05.6.1]` (last_login non scritto) → root cause comune, probabilmente middleware audit non agganciato.
+- **Status page disonesta**: `[05.4.1]` (status verde) + `[05.3.1]` (datasource down) → status page manuale, non legge probe automatici.
+- **UI inconsistencies su retention**: `[05.5.2]` (365d vs 730d) → almeno una pagina mostra valori obsoleti.
+
