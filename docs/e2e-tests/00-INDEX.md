@@ -321,9 +321,9 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 **Post Phase 05 opening + verify round 2 — 2026-04-29** (PC casa, docker rebuild beta.6 fresh):
 
-- 🔴 Bug aperti: **20** *(13 da round 1 + 6 nuovi HIGH da Fase 05 + **1 CRITICAL `[05.9.1]` UI admin morta** + **1 nuovo `[03.15.1]` 404 page unstyled**)*
-- 🟡 Warning: **14** *(10 + 3 Fase 05 + 1 nuovo `[03.15.2]` HTTPS rotto in locale)*
-- 🔵 Info/UX: **65** *(61 + 3 Fase 05 + 1 nuovo `[05.9.2]` doppia pagina audit log)*
+- 🔴 Bug aperti: **22** *(20 + 2 nuovi: `[03.14.11]` HIGH progress multi-worker rotto, `[03.14.9]` WARN match 0)*
+- 🟡 Warning: **15** *(14 + 1: `[03.14.9]` riclassificato WARN finché [03.14.11] non è fixato)*
+- 🔵 Info/UX: **67** *(65 + 2: `[03.14.0]` `[03.14.10]` a11y aria-hidden, `[03.14.8]` localhost UI hint)*
 - 🟢 OK passati: **110** *(100 + 4 Fase 05 + 6 da Fase 03.14: sync CISA/EPSS/CPE/Auto-Ack code path + Email/Webhook alerts code path)*
 - ⏸️ Test bloccati: 5 (residui solo on-prem dependencies — sbloccabili oggi) + **9 follow-up Fase 05 bloccati da `[05.9.1]`** finché non viene fixato lato `SentriKat-web`
 - ✅ Fix applicati: **20** *(7 core + 13 web)*
