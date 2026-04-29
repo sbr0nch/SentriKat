@@ -750,17 +750,38 @@ def save_sync_settings():
         set_setting('sync_time', data.get('sync_time', '02:00'), 'sync', 'Preferred sync time')
         set_setting('cisa_kev_url', data.get('cisa_kev_url', ''), 'sync', 'CISA KEV feed URL')
 
-        # Handle NVD API key - validate before saving
-        # Only process if key is explicitly included in the request
+        # Handle NVD API key — validate before saving by default. The user
+        # can opt out of validation with skip_nvd_validation=true, which is
+        # the only way to save the key when an NVD-heavy job (sync, CPE
+        # backfill) is currently saturating the rate-limit slot and the
+        # validation request would time out (see bug [03.14.37]).
         if 'nvd_api_key' in data:
             nvd_key = (data.get('nvd_api_key') or '').strip()
             if nvd_key and nvd_key != '********':
-                # Validate the API key by making a test request
+                skip_validation = bool(data.get('skip_nvd_validation'))
+
+                if skip_validation:
+                    # Save unvalidated. The next sync run that uses the key
+                    # will surface authentication errors via the regular
+                    # logging path; the user can re-save to retry validation
+                    # once the rate-limit pressure clears.
+                    set_setting(
+                        'nvd_api_key', nvd_key,
+                        'sync', 'NVD API key (unvalidated at save time)',
+                        is_encrypted=True,
+                    )
+                    return jsonify({
+                        'success': True,
+                        'message': 'NVD API key saved without validation. It will be tested on the next sync.',
+                        'validated': False,
+                    })
+
                 is_valid, error_msg = _validate_nvd_api_key(nvd_key)
                 if not is_valid:
                     return jsonify({
                         'success': False,
-                        'error': f'Invalid NVD API key: {error_msg}. Key was not saved.'
+                        'error': f'Invalid NVD API key: {error_msg}. Key was not saved.',
+                        'hint': 'If a sync or backfill is currently running, NVD may be saturating the rate limit. Retry save with skip_nvd_validation=true to save now and validate later.',
                     }), 400
 
                 set_setting('nvd_api_key', nvd_key, 'sync', 'NVD API key', is_encrypted=True)
@@ -801,7 +822,11 @@ def _validate_nvd_api_key(api_key):
             headers=headers,
             proxies=proxies,
             verify=verify_ssl,
-            timeout=15
+            # 30s instead of 15s — NVD is frequently slow under anonymous
+            # rate-limit while a sync is in flight (see [03.14.37]). The
+            # validation is one-shot per save, so the longer wait is
+            # negligible vs. the impact of a false-negative timeout.
+            timeout=30,
         )
 
         if response.status_code == 200:
