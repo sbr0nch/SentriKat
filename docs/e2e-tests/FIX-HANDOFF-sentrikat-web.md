@@ -301,3 +301,59 @@ Sessione SentriKat-web aperta **2026-04-26** su branch `claude/fix-sentrikat-e2e
 - Fase 01: https://github.com/sbr0nch/SentriKat/blob/main/docs/e2e-tests/01-landing-site.md
 - Fase 02: https://github.com/sbr0nch/SentriKat/blob/main/docs/e2e-tests/02-signup-saas.md
 - Fase 04: https://github.com/sbr0nch/SentriKat/blob/main/docs/e2e-tests/04-portal-customer.md
+- **Fase 05 (NEW)**: https://github.com/sbr0nch/SentriKat/blob/main/docs/e2e-tests/05-admin-portal.md
+
+---
+
+## 🆕 Batch 2 — Fase 05 Portal Admin (`portal.sentrikat.com/admin/*`) — 2026-04-29
+
+Sessione di apertura Fase 05 sul branch `claude/add-e2e-test-docs-UVya5` ha mappato 8 pagine admin del portal con 8 bug aperti + 4 info. **Tutti i fix sono nel repo `sentrikat-web`**: il portal admin è generato dallo stesso codebase del portal customer (Astro), gira sulla VM Hetzner SaaS, non in locale.
+
+### 🔴🔴 CRITICAL — agire per primo
+
+**`[05.9.1]` — Intera UI admin morta ai click (CSP `script-src-attr` blocca onclick inline)**
+- Tutti i bottoni del portal admin sono incliccabili: Sign Out, Export CSV/JSON, campanellina notifiche, "+ New User", "+ New Incident", Probe, Sync from GitHub, Sync NVD, Sync Now, Probe All, Filter, Edit/Disable/Delete, Run Cleanup Now, Refresh, "+ Manual Release", Schedule Maintenance.
+- Errore console (4+ warning identici con hash diversi): `Content-Security-Policy: ... script-src 'self' 'nonce-xxx'` blocca inline event handlers in `admin:702:7`.
+- Diagnosi: il template HTML usa `onclick=""` inline ma CSP non ha `'unsafe-inline'` né `'unsafe-hashes'` con i hash necessari. Pattern identico a [04.2.1] portal customer (già fixato in `42d7ea0` → `assetsInlineLimit: 0`), qui il regression è sull'admin layout.
+- Fix proposto: sostituire `onclick=""` con `data-action="..."` + un singolo `<script nonce="{{ csp_nonce }}">` esterno che fa `addEventListener` sui bottoni. Pattern unobtrusive JS standard.
+- File coinvolto: `admin:702:7` → uno dei layout/partial admin (probabilmente sidebar o header condiviso).
+- Impatto: il portal admin è in pratica read-only forzato (per bug). L'unico modo di amministrare è API diretta o accesso DB.
+
+### 🔴 HIGH — dopo il CRITICAL
+
+| Bug | Dettaglio | Diagnosi probabile |
+|---|---|---|
+| `[05.5.1]` | Centralized Logs vuoto (`/admin/logs` Total/Audit/Activation/SaaS = 0) anche durante sessione admin attiva e dopo logout/OTP login fresh | Audit logger non scrive su DB letto dalla pagina, o middleware audit non agganciato alle route admin/auth |
+| `[05.6.1]` | `Last Login: -` per super-admin appena loggato via OTP fresh | Auth flow non scrive `last_login_at` (correlato a [05.5.1] — root cause condivisa) |
+| `[05.1.1]` | `/admin/releases` mostra 0 releases mentre `/api/health` core dice `1.0.0-beta.6` | Sync GitHub mai eseguito, oppure pipeline release non popola endpoint admin |
+| `[05.3.1]` | Data source "Unknown" Critical/Down senza identificativo, no probe history | Seed/migration ha inserito riga senza `name`/`url`, oppure config loader fallisce silenzioso |
+| `[05.4.1]` | Status page pubblica dichiara "All systems operational" mentre `[05.3.1]` mostra source DOWN | Status page manuale, non legge probe automatico delle data sources → integrare auto-incident |
+| `[05.8.1]` | `RSA_PRIVATE_KEY = NOT SET` in env config admin | UI legge solo env, ma probabile che la chiave sia in vault/DB. UI deve riflettere "configured via vault" |
+
+### 🟡 WARN
+
+- `[05.2.1]` Filter "Community" default su `/admin/kb` mostra "No mappings found" mentre KPI sopra dice 64.697 → cambiare default filter a "All".
+- `[05.5.2]` Retention policy: `/admin/logs` dice "365 days" mentre `/admin/settings` dice "730 DAYS" → 1 delle 2 UI è obsoleta, riconciliare.
+- `[05.8.2]` `NVD_API_KEY = NOT SET` → NVD sync funziona ma rate-limited. Da configurare prima di scalare.
+
+### 🔵 INFO/UX
+
+- `[05.1.2]` "CVE Findings: 0" su `/admin/releases` → aggiungere tooltip su cosa significa.
+- `[05.6.2]` Super-admin di prod usa email gmail personale (`sotadenis94@gmail.com`) → governance smell, creare email custodial aziendale.
+- `[05.7.1]` `/admin/runbook` manca "Last updated" timestamp + link al commit GitHub che lo ha modificato.
+- `[05.9.2]` Due pagine "audit log" simili: `/admin/logs` (Centralized Logs) e `/admin/audit` (Audit Log dedicated) → unificare o chiarire diff con tooltip.
+
+### Cluster bug correlati (root cause condivisa)
+
+- **Audit logging rotto**: `[05.5.1]` + `[05.6.1]` → middleware audit non agganciato alle route admin/auth. Fixare il middleware (probabilmente nel file `app/auth.py` o middleware FastAPI) risolve entrambi.
+- **Status page disonesta**: `[05.4.1]` + `[05.3.1]` → integrare data source health nel status page con auto-incident creation quando una source è Down per >N min.
+
+### Test bloccati da `[05.9.1]` (riprendere DOPO il fix CRITICAL)
+
+9 test follow-up Fase 05 sono bloccati finché la UI non risponde ai click. Vedi sezione "Test follow-up" dentro `05-admin-portal.md` per ogni pagina (Sync from GitHub, Probe, Test Connection, "+ New User", export CSV/JSON, ecc.).
+
+### Riferimento dettagliato
+
+- **Tutti i 23 finding con repro step e fix proposto**: `docs/e2e-tests/05-admin-portal.md` (file completo).
+- **Sessione apertura**: branch `claude/add-e2e-test-docs-UVya5`, commit `e99d6cb` → `c8ce89e` su `sbr0nch/SentriKat`.
+- **Verify post-fix**: appena `[05.9.1]` è live su `portal.sentrikat.com`, l'utente riaprirà `05-admin-portal.md` e procederà coi test follow-up bloccati (cluster sblocco automatico).
