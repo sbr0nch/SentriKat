@@ -49,6 +49,49 @@ I bug E2E sono divisi in **due repository** distinti. Il tuo working dir potrebb
 - **PC casa**: docker on-prem + testlab → tutti i test sbloccabili (LDAP/SAML reali, Jira/Webhook con `FLASK_ENV=development`, agent install, scan, compliance reports).
 - **Laptop remoto**: solo browser-only su superfici prod (`sentrikat.com`, `portal.sentrikat.com`, `app.sentrikat.com`, `docs`, `community`). NON fare i test che richiedono docker.
 
+### Testlab — URL e credenziali (perenni, non chiedere all'utente)
+
+Working dir testlab: `C:\SentriKat\testlab\docker-compose.testlab.yml`. Container `testlab-*` running su PC casa.
+
+| Servizio | URL host (browser) | URL da DENTRO container `sentrikat` | Auth |
+|---|---|---|---|
+| **Mailpit** (SMTP+inbox) | `http://localhost:8025` (UI), `localhost:1025` (SMTP) | `mailpit:1025` o `host.docker.internal:1025` | nessuna |
+| **Keycloak** (SAML/OIDC IdP) | `http://localhost:8180` | `host.docker.internal:8180` | admin: `admin` / `admin123` |
+| **OpenLDAP** | `ldap://localhost:389` | `host.docker.internal:389` | bind DN: `cn=admin,dc=sentrikat-test,dc=local` / `admin123` |
+| **phpLDAPadmin** | `https://localhost:6443` | n/a | stesso bind DN OpenLDAP |
+| **Webhook-tester** | `http://localhost:8800` | `host.docker.internal:8800` | nessuna |
+| **Jira mock** (MockServer) | `http://localhost:8080` (host) → container `:1080` | `http://host.docker.internal:8080` o `http://testlab-jira-mock:1080` | nessuna; mock accetta qualsiasi credential |
+| **Dozzle** (log viewer) | `http://localhost:9999` | n/a | nessuna |
+| **Uptime-Kuma** | `http://localhost:3001` | n/a | setup iniziale alla prima visita |
+| **Kibana** | `http://localhost:5601` | n/a | — |
+| **Elasticsearch** | n/a esposto | `testlab-elasticsearch:9200` | — |
+| **Squid proxy** | `localhost:3128` (HTTP proxy) | `host.docker.internal:3128` | — |
+| **Syslog** | `localhost:514` (UDP) | `testlab-syslog:514` | — |
+
+#### Jira mock — endpoints pre-configurati (`jira-expectations.json`, vedi [03.11.4.2])
+
+Project key preconfigurato: **`VULN`**. Endpoint mockati:
+
+| Method | Path | Scopo |
+|---|---|---|
+| GET | `/rest/api/2/serverInfo` | Server version info (Test Connection ping) |
+| GET | `/rest/api/2/myself` | Auth check |
+| GET | `/rest/api/2/project/VULN` | Project detail (project key=VULN preconfigurato) |
+| GET | `/rest/api/2/project` | List projects |
+| POST | `/rest/api/2/issue` | Create issue (core integration endpoint) |
+| GET | `/rest/api/2/search` | JQL search |
+| GET | `/rest/api/2/issuetype` | Issue types list (dropdown UI) |
+
+**Test Connection Jira tipo**: URL `http://host.docker.internal:8080`, email arbitraria (`test@sentrikat.local`), API token arbitrario (`mock-token-123`), project key `VULN`. Il mock non valida credenziali.
+
+**Per altri integration mock similari**: webhook-tester (`http://host.docker.internal:8800`), GitLab on-prem mock (vedi se esiste), GitHub (no URL custom — passa SSRF), YouTrack (uguale a Jira pattern atteso).
+
+### Workflow PowerShell utente (Windows)
+
+- `&&` NON funziona in PowerShell. Usare `;` per concatenare, oppure eseguire comandi separati.
+- Per pull aggiornato dopo merge su main: `git fetch origin ; git switch main` (la prima volta serve `git switch -c main origin/main` perché il repo locale è in detached HEAD su tag `v1.0.0-beta.6`).
+- Path repo locale: `C:\SentriKat\v1.0.0-beta.6\` (sottocartella, NON `C:\SentriKat\`).
+
 ---
 
 ## 🤝 Stile collaborazione (preferenze utente)
