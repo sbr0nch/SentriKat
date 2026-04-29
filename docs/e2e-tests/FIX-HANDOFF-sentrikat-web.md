@@ -271,6 +271,8 @@ Sessione SentriKat-web aperta **2026-04-26** su branch `claude/fix-sentrikat-e2e
 | 2026-04-26 | 01.12.3 | `beb7d27` | co-fix con 01.9.1 |
 | 2026-04-26 | 01.16.1 | — | Verified only: `astro.config.mjs` filtra `/impressum` correttamente, no fix needed |
 | 2026-04-26 | 02.3.2 | `b766153` | `trial.py` helper `_dup_signup_detail` → messaggio specifico `EMAIL_ALIAS_NOT_ACCEPTED` sul 409 con `+tag`; frontend specializza UI message. Interpretazione "specialize" scelta rispetto a "block upfront" (meno invasiva, mantiene dedup canonico) |
+| 2026-04-26 | **04.2.1** | `42d7ea0` | **NUOVO BUG scoperto durante verify round 1**: portal stuck su "Verifying authentication..." per CSP che bloccava inline scripts da Astro/Vite. Root cause: M-7 nonce-CSP (commit `93b9c42` 16-apr) richiede `__CSP_NONCE__` placeholder che `sub_filter` nginx sostituisce, ma Vite inlinea script `<4KB` automaticamente senza placeholder. Fix 1-line: `assetsInlineLimit: 0` in `portal/astro.config.mjs` → tutti script emessi come `/_astro/*.js` esterni autorizzati da `script-src 'self'`. Sicurezza M-7 invariata. ✅ VERIFIED post-rebuild |
+| 2026-04-26 | **04.2.2** | — | **NUOVO BUG OPEN — non fixato**: Chart.js usa `new Function()` per animazioni → bloccato da `script-src` senza `'unsafe-eval'`. Impact: solo pagine portal `/admin/*` (Chart.js non caricato in dashboard cliente). Da fixare separatamente: bundling locale di Chart.js con tree-shake animazioni, oppure aggiungere `unsafe-eval` (security degrade). Sessione dedicata necessaria |
 
 ### ⚠️ Non fixati — da discutere architetturalmente
 

@@ -22,41 +22,66 @@ _PROD_IGNORE_WARNING_EMITTED = False
 
 
 def _allow_private_urls():
-    """Check if private/internal URLs are allowed (for dev/test environments).
+    """Check if private/internal URLs are allowed.
 
-    In production (``FLASK_ENV=production``) the flag is deliberately
-    ignored regardless of its value — this hardens against an admin
-    accidentally enabling SSRF bypass on a prod box. The first time we
-    observe the misconfiguration we emit a warning so it surfaces in
-    log review; subsequent calls stay quiet.
+    Behavior depends on deployment mode (see bug [03.11.4.5] revisited):
+
+    - **On-prem** (``saas_mode=False``): the flag is honored even in
+      production, because reaching internal network resources (Jira,
+      GitLab, webhooks, syslog, AD) is the primary use case for an
+      on-prem vulnerability management deployment.
+    - **SaaS** (``saas_mode=True``): the flag is ignored in production
+      to harden against an admin accidentally enabling SSRF bypass on
+      a multi-tenant cloud box (where private IPs would target other
+      tenants or cloud-provider metadata endpoints).
+
+    In ``FLASK_ENV=development`` the flag is honored regardless of mode.
     """
     global _PROD_IGNORE_WARNING_EMITTED
     allowed = (os.environ.get('ALLOW_PRIVATE_URLS', '').lower() == 'true' or
                os.environ.get('ALLOW_PRIVATE_JIRA_URL', '').lower() == 'true')
-    if allowed and os.environ.get('FLASK_ENV') == 'production':
-        if not _PROD_IGNORE_WARNING_EMITTED:
-            logger.warning(
-                "ALLOW_PRIVATE_URLS is set but FLASK_ENV=production — the "
-                "flag is ignored as a hardening measure. If you are in a "
-                "test/docker environment, set FLASK_ENV=development."
-            )
-            _PROD_IGNORE_WARNING_EMITTED = True
-        return False  # Never allow private URLs in production
-    return allowed
+    if not allowed:
+        return False
+    if os.environ.get('FLASK_ENV') != 'production':
+        return True
+    # Production: only honor the flag if this is an on-prem deployment.
+    try:
+        from app.saas import is_saas_mode
+        if not is_saas_mode():
+            return True
+    except Exception:
+        # If saas detection fails, fall through to the conservative path.
+        pass
+    if not _PROD_IGNORE_WARNING_EMITTED:
+        logger.warning(
+            "ALLOW_PRIVATE_URLS is set in a SaaS production deployment — "
+            "the flag is ignored as SSRF hardening. If this is an on-prem "
+            "install, ensure SAAS_MODE is unset/false."
+        )
+        _PROD_IGNORE_WARNING_EMITTED = True
+    return False
 
 
 def private_urls_ignored_in_production():
-    """Return True when the admin set ALLOW_PRIVATE_URLS but we're in prod.
+    """Return True when the admin set ALLOW_PRIVATE_URLS but we're in a
+    SaaS production deployment that ignores it.
 
     Call-sites that reject a URL for targeting a private network can use
-    this to enrich their error message (see bug [03.11.4.5]). It reports
-    the misconfiguration without leaking anything the admin can't
-    already see in their own ``.env``.
+    this to enrich their error message (see bug [03.11.4.5]). On-prem
+    deployments now honor the flag in production, so this returns False
+    for them.
     """
     if os.environ.get('FLASK_ENV') != 'production':
         return False
-    return (os.environ.get('ALLOW_PRIVATE_URLS', '').lower() == 'true' or
-            os.environ.get('ALLOW_PRIVATE_JIRA_URL', '').lower() == 'true')
+    flag_set = (os.environ.get('ALLOW_PRIVATE_URLS', '').lower() == 'true' or
+                os.environ.get('ALLOW_PRIVATE_JIRA_URL', '').lower() == 'true')
+    if not flag_set:
+        return False
+    try:
+        from app.saas import is_saas_mode
+        return is_saas_mode()
+    except Exception:
+        return True
 
 
 def is_ssrf_safe_url(url):
@@ -70,12 +95,13 @@ def is_ssrf_safe_url(url):
     - Reserved addresses
     - Cloud metadata endpoints (169.254.169.254, 169.254.170.2)
 
-    When ``ALLOW_PRIVATE_URLS=true`` AND ``FLASK_ENV=development`` the
-    private/internal network checks are bypassed. This is intended for
-    dev/test environments where services run on internal networks (e.g.
-    Docker containers using ``host.docker.internal``). In
-    ``FLASK_ENV=production`` the flag is deliberately ignored regardless
-    of its value as a hardening measure against accidental misconfig.
+    When ``ALLOW_PRIVATE_URLS=true`` the private/internal network
+    checks are bypassed if EITHER ``FLASK_ENV=development`` OR the
+    deployment is on-prem (``saas_mode=False``). On-prem must reach
+    internal services (Jira, GitLab, webhooks, syslog) — that is the
+    point of an on-prem install. In a SaaS production deployment the
+    flag is ignored as SSRF hardening against accidental misconfig
+    that could target other tenants or cloud-provider metadata.
 
     Args:
         url: The URL to validate.
