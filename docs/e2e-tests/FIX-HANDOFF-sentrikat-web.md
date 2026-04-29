@@ -420,3 +420,39 @@ Quando avete deployato:
 5. `/admin/users` colonna Last Login mostra timestamp di te stesso.
 
 Scrivete un Progress log nello stesso file (sezione "🛑 UPDATE 2026-04-29") con commit hash + branch.
+
+---
+
+## ✅ Progress log — 2026-04-29 (sentrikat-web batch 2 — option A delivered)
+
+**Branch**: `claude/fix-admin-csp-critical-QWC8v` (commit `23ce9da` pushed)
+
+### `[05.9.1]` CRITICAL — admin UI dead under strict CSP — ✅ FIXED (one-shot, option A)
+
+- Single delegated dispatcher in `AdminLayout.astro` nonce'd script: parses call expressions via regex (no `eval`/`new Function`, no `'unsafe-eval'` needed), resolves the function name against `window`, invokes with parsed literal args (`'str'`, `"str"`, numbers, `true|false|null|undefined`, `this`, `this.value`, `event`).
+- Verbatim recognition for: `event.stopPropagation()`, `event.preventDefault()`, `if(event.target===this)F()` (modal backdrop), `window.location.href='/x'` (row navigation).
+- Bulk attribute migration across **22 files** (AdminLayout + 21 pagine): `onclick=` → `data-action=`, `onchange=` → `data-change-action=`, `oninput=` → `data-input-action=`, `onsubmit=` → `data-submit-action=`. Hover-only `onmouseover` → CSS classes (`.hover-bg-indigo`, `.hover-border-gray`).
+- Document-level delegation: dynamically-injected rows (`tbody.innerHTML…`) pick up handlers without rebind.
+- Pre-existing kebab-case registry in `saas-tenants` preserved (dispatcher silently no-ops on non-call expressions).
+- `npx astro build` clean; rendered `dist/admin/*.html` contains **zero** `on*=` attributes.
+- **Acceptance**: zero "Refused to execute inline event handler" violations on every `/admin/*` page; create/save/delete actions, table row navigation, modal open/close, incident toggles, status selects, exports — all firing.
+
+### `[05.5.1]` — already FIXED in earlier batch (commit `31805d6`)
+
+- `/admin/auth/login` emits `LOGIN_SUCCESS` / `LOGIN_FAILED` (with `details.reason`: `missing_credentials` / `invalid_credentials` / `account_deactivated`) on every outcome via `log_admin_action`.
+- `/admin/users` POST/PATCH/DELETE emit `ADMIN_ACTION` with operator credit + `target_email`.
+
+### `[05.6.1]` — already FIXED in earlier batch (commit `31805d6`)
+
+- `admin.py:171` writes `user.last_login_at = datetime.utcnow()` on every successful `/admin/auth/login`.
+- Customer-side OTP flow (`portal.py:373` `verify_otp`) already writes `customer.last_login_at = datetime.utcnow()`. **Note**: if `/admin/customers` continues to show `-` for a customer after a fresh OTP login, the scenario differs from the original repro and needs precise repro steps (which page, which user, which login flow).
+
+### Deploy
+
+`docker compose up -d --build portal` (license-server unchanged in `23ce9da` — audit/login changes shipped in `31805d6`).
+
+### ✅ User verify 2026-04-29 (sul laptop): "sembra tutto ok in console in ogni sezione"
+
+- Sign Out: ✅ funziona
+- Console F12 admin pages: zero CSP errors visibili dall'utente.
+- `[05.5.1]` `[05.6.1]` da ri-verificare puntualmente lato `portal.sentrikat.com/admin/users` (last_login admin) e `portal.sentrikat.com/admin/logs` (audit entries) — eseguire dopo aver chiuso il sync core in corso.
