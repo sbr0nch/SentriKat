@@ -126,10 +126,12 @@ EA Tenants, Webhook Outbox, Usage Metrics, Leads, Demo Requests, Newsletter, Sup
 
 ### Findings
 
-- 🔴 **[05.5.1] Centralized Logs completamente vuoto durante una sessione admin attiva** (HIGH)
+- 🔴 **[05.5.1] Centralized Logs completamente vuoto durante una sessione admin attiva** (HIGH — ✅ VERIFIED 2026-04-29)
   - Total: **0** · Audit: 0 · Activation: 0 · SaaS: 0 · Today: 0.
   - Stiamo aprendo `/admin/logs` da una sessione super-admin autenticata in questo momento → l'evento `admin.login` (oltre a tutte le navigazioni admin) **dovrebbe** apparire come audit log entry.
-  - Diagnosi probabile: l'audit logger non scrive su questo storage (forse scrive su file/Docker logs ma non sul DB letto da questa pagina), oppure il middleware audit non è agganciato alle route admin.
+  - **Re-test 2026-04-29**: dopo logout (vedi [05.9.1] — sign out non funziona, ma OTP login fresh sì) → audit log ancora vuoto. Bug confermato HIGH.
+  - Confermato anche su `/admin/audit` (vedi 05.9): Total Events 0, Today 0, This Week 0, This Month 0 — DUE pagine diverse di audit, entrambe vuote.
+  - Diagnosi probabile: l'audit logger non scrive su questo storage (forse scrive su file/Docker logs ma non sul DB letto da questa pagina), oppure il middleware audit non è agganciato alle route admin/auth.
   - Impatto: zero traceability di azioni admin. Compliance issue (SOC2/GDPR richiedono audit trail di accessi privilegiati).
   - Correlato a [05.6.1] (last login `-`).
 
@@ -154,9 +156,10 @@ EA Tenants, Webhook Outbox, Usage Metrics, Leads, Demo Requests, Newsletter, Sup
 ### Findings
 
 - 🟢 **Permissions matrix** ben strutturata e leggibile. Differenziazione coerente: Super Admin = Full ovunque; Admin = Full su tutto tranne nessun accesso a "Settings"; Support/Sales/Ops/Viewer con scopi limitati. ✅
-- 🔴 **[05.6.1] Last Login `-` per super-admin attualmente loggato** (HIGH)
+- 🔴 **[05.6.1] Last Login `-` per super-admin attualmente loggato** (HIGH — ✅ VERIFIED 2026-04-29)
   - L'utente `admin-sentrikat / sotadenis94@gmail.com / SUPER ADMIN / ACTIVE` ha `Last Login: -` → mai aggiornato.
   - Stiamo navigando come quell'utente in questo momento. La login deve aver settato il campo.
+  - **Re-test 2026-04-29**: dopo OTP login fresh, `/admin/users` mostra ancora `Last Login: -` → bug confermato HIGH.
   - Diagnosi: stessa causa di [05.5.1] — auth flow non scrive `last_login_at` né emette evento audit.
   - Impatto: impossibile sapere quando un super-admin si è loggato l'ultima volta → security blind spot.
 
@@ -243,9 +246,43 @@ EA Tenants, Webhook Outbox, Usage Metrics, Leads, Demo Requests, Newsletter, Sup
 
 ---
 
+---
+
+## 05.9 — Bug trovati durante re-test 2026-04-29
+
+### `[05.9.1]` Sign Out **non funziona** — CSP `script-src-attr` blocca inline handler (HIGH/CRITICAL)
+
+- Cliccando "Sign Out" in basso a sinistra del sidebar admin: nulla succede. Console browser mostra ripetuti errori CSP:
+  ```
+  Content-Security-Policy: Le impostazioni della pagina hanno bloccato l'esecuzione
+  di un gestore eventi (script-src-attr) in quanto viola la seguente direttiva:
+  "script-src 'self' 'nonce-ce4aae40edc7df44b92117a9fafba33b'".
+  Considerare l'utilizzo di un hash ("sha256-y0nKik4dM+1fXZh10edAXaR/Ck6G362K0i51lEfsER4=")
+  insieme a "unsafe-hashes". admin:702:7
+  ```
+  + 3 warning identici con hash diverso (`sha256-7X/TEBMYawkpLTmqph9jNMqmP7vLvBcPZkLBLwPk8G8=`).
+- Diagnosi: il bottone "Sign Out" usa un `onclick="..."` inline (HTML attribute event handler), ma il CSP del portal admin non ha `'unsafe-inline'` o gli hash necessari nella direttiva `script-src-attr`/`script-src`. Conseguenza: il logout non parte mai.
+- File coinvolto (dal log): `admin:702:7` → `/admin/<page>` template HTML.
+- Impatto: **session non chiudibile dalla UI**. Per fare logout l'utente deve chiudere il browser o cancellare i cookie a mano. Security issue: in caso di laptop condiviso/perso, il super-admin resta loggato.
+- Correlato a [04.2.1] CSP portal regression già fixato lato customer — qui il regression è sull'admin.
+- Fix proposto: rimuovere `onclick=""` inline e legare l'evento via JS esterno con il nonce corretto (`<script nonce="...">document.querySelector('#sign-out').addEventListener('click', ...)</script>`), oppure usare un form POST a `/admin/logout` con il submit button.
+- Repro: aprire `/admin/<qualsiasi>`, click "Sign Out" → nessuna azione, console F12 mostra il warning CSP.
+
+### `/admin/audit` — pagina **dedicata audit log**, anch'essa vuota (HIGH — stesso root cause di [05.5.1])
+
+Scoperta nuova: il sidebar ha **due** voci log distinte:
+- `/admin/logs` (gruppo "Centralized Logs", riga `Logs / Audit` nella matrice permessi 05.6) → KPI: Total / Audit / Activation / SaaS / Today.
+- `/admin/audit` (gruppo "SYSTEM" → `Audit Log`) → KPI: Total Events / Today / This Week / This Month.
+
+Entrambe mostrano 0 entries dopo OTP login fresh. Stesso bug HIGH già tracked come `[05.5.1]`.
+
+- 🔵 **[05.9.2]** Due pagine diverse per "audit log" (Centralized Logs vs Audit Log) — possibile duplicato UI o concettualmente distinte (centralized = aggregator, audit = security trail). Va chiarito + tooltip + label coerenti, oppure unificate.
+
+---
+
 ## Riepilogo apertura Fase 05
 
-- **Bug aperti**: 7 (di cui 5 HIGH `[05.1.1]` `[05.3.1]` `[05.4.1]` `[05.5.1]` `[05.6.1]` `[05.8.1]`, 2 WARN `[05.2.1]` `[05.5.2]` `[05.8.2]`).
+- **Bug aperti**: 8 (di cui 7 HIGH `[05.1.1]` `[05.3.1]` `[05.4.1]` `[05.5.1]` ✅ `[05.6.1]` ✅ `[05.8.1]` `[05.9.1]`, 2 WARN `[05.2.1]` `[05.5.2]` `[05.8.2]`). ✅ = verified 2026-04-29.
 - **Info/governance**: 3 (`[05.1.2]` `[05.6.2]` `[05.7.1]`).
 - **OK**: 4 (NVD sync, runbook, role matrix, quick actions).
 - **Pagine ancora da aprire**: ~17 (vedi sidebar). Continuare nelle prossime sessioni.
