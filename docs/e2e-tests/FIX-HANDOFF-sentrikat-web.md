@@ -357,3 +357,66 @@ Sessione di apertura Fase 05 sul branch `claude/add-e2e-test-docs-UVya5` ha mapp
 - **Tutti i 23 finding con repro step e fix proposto**: `docs/e2e-tests/05-admin-portal.md` (file completo).
 - **Sessione apertura**: branch `claude/add-e2e-test-docs-UVya5`, commit `e99d6cb` → `c8ce89e` su `sbr0nch/SentriKat`.
 - **Verify post-fix**: appena `[05.9.1]` è live su `portal.sentrikat.com`, l'utente riaprirà `05-admin-portal.md` e procederà coi test follow-up bloccati (cluster sblocco automatico).
+
+---
+
+## 🛑 UPDATE 2026-04-29 — fix `[05.9.1]` PARZIALE — serve fix one-shot globale
+
+**Verificato live su `portal.sentrikat.com/admin/*`**: il deploy ha fixato SOLO il bottone **Sign Out**. Tutti gli altri `onclick` inline sono ancora rotti. Errori console attuali (sample dalla pagina `/admin/users`):
+
+```
+CSP blocked event handler: showCreateUser()      hash: VSJ5UkXbRNeSr8hXxq1rzv47uOHY5ZPLEZP7OlwUbO8=
+CSP blocked event handler: hideUserModal()       hash: J0B2g3DjNzi6XLap5osB7P3FVGD3ZYpZXS7s6xNo23U=
+CSP blocked event handler: saveUser()            hash: OS6F7RAqovpX/0puMxxPq+DYBxFlfKFnpYpGVEAtwxA=
++ 3 altri unnamed handlers nella stessa pagina
+```
+
+E presumibilmente decine di altri in `/admin/releases`, `/admin/datasources`, `/admin/logs`, `/admin/audit`, `/admin/customers`, `/admin/licenses`, `/admin/leads`, `/admin/demo-requests`, `/admin/feedback`, `/admin/support-tickets`, `/admin/response-templates`, ecc.
+
+### Richiesta fix one-shot (NON bug-by-bug)
+
+Tre opzioni in ordine di preferenza tecnica:
+
+**A) (preferito) Sostituire TUTTI gli `onclick="..."` inline nei template admin con `data-action="<id>"` + un singolo `<script nonce="{{ csp_nonce }}">` centralizzato che fa `addEventListener` su `data-action`.** Pattern unobtrusive JS, mantiene CSP strict, fix definitivo.
+
+**B) Aggiungere `'unsafe-hashes'` al CSP + uno script di build che genera lo `sha256` di ogni handler e li inietta nella direttiva.** Più fragile (hash da rigenerare ad ogni cambio template), ma fattibile.
+
+**C) Aggiungere `'unsafe-inline'` allo `script-src-attr`.** 2 minuti di lavoro ma **degrada la security posture** (rinuncia a una difesa CSP). Da considerare solo se A/B sono impraticabili in tempi brevi.
+
+### Comando per identificare TUTTI gli onclick da fixare in colpo solo
+
+Da repo root `sentrikat-web`:
+
+```bash
+grep -rn 'onclick=' src/ --include="*.astro" --include="*.html" --include="*.jsx" --include="*.tsx" | wc -l
+grep -rn 'onclick=' src/ --include="*.astro" --include="*.html" --include="*.jsx" --include="*.tsx" > /tmp/onclick-audit.txt
+```
+
+(adatta i path/estensioni al layout reale di Astro). Il numero totale ti dice la dimensione del refactor. Se >100, opzione A diventa onerosa → considera B (con script generatore hash).
+
+### Bug HIGH non-CSP nello stesso cluster (anche questi NON fixati)
+
+- **`[05.5.1]` Centralized Logs vuoto** — `/admin/logs` mostra Total Logs=0 anche dopo login admin attivo. Audit middleware non agganciato alle route admin/auth.
+- **`[05.6.1]` `Last Login: -`** — anche dopo OTP login fresh, `users.last_login_at` non viene scritto. Stessa root cause: l'auth flow del portal admin non emette `user.login` audit event né aggiorna `last_login_at`.
+
+**Fix proposto per questo cluster**: aggiungere alle handler delle route admin/auth (suggerimento: middleware FastAPI/Astro server endpoint) un hook che fa:
+1. `INSERT INTO audit_log (...)` per `admin.login`, `admin.logout`, `admin.<resource>.read/write`
+2. `UPDATE users SET last_login_at = NOW() WHERE id = <admin_id>` al login
+
+Un solo middleware risolve entrambi.
+
+### Cosa NON fare nel prossimo deploy
+
+- ❌ Non spostare i singoli `onclick` uno per uno (è quello che ha fatto il deploy parziale per Sign Out, e ora ci sono ancora 30+ pagine da girare).
+- ✅ Applicare A o B come **single PR globale** che fixa l'intero cluster, poi un commit separato per audit middleware.
+
+### Verify post-fix
+
+Quando avete deployato:
+1. Apri `https://portal.sentrikat.com/admin/users` con DevTools console aperta.
+2. Devi vedere **zero** errori CSP `script-src-attr` su qualsiasi pagina admin (testare tutte le 8 documentate in `05-admin-portal.md`: `/admin/releases`, `/admin/kb`, `/admin/datasources`, `/admin/status`, `/admin/logs`, `/admin/users`, `/admin/runbook`, `/admin/settings`).
+3. Click "**+ New User**" → modal apre. Click "**Save**" su un user fittizio → toast verde + l'utente appare nella lista.
+4. `/admin/logs` Total Logs > 0 (deve mostrare almeno l'event `admin.login` di te stesso).
+5. `/admin/users` colonna Last Login mostra timestamp di te stesso.
+
+Scrivete un Progress log nello stesso file (sezione "🛑 UPDATE 2026-04-29") con commit hash + branch.
