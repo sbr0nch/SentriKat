@@ -5407,6 +5407,111 @@ def sync_status():
         return jsonify(last_sync.to_dict())
     return jsonify({'message': 'No sync performed yet'})
 
+@bp.route('/api/sync/cpe-backfill', methods=['POST'])
+@admin_required
+@limiter.limit("2/hour")
+def trigger_cpe_backfill():
+    """
+    Backfill NVD CPE data for vulnerabilities with cpe_data IS NULL.
+
+    Iterates fetch_cpe_version_data() in chunks (respecting NVD rate limits)
+    until no more vulnerabilities need enrichment. Without this, ~65% of
+    historical CVEs in the DB lack cpe_data and are invisible to the CPE
+    match path even when match_type='auto' (see bug [03.14.32] sub-A).
+
+    Runs in a background thread; the frontend can poll progress via
+    /api/progress/<job_id>. Strict 2/hour rate limit because the work itself
+    is bounded by NVD's external rate limit (no benefit to running it more).
+
+    Permissions:
+    - Super Admin only.
+    """
+    import threading
+    from app import progress as prog
+    from app.models import Vulnerability
+
+    # Refuse if any sync is already running — backfill saturates the NVD
+    # quota and would starve other operations.
+    active = prog.get_active()
+    if any(j['job_id'].startswith(('sync_', 'cpe_backfill_')) for j in active):
+        return jsonify({
+            'error': 'A sync or backfill is already running',
+            'job_id': active[0]['job_id'],
+        }), 409
+
+    # Estimate total work for the progress bar.
+    pending = Vulnerability.query.filter(Vulnerability.cpe_data == None).count()
+    if pending == 0:
+        return jsonify({
+            'status': 'noop',
+            'message': 'No vulnerabilities need CPE backfill — all already enriched.',
+        })
+
+    job_id = f'cpe_backfill_{int(time.time())}'
+
+    def _run_backfill(app):
+        from app.cisa_sync import fetch_cpe_version_data
+        with app.app_context():
+            try:
+                # Use a generous step count so the percent meter advances
+                # smoothly across many small batches.
+                CHUNK = 100
+                total_chunks = max(1, (pending + CHUNK - 1) // CHUNK)
+                prog.start(job_id, total_chunks, 'Backfilling NVD CPE data...')
+
+                done_chunks = 0
+                total_enriched = 0
+                while True:
+                    enriched = fetch_cpe_version_data(limit=CHUNK)
+                    total_enriched += enriched or 0
+                    done_chunks += 1
+                    prog.update(
+                        job_id,
+                        step=min(done_chunks, total_chunks),
+                        description='Backfilling NVD CPE data...',
+                        detail=f'{total_enriched} enriched so far',
+                    )
+                    if not enriched:
+                        break
+                    # Safety stop: do not loop forever if NVD keeps returning
+                    # rows. The original `pending` count caps us; allow 50%
+                    # headroom for stale rows that re-qualify mid-run.
+                    if done_chunks > total_chunks * 2:
+                        logger.warning(
+                            'CPE backfill stopped at chunk %d (>2× estimated work) — '
+                            'likely transient NVD churn; re-run if needed.',
+                            done_chunks,
+                        )
+                        break
+
+                # After backfill, re-run the matcher so the newly enriched
+                # CVEs surface in the dashboard immediately.
+                from app.filters import rematch_all_products
+                prog.update(job_id, step=total_chunks,
+                            description='Rematching products...',
+                            detail=f'{total_enriched} enriched, rematching')
+                removed, added = rematch_all_products()
+
+                prog.finish(job_id, {
+                    'enriched': total_enriched,
+                    'rematch_removed': removed,
+                    'rematch_added': added,
+                })
+            except Exception as e:
+                logger.exception('CPE backfill failed')
+                prog.fail(job_id, str(e))
+
+    app = current_app._get_current_object()
+    t = threading.Thread(target=_run_backfill, args=(app,), daemon=True)
+    t.start()
+
+    return jsonify({
+        'job_id': job_id,
+        'status': 'started',
+        'pending_estimate': pending,
+    })
+
+
 @bp.route('/api/sync/history', methods=['GET'])
 @login_required
 def sync_history():

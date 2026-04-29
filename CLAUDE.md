@@ -106,6 +106,22 @@ Project key preconfigurato: **`VULN`**. Endpoint mockati:
 
 ---
 
+## 🛡️ Principio cardine — coverage prodotto
+
+> **Zero coverage parziale è accettabile** per un vulnerability management tool.
+
+SentriKat dichiara di trovare le CVE che colpiscono i prodotti del cliente. Se il sistema ne perde anche solo il 5% silenziosamente è un fallimento di prodotto, non un "bug accettabile". Nessun "in SaaS funziona meglio quindi ok" o "statisticamente non si nota" o "edge case". Ogni miss = un cliente che pubblica vulnerability missed da NOI mentre noi diciamo "tutto verde".
+
+Implicazioni operative:
+- Quando trovi un bug "match algo skippa il 65% delle CVE" è **HIGH/CRITICAL** anche se "in SaaS si vede meno". Non è opinabile.
+- Quando una funzione ha 2 code path diversi (UI vs scheduler vs API), tutti e 3 devono essere testati, non basta uno.
+- Quando il sync è "incompleto ma copre il caso base", è ancora **bug aperto**. Da fixare prima del go-to-market, non in "round 2".
+- Quando la dashboard mostra `0 match` perché un upstream sync è incompleto, **non puoi nascondere** dicendo "OK funziona, dati arriveranno". L'utente vede 0 e perde fiducia.
+
+Quando documenti un bug, classifica in base all'impatto reale sull'utente, non al "ma succede solo se...".
+
+---
+
 ## 🚫 Cose da NON fare
 
 - Non leggere `00-INDEX.md` per intero (è enorme). Usa `grep -n` + `Read` con `offset`/`limit` mirato.

@@ -566,12 +566,33 @@ def create_app(config_class=Config):
                     pass
         return response
 
+    def _render_error_page(status_code, heading, message, icon, tone):
+        """Render the styled error page (extends base.html). Falls back to
+        plain HTML if the template render itself fails — never let an error
+        handler raise."""
+        from flask import render_template
+        try:
+            return render_template(
+                'error.html',
+                status_code=status_code,
+                heading=heading,
+                message=message,
+                icon=icon,
+                tone=tone,
+            ), status_code
+        except Exception:
+            return f'<h1>{status_code} - {heading}</h1><p>{message}</p>', status_code
+
     @app.errorhandler(404)
     def not_found_error(e):
         from flask import request as _req, jsonify as _jfy
         if _req.path.startswith('/api/'):
             return _jfy({'error': 'Not found'}), 404
-        return '<h1>404 - Page Not Found</h1><p>The requested page does not exist.</p>', 404
+        return _render_error_page(
+            404, 'Page Not Found',
+            'The page you requested does not exist or has been moved.',
+            'bi-compass', 'primary',
+        )
 
     @app.errorhandler(500)
     def internal_error(e):
@@ -582,7 +603,11 @@ def create_app(config_class=Config):
             pass
         if _req.path.startswith('/api/'):
             return _jfy({'error': 'Internal server error'}), 500
-        return '<h1>500 - Internal Server Error</h1><p>An unexpected error occurred.</p>', 500
+        return _render_error_page(
+            500, 'Internal Server Error',
+            'Something went wrong on our side. The team has been notified.',
+            'bi-exclamation-triangle-fill', 'danger',
+        )
 
     @app.errorhandler(429)
     def rate_limit_error(e):

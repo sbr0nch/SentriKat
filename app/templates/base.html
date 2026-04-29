@@ -3821,6 +3821,22 @@
                 clearInterval(_progressPollInterval);
                 _progressPollInterval = null;
             }
+            // Re-enable the Sync button if it was disabled by a restored job
+            // (see [03.14.35]). Defensive: only acts if the button exists.
+            const syncBtn = document.getElementById('syncButton') || document.getElementById('syncBtn');
+            if (syncBtn && typeof resetButton === 'function') resetButton(syncBtn);
+        }
+
+        // Disable the Sync button (if present on the current page) for the
+        // duration of a job restored from sessionStorage / /api/progress/active.
+        // Only sync_* job IDs touch the Sync button — other long-running jobs
+        // (cpe_backfill_*, etc.) leave it untouched.
+        function _maybeLockSyncButtonForJob(jobId) {
+            if (!jobId || !jobId.startsWith('sync_')) return;
+            const syncBtn = document.getElementById('syncButton') || document.getElementById('syncBtn');
+            if (syncBtn && typeof setButtonLoading === 'function') {
+                setButtonLoading(syncBtn, 'Syncing...');
+            }
         }
 
         async function pollProgress(jobId) {
@@ -3904,6 +3920,7 @@
                 fetch(`/api/progress/${savedJobId}`).then(r => r.json()).then(p => {
                     if (p.status === 'running') {
                         showProgressBanner(savedJobId);
+                        _maybeLockSyncButtonForJob(savedJobId);
                     } else {
                         sessionStorage.removeItem('activeJobId');
                         if (p.status === 'completed') {
@@ -3913,10 +3930,14 @@
                     }
                 }).catch(() => sessionStorage.removeItem('activeJobId'));
             } else {
-                // Fallback: check server for any active jobs
+                // Fallback: check server for any active jobs (cross-tab / fresh
+                // page-load case — see [03.14.35]). Lock the Sync button if
+                // an active sync is already running on the server.
                 fetch('/api/progress/active').then(r => r.json()).then(data => {
                     if (data.jobs && data.jobs.length > 0) {
-                        showProgressBanner(data.jobs[0].job_id);
+                        const jobId = data.jobs[0].job_id;
+                        showProgressBanner(jobId);
+                        _maybeLockSyncButtonForJob(jobId);
                     }
                 }).catch(() => {});
             }
