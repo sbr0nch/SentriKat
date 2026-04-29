@@ -25,10 +25,15 @@
 | 05.12 | `/admin/demo-requests` | 🟢 OK happy (empty state) |
 | 05.13 | `/admin/newsletter` | 🔴 1 bug (subscribers list 403 "Invalid admin key") |
 | 05.14 | `/admin/support` | 🔵 1 info (CSS class leak in stat card) |
+| 05.15 | `/admin/canned-responses` | 🟢 OK (empty state) |
+| 05.16 | `/admin/health` | 🔵 1 info (semantica "healthy" su zero-data) |
+| 05.17 | `/admin/feedback` | 🔵 1 info (possibile mancanza dedup), 🟢 2 entry seed |
+| 05.18 | `/admin/licenses` (POST-EA) | 🟢 OK (empty as expected) |
+| 05.19 | `/admin/activations` (POST-EA) | 🔵 1 info (UX redundancy), 🟢 OK empty |
 
 ## Pagine ancora NON aperte (sidebar)
 
-EA Tenants, Webhook Outbox, Usage Metrics, Response Templates, Customer Health, Feedback, Licenses (POST-EA), Activations (POST-EA), Pricing (READ-ONLY), Plans, Audit Log (visibile via Settings → "Go to Audit Log"), Status & Incidents sub-views.
+EA Tenants, Webhook Outbox, Usage Metrics, Pricing (READ-ONLY), Plans, Audit Log (visibile via Settings → "Go to Audit Log"), Status & Incidents sub-views.
 
 ---
 
@@ -436,6 +441,164 @@ Entrambe mostrano 0 entries dopo OTP login fresh. Stesso bug HIGH già tracked c
 - Workflow ticket: Open → In Progress → Resolved → Closed (state transitions dim 5).
 - Reply admin → email customer → audit log entry.
 - Filter Category con seed (security, billing, technical, ...) → coverage dim 6.
+
+---
+
+## 05.15 — `/admin/canned-responses` (Response Templates)
+
+> Sessione 2026-04-29. Empty state. Coverage UI happy path.
+
+### Findings
+
+- 🟢 **Header**: titolo "Response Templates", CTA `+ New Template`.
+- 🟢 **Filtro**: `All Categories` dropdown.
+- 🟢 **Empty state copy** "No templates yet. Create your first response template to speed up support." — buona UX (action-oriented, non solo "no data").
+
+### Test follow-up
+
+- Crea template (subject, body, category, tags) → appare in Support Tickets reply UI?
+- Categorie predefinite (security/billing/technical/...) o free-form?
+- Variable substitution (es. `{{customer.name}}`) supportato? Test con un template e una reply.
+- RBAC: solo super-admin può creare/editare? customer support agent solo usare?
+
+---
+
+## 05.16 — `/admin/health` (Customer Health)
+
+> Sessione 2026-04-29. Pagina dashboard di "alerting" customer-side. Tutti gli indicatori a 0.
+
+### Findings
+
+- 🟢 **6 stat card** in top: Expiring (7D) `0`, Expiring (30D) `0`, Inactive Installs `0`, Failed Activations `0`, Locked Accounts `0`, Open Tickets `0`.
+- 🟢 **4 sezioni** dettagliate sotto:
+  - **Expiring Licenses (30 days)** — colonne Customer, Company, License, Edition, Expires, Days Left, Actions. Empty: "All licenses healthy".
+  - **Inactive Installations (7+ days)** — Customer, Hostname, OS, Version, Last Seen, Days Inactive. Empty: "All installations active".
+  - **Failed Activations (7 days)** — Time, Installation ID, License, IP, Details. Empty: "No failed activations".
+  - **Locked Accounts** — Customer, Email, Failed Attempts, Locked Until, Actions. Empty: "No locked accounts".
+- 🔵 **`[05.16.1]`** Semantica "All ... healthy" su zero-data (vedi sotto).
+
+### `[05.16.1]` 🔵 **INFO/UX** — Empty state non distingue "nessun dato" da "tutto sano"
+
+**Sintomo**:
+- "Expiring Licenses (30 days)" → empty state "**All licenses healthy**". Ma i 3 customer in `[05.10]` hanno colonna Licenses = `0` (nessuna licenza emessa). Quindi non c'è "salute" buona, c'è **assenza totale di licenze** da monitorare.
+- Stesso pattern per "All installations active" (zero installation, non "tutte attive") e "No failed activations" (zero attivazioni totali, non solo zero failed).
+
+**Impatto**:
+- Super-admin che apre questa pagina vede tutto verde e crede di avere customer attivi sani. In realtà non ha mai venduto una licenza (stato pre-EA atteso, ma il dashboard non lo dice).
+- Rischio falsa sicurezza in fase di scale-up: quando il primo customer paga, il dashboard non distingue "0 license OK perché nuovo customer" da "0 license OK perché tutto bene".
+
+**Suggerimento**:
+- Empty copy con denominator: "0 of 0 licenses expiring" / "Monitoring 0 installations" / "No license activity in the last 7 days".
+- Oppure card top con "Total Customers / Total Licenses" così il super-admin sa il denominator a colpo d'occhio.
+
+**Severity = INFO**: cosmetico-strategico, non blocca funzionalità. Deployment scope: `🌐 portal admin`.
+
+### Test follow-up
+
+- Seed 1 license che scade in 5 giorni → verifica appare in "Expiring (7D)" + sezione Expiring Licenses.
+- Seed 1 installation con `last_heartbeat = NOW() - 8 days` → verifica "Inactive Installs" sale a 1.
+- Trigger 6 failed login per un user → verifica appare in "Locked Accounts" (cluster `[05.6]`).
+- Action su Locked Accounts: cosa fa il bottone "Actions"? Unlock? Reset password?
+
+---
+
+## 05.17 — `/admin/feedback` (Feedback)
+
+> Sessione 2026-04-29. 2 entry seed (utente test `muscleaddiction49` ha smoke-tested il bug report). Coverage 7-dim happy + dim 7 audit nuovo.
+
+### Findings
+
+- 🟢 **Header**: titolo "Feedback".
+- 🟢 **Stat card (4)**: Total `2`, Bugs `2`, Features `0`, Open `2` "Needs attention".
+- 🟢 **Filtri**: Search feedback, All Types, All Statuses.
+- 🟢 **Tabella "Bug Reports & Feature Requests"**: Type, Status, Title, Customer, Tags, Date, Replies.
+- 🟢 **Entry seed**:
+  - Riga 1: BUG / SUBMITTED / "Testing the bug report feature" / muscleaddiction49 / (no tag) / Apr 27, 2026 / (no replies)
+  - Riga 2: BUG / SUBMITTED / "Testing the bug report feature" / muscleaddiction49 / DASHBOARD / Apr 27, 2026 / (no replies)
+- 🔵 **`[05.17.1]`** Possibile mancanza dedup (vedi sotto).
+
+### `[05.17.1]` 🔵 **INFO/UX** — Submit duplicato non rilevato
+
+**Sintomo**:
+- 2 entry con **stesso titolo identico** ("Testing the bug report feature"), **stesso customer**, **stessa data** (Apr 27, 2026), differenti solo per il tag (una `null`, una `DASHBOARD`).
+- Suggerisce che l'utente abbia premuto Submit due volte o che il form non normalizzi il payload (tag opzionale → 2 stati distinti). Non c'è warning "Sembri aver già inviato questo feedback".
+
+**Impatto**:
+- Customer in panico/frustrazione che spamma 5 volte lo stesso bug intasa il funnel admin.
+- Stat "Open: 2 — Needs attention" gonfiata da duplicate → super-admin perde tempo.
+
+**Suggerimento**:
+- Submit-side: normalizza payload (trim title) + warn se stesso title+customer in ultime 24h.
+- Admin-side: bottone "Merge duplicates" o auto-clustering by title similarity.
+
+**Severity = INFO**: scelta di prodotto, non vero bug. Deployment scope: `🌐 portal admin` + `🔐 license-server` (API submit).
+
+### Test follow-up
+
+- Click su una riga → vedi il body del bug report? screenshot allegato? user-agent / browser info catturato?
+- Workflow status: SUBMITTED → ACKNOWLEDGED → IN_PROGRESS → RESOLVED / WON'T_FIX.
+- Reply admin: notifica email al customer? entry in audit log `[05.5.1]`?
+- Filter Type=FEATURE → con seed feature request, separazione bug vs feature OK?
+- RBAC: customer-side può vedere solo i propri feedback, super-admin tutti?
+
+---
+
+## 05.18 — `/admin/licenses` (Licenses POST-EA)
+
+> Sessione 2026-04-29. Empty atteso pre-EA. Coverage shell UI.
+
+### Findings
+
+- 🟢 **Header**: titolo "Licenses", CTA `+ New License`.
+- 🟢 **Filtri**: All Editions, All Statuses, Customer ID input, bottone Search.
+- 🟢 **Stat card (4)**: Total `0`, Active `0`, Pro `0`, Trials Active `0`.
+- 🟢 **Tabella "Licenses" — `0 licenses`**: License Key, Customer, Edition, Status, Agents, Subscription, Expires, Trial. Empty: "No licenses found".
+- 🟢 **Sidebar label POST-EA**: coerente con strategia di rilascio (la pagina esiste ma il modello dati si attiva solo dopo Early Access end).
+
+### Test follow-up (post-EA)
+
+- Crea license trial 30gg → verifica conta in `Trials Active`.
+- Crea license Professional → verifica conta in `Pro`.
+- Filter by Customer ID → match esatto / parziale?
+- Action revoke license → status passa a REVOKED, bloccata immediatamente l'attivazione lato agent? `[03.13.2]` cross-ref.
+- Cross-ref `[02.7.6]` (Billing "Monthly/Renews" su EA gratuito): verifica anche qui edge case EA tier.
+
+---
+
+## 05.19 — `/admin/activations` (Activations POST-EA)
+
+> Sessione 2026-04-29. Empty atteso pre-EA. UX duplicata da osservare.
+
+### Findings
+
+- 🟢 **Header**: titolo "Activations".
+- 🟢 **Banner top**: "No active installations — Waiting for first activation" (icon dot, info-level).
+- 🟢 **Stat card (5)**: Active Installations `0` / `0 total`, Online (24H) `0` / "No active installations", Stale (1-3 DAYS) `0` / "All healthy", Offline (3+ DAYS) `0` / "None detected", Heartbeats (24H) `0` / "Last 24 hours".
+- 🟢 **Sezione "Activation Events"**: filter `All Events` + Refresh, area log empty con icona heart-pulse e testo "No activation events found".
+- 🔵 **`[05.19.1]`** UX redundancy "no install" detto 3 volte (vedi sotto).
+
+### `[05.19.1]` 🔵 **INFO/UX** — Triplo messaggio "no installations"
+
+**Sintomo**:
+- Banner top: "No active installations — Waiting for first activation"
+- Stat 1 subtitle: "0 total"
+- Stat 2 subtitle: "No active installations"
+- Stat 3 subtitle: "All healthy" (su 0 stale)
+
+3 conferme dello stesso fatto. Quando arriverà il primo customer, le 4 card diventano informative; ora sono rumore.
+
+**Impatto**: nessuno funzionale. UI overcrowded ma pragmatica.
+
+**Suggerimento**: in stato vuoto mostra solo il banner top, nascondi le stat card o le mostra in stato `dim/disabled`.
+
+**Severity = INFO**. Deployment scope: `🌐 portal admin`.
+
+### Test follow-up (post-EA)
+
+- Installa 1 agent on-prem → verifica appare in `Active Installations` + log evento in `Activation Events`.
+- Heartbeat ogni N min: verifica `Heartbeats (24H)` cresce.
+- Stop agent per 25h → verifica passaggio a `Stale (1-3 DAYS)` poi a `Offline (3+ DAYS)`.
+- Filter `All Events` → discrimina activation/deactivation/heartbeat/error.
 
 ---
 
