@@ -5151,8 +5151,16 @@ def trigger_sync():
 
 @bp.route('/api/progress/<job_id>', methods=['GET'])
 @login_required
+@limiter.limit("120/minute")
 def get_progress(job_id):
-    """Get progress of a running job."""
+    """Get progress of a running job.
+
+    The default app rate limit (200/hour) was killing the UI on long syncs:
+    a 30-minute job at 2s polling = 900 calls/h, which the limiter cut at
+    ~6 minutes with 429 (see bug [03.14.36]). 120/minute (= 7200/h) leaves
+    plenty of headroom for any reasonable polling cadence while still
+    bounding abuse.
+    """
     from app import progress as prog
     prog.cleanup()  # Housekeeping
     p = prog.get(job_id)
@@ -5163,6 +5171,7 @@ def get_progress(job_id):
 
 @bp.route('/api/progress/active', methods=['GET'])
 @login_required
+@limiter.limit("120/minute")
 def get_active_progress():
     """Get all active jobs (for the progress banner)."""
     from app import progress as prog
