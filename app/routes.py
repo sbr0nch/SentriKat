@@ -5461,25 +5461,57 @@ def trigger_cpe_backfill():
 
                 done_chunks = 0
                 total_enriched = 0
+                # Track pending (cpe_data IS NULL) count to detect stalls.
+                # A chunk that returns 0 enrichments does NOT mean we are done:
+                # NVD may have only returned 'Awaiting Analysis' for the whole
+                # batch. We must keep going until the pending pool actually
+                # stops shrinking — that's the real "done" signal. See
+                # bug [03.14.32] sub-C.
+                pending_baseline = Vulnerability.query.filter(
+                    Vulnerability.cpe_data == None
+                ).count()
+                stall_chunks = 0
+                MAX_STALL = 3
                 while True:
-                    enriched = fetch_cpe_version_data(limit=CHUNK)
+                    # oldest_first: legacy CVE far more likely to have NVD
+                    # analysis complete; newest tend to sit in 'Awaiting'.
+                    # skip_awaiting: don't waste NVD quota on CVE we already
+                    # know NVD hasn't analyzed yet — they will resolve in
+                    # future natural sync runs.
+                    enriched = fetch_cpe_version_data(
+                        limit=CHUNK, oldest_first=True, skip_awaiting=True
+                    )
                     total_enriched += enriched or 0
                     done_chunks += 1
+                    pending_now = Vulnerability.query.filter(
+                        Vulnerability.cpe_data == None
+                    ).count()
                     prog.update(
                         job_id,
                         step=min(done_chunks, total_chunks),
                         description='Backfilling NVD CPE data...',
-                        detail=f'{total_enriched} enriched so far',
+                        detail=f'{total_enriched} enriched · {pending_now} pending',
                     )
-                    if not enriched:
+                    if pending_now == 0:
                         break
-                    # Safety stop: do not loop forever if NVD keeps returning
-                    # rows. The original `pending` count caps us; allow 50%
-                    # headroom for stale rows that re-qualify mid-run.
-                    if done_chunks > total_chunks * 2:
+                    if pending_now >= pending_baseline:
+                        stall_chunks += 1
+                        if stall_chunks >= MAX_STALL:
+                            logger.info(
+                                'CPE backfill stopped after %d chunks: pending '
+                                "stalled at %d (likely all remaining are NVD "
+                                "'Awaiting Analysis').",
+                                done_chunks, pending_now,
+                            )
+                            break
+                    else:
+                        stall_chunks = 0
+                        pending_baseline = pending_now
+                    # Hard safety stop: never loop more than 5× original estimate.
+                    if done_chunks > total_chunks * 5:
                         logger.warning(
-                            'CPE backfill stopped at chunk %d (>2× estimated work) — '
-                            'likely transient NVD churn; re-run if needed.',
+                            'CPE backfill stopped at chunk %d (>5× estimated work) '
+                            '— safety cap; re-run if needed.',
                             done_chunks,
                         )
                         break

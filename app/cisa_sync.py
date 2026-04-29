@@ -938,7 +938,7 @@ def parse_and_store_vulnerabilities(kev_data):
     db.session.commit()
     return stored_count, updated_count
 
-def fetch_cpe_version_data(limit=30):
+def fetch_cpe_version_data(limit=30, oldest_first=False, skip_awaiting=False):
     """
     Fetch CPE version range data from NVD for vulnerabilities.
     This enables precise version-based matching instead of keyword matching.
@@ -948,6 +948,13 @@ def fetch_cpe_version_data(limit=30):
 
     Args:
         limit: Maximum CVEs to fetch per run (NVD rate limits apply)
+        oldest_first: When True (backfill mode), pick oldest CVE first.
+            Legacy CVE are far more likely to have NVD analysis complete,
+            while newest may sit in 'Awaiting Analysis' for days.
+        skip_awaiting: When True, exclude CVE already known to be in NVD
+            'Awaiting Analysis' / 'Received' / 'Undergoing Analysis' states.
+            Saves NVD quota during backfill — those will not have CPE data
+            even if we re-fetch.
 
     Returns:
         int: Number of vulnerabilities enriched with CPE data
@@ -963,7 +970,7 @@ def fetch_cpe_version_data(limit=30):
     #    (NVD "Awaiting Analysis" can take days to resolve; we must not give up)
     stale_cutoff = datetime.utcnow() - timedelta(hours=24)
 
-    vulns_to_fetch = Vulnerability.query.filter(
+    query = Vulnerability.query.filter(
         or_(
             Vulnerability.cpe_data == None,
             db.and_(
@@ -971,10 +978,22 @@ def fetch_cpe_version_data(limit=30):
                 Vulnerability.cpe_fetched_at < stale_cutoff
             )
         )
-    ).order_by(
-        # Prioritize: never-fetched first, then oldest stale re-checks
+    )
+    if skip_awaiting:
+        query = query.filter(
+            or_(
+                Vulnerability.nvd_status == None,
+                Vulnerability.nvd_status.notin_(
+                    ['Awaiting Analysis', 'Received', 'Undergoing Analysis']
+                ),
+            )
+        )
+
+    date_order = Vulnerability.date_added.asc() if oldest_first else Vulnerability.date_added.desc()
+    vulns_to_fetch = query.order_by(
+        # Prioritize never-fetched, then by date in chosen direction
         (Vulnerability.cpe_data == None).desc(),
-        Vulnerability.date_added.desc()
+        date_order,
     ).limit(limit).all()
 
     if not vulns_to_fetch:
