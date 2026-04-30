@@ -2651,3 +2651,76 @@ In on-prem demo senza agent: praticamente impossibile vedere match per prodotti 
 - [ ] **7-dim dim 5 state**: scheduler interval triggers (Enable Automatic Sync) — verificare next-scheduled + last-sync.
 - [ ] **NVD API key**: registrare key gratis su https://nvd.nist.gov/developers/request-an-api-key e inserirla in Settings → Sync per 10× speed sync.
 
+---
+
+## 03.16 — Settings sub-tabs mai aperti — 2026-04-30
+
+> Sessione 2026-04-30. Apertura sistematica delle 4 tab "minori" di System Settings mai mappate prima: General, Security, Data Retention, Appearance, Logs (Admin Guide skip — solo testo doc).
+
+### [03.16.1] 🔴 **HIGH** — `Verify SSL Certificates` toggle OFF by default
+
+- **Tab**: System Settings → System → General → Network & Proxy
+- **Deployment scope**: 🏢☁️ both
+- **Tipo**: 🔴 Bug security
+- **Sintomo**: il toggle "Verify SSL Certificates" è **disattivato** out-of-the-box. Helper text dice "Disable if behind corporate proxy with SSL inspection (not recommended for production)".
+- **Impatto**: chiamate outbound a CISA KEV (`cisa.gov`), NVD (`services.nvd.nist.gov`), KB sync (`kb.sentrikat.com`), license-server (`license.sentrikat.com`) viaggiano **senza verifica certificato** → MITM attack possibile in qualsiasi rete intermedia. Per un vulnerability management product **default insecure è la peggiore possibile**: ironico, customer compra SentriKat per scoprire vulnerabilità ma il prodotto si espone a MITM.
+- **Severity = 🔴 HIGH** per principio "zero coverage parziale" applicato alla security: un default insecure è worse di un bug isolato perché ogni installazione fresh è vulnerable.
+- **Fix prescriptivo**: default ON. Toggle OFF richiede explicit confirm ("Are you sure? This disables MITM protection for all external API calls.").
+- **Discovered**: 2026-04-30
+
+### [03.16.2] 🟡 **WARN** — Cluster 3 default insicuri: 2FA off + Special char off + SSL off
+
+- **Tab**: System Settings → System → Security + General (cross-ref [03.16.1])
+- **Deployment scope**: 🏢☁️ both
+- **Tipo**: 🟡 Warning security cluster
+- **Sintomo**: 3 default insicuri uniti out-of-the-box:
+  1. **`Require 2FA for all users`** = UNCHECKED
+  2. **`Require special character (!@#$%^&*)`** = UNCHECKED (mentre uppercase/lowercase/number sono ✓)
+  3. **`Verify SSL Certificates`** = OFF (vedi [03.16.1])
+- **Impatto**:
+  - 2FA opt-in significa che il customer DEVE ricordarsi di attivarlo. La maggioranza non lo farà. Per security product = standard sotto le aspettative ISO27001/SOC2.
+  - Special char opt-in significa password come `Password1` accettate. NIST 2017 SP 800-63B effettivamente non richiede special char, ma SOC2/ISO/PCI-DSS sì. Senza un'opzione di compliance preset per questi standard, il customer deve sapere di toggleare.
+- **Fix prescriptivo**: aggiungere "Compliance preset" dropdown in cima a Security tab: `[Custom | NIST | SOC2 | ISO27001 | PCI-DSS]`. Selezionando un preset si applicano tutti i toggle coerenti. Default preset = `NIST`.
+- **Severity = 🟡 WARN** (escalation a HIGH se SentriKat targeting customer regulated).
+- **Discovered**: 2026-04-30
+
+### [03.16.3] ✅ **CONFIRMED** `[05.5.2]` retention inconsistency — on-prem dice 365d, admin portal dice 730d
+
+- **Tab**: System Settings → System → Data Retention
+- **Deployment scope**: 🏢☁️ both (cross-repo discrepancy)
+- **Tipo**: 🟢 Confirm di bug già aperto
+- **Sintomo**: Audit Log Retention = **365 days** qui (on-prem core, Flask app). Mentre `[05.5.2]` (portal admin Settings page) mostrava **730 days**.
+- **Cross-ref**: bug `[05.5.2]` confirmed — i due lati della dashboard amministrativa sentono ognuno un valore diverso. Single source of truth mancante (cluster con `[05.21.1]` pricing source-of-truth).
+- **Sync History Retention**: 90 days. Session Log Retention: 30 days. Coerenti.
+- **Auto-acknowledge toggle ON** ✅ (riduce alert fatigue per CVE su software rimosso). Buon default.
+- **Discovered re-confirm**: 2026-04-30
+
+### [03.16.4] 🔵 **INFO** — Appearance: Support Email placeholder `support@company.com` ancora visibile
+
+- **Tab**: System Settings → System → Appearance → Branding & Appearance
+- **Deployment scope**: 🏢☁️ both
+- **Tipo**: 🔵 Info/UX
+- **Sintomo**: campo "Support Email" mostra `support@company.com` (placeholder). Helper text dice "Shown on login page and error messages". Quindi il login page del customer mostra in basso un mailto a `support@company.com`, scoraggiante per il branding.
+- **Suggerimento**: warning UI sopra il bottone Save se il valore è ancora un placeholder default (`support@company.com`, `info@example.com`) — "Configure a real support email before deploying to production".
+- **Cross-ref**: in linea con `[02.4.6]` welcome email reply-to (cluster branding/contatto deploy-time).
+- **Discovered**: 2026-04-30
+
+### [03.16.5] 🟢 OK — Logs tab funzionale
+
+- System Logs viewer carica 6 lines (file size 681 B) della migration init. Filtri: Application/All Levels/Search/200 lines visibili. Bottoni Refresh + Download presenti.
+- **Note**: testato con filter Application = "Application" — gli altri log type (error, access, security, audit, sync, jobs) richiedono click separato per verifica content. Follow-up TODO sotto.
+
+### [03.16.6] 🟢 OK — General tab campi base coerenti
+
+- Display Timezone = UTC (default sensato per audit/log SQL), Date Format = `2024-01-15 14:30 (ISO)` (default sensato). Network & Proxy section con HTTP/HTTPS Proxy fields + No Proxy bypass list (default `localhost,127.0.0.1,db` corretto per docker compose).
+
+### Test follow-up Phase 03.16
+
+- [ ] **Logs**: aprire ogni log type (application/error/access/security/audit/sync/jobs/performance) → verificare contenuto + che il viewer non mostri 404 per log file mancanti.
+- [ ] **Logs Download**: scaricare un log file → verificare formato (raw vs gzip), encoding.
+- [ ] **Appearance Upload Logo**: testare upload con (a) PNG > 2MB → deve rifiutare, (b) JPEG → deve rifiutare, (c) PNG transparent 128x128 → ok.
+- [ ] **Security Save**: cambiare 2FA Require, special char, password expiry → Save → verificare DB persistence + che le modifiche si applichino agli user nuovi.
+- [ ] **General Test Connection** Proxy: configurare proxy invalido → click Test Connection → atteso error chiaro.
+- [ ] **Security**: verificare che `Save Security Settings` su valori invalidi (Session Timeout = 0, Max Failed = -1) ritorni validation error chiara.
+- [ ] **Admin Guide tab** (skipped 2026-04-30): re-check copy + accuracy quando il prodotto stabilizza.
+
