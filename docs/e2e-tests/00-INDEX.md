@@ -322,16 +322,16 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 **Post Phase 05 opening + verify round 2 — 2026-04-29** (PC casa, docker rebuild beta.6 fresh):
 
-- 🔴 Bug aperti: **22** *(20 + 2 fixati subito: [03.14.34] HIGH progress multi-worker ✅ VERIFIED, [03.14.36] HIGH rate limit polling 🔧 fix applicato — verify pending)*
+- 🔴 Bug aperti: **22** *(20 + 2 fixati subito: [03.14.34] HIGH progress multi-worker ✅ VERIFIED, [03.14.36] HIGH rate limit polling ✅ VERIFIED 2026-04-30)*
 - 🟡 Warning: **15** *(14 + 1: `[03.14.32]` WARN match 0)*
-- 🔵 Info/UX: **69** *(65 + 4: `[03.14.23]` admin-panel redirect, `[03.14.31]` localhost UI hint, `[03.14.33]` aria-hidden a11y, `[03.14.35]` Sync button cliccabile)*
+- 🔵 Info/UX: **69** *(65 + 4: `[03.14.23]` admin-panel redirect, `[03.14.31]` localhost UI hint, `[03.14.33]` aria-hidden a11y, `[03.14.35]` Sync button cliccabile ✅ VERIFIED 2026-04-30)*
 - ✅✅ Fix VERIFIED: **18** su 22, **+ 5 nuovi fix applicati 2026-04-29 sera** (B + C1 + C2 + C3 + sub-B `[03.14.32]`):
   - `[03.14.32]` sub-B `e3dc41f` — fallback keyword se `cpe_data IS NULL` ✅ VERIFIED (14 match invece di 5)
-  - `[03.14.32]` sub-A `7b5e661` — endpoint `/api/sync/cpe-backfill` per arricchire le 1799 CVE storiche (verify pending)
+  - `[03.14.32]` sub-A `7b5e661` — endpoint `/api/sync/cpe-backfill` ✅ wired in UI (commit `077b936` 2026-04-29); sub-C `1a3856c` fix loop early-stop + oldest_first + skip_awaiting ✅ VERIFIED 2026-04-30 (round-2 ha enriched il pool NULL nvd_status come previsto)
   - `[03.15.1]` `13122e4` — 404/500 pages styled (verify pending)
-  - `[03.14.35]` `a49d6d4` — Sync button lock dopo refresh (verify pending)
-  - `[03.14.37]` `5ad37e5` — save NVD key con opt-out validation (verify pending)
-  - `[03.14.36]` rate limit verify pending dopo prossimo sync >6 min.
+  - `[03.14.35]` `a49d6d4` — Sync button lock dopo refresh ✅ VERIFIED 2026-04-30 (refresh durante backfill mantiene lock)
+  - `[03.14.37]` `5ad37e5` — save NVD key con opt-out validation ✅ VERIFIED 2026-04-30 (save <30s anche con backfill in corso)
+  - `[03.14.36]` rate limit polling ✅ VERIFIED 2026-04-30 (Network tab F12 durante backfill round-2: ≤15 req/30s).
 - 🟢 OK passati: **110** *(100 + 4 Fase 05 + 6 da Fase 03.14: sync CISA/EPSS/CPE/Auto-Ack code path + Email/Webhook alerts code path)*
 - ⏸️ Test bloccati: 5 (residui solo on-prem dependencies — sbloccabili oggi) + **9 follow-up Fase 05 bloccati da `[05.9.1]`** finché non viene fixato lato `SentriKat-web`
 - ✅ Fix applicati: **20** *(7 core + 13 web)*
@@ -349,11 +349,11 @@ Test che non sono eseguibili finché non viene risolto un bug a monte. Da ripren
 
 | Test ID | Fase/Area | Sommario | Stato |
 |---|---|---|---|
-| 🔧 03.11.2.9 | 03 / LDAP login | Login di un utente LDAP seedato non può essere testato significativamente finché non c'è la pagina admin per "accettare/invitare" l'utente LDAP prima del login | **Unblocked** dopo fix [03.11.2.3] (commit `d44fcd0`). Re-test richiede rebuild on-prem docker |
-| 🔧 03.11.4 (all) | 03 / Jira integration | Test funzionali Jira non eseguibili con testlab docker in `FLASK_ENV=production` (policy SSRF hardening ignora `ALLOW_PRIVATE_URLS`) | **Unblocked parzialmente**: [03.11.4.5] fixato in log + UI hint (commit `4bf0afd`), la policy hardening resta by-design. Workaround: passare a `FLASK_ENV=development` per test locale |
-| 🔧 03.11.5 (all) | 03 / Webhook | Test funzionali Webhook out bloccati dalla stessa policy SSRF | **Unblocked** con stesso workaround di 03.11.4 |
-| 🔧 03.11.6.4 | 03 / GitLab | Test funzionali GitLab bloccati dalla stessa policy SSRF | **Unblocked** con stesso workaround |
-| 🔧 03.11.6.8 | 03 / YouTrack | Saltato in questa sessione (pattern atteso uguale), test rinviato a post-fix | **Unblocked** con stesso workaround |
+| 🔧 03.11.2.9 | 03 / LDAP login | Login di un utente LDAP seedato non può essere testato significativamente finché non c'è la pagina admin per "accettare/invitare" l'utente LDAP prima del login | ✅ **VERIFIED 2026-04-30** post fix [03.11.2.3] (commit `d44fcd0`). Re-test passato in sessione precedente. |
+| 🔧 03.11.4 (all) | 03 / Jira integration | Test funzionali Jira non eseguibili con testlab docker in `FLASK_ENV=production` (policy SSRF hardening ignora `ALLOW_PRIVATE_URLS`) | ✅ **VERIFIED 2026-04-30** in modalità `FLASK_ENV=development` con testlab MockServer (`host.docker.internal:8080`, project `VULN`). Test Connection OK + Create Issue OK. |
+| 🔧 03.11.5 (all) | 03 / Webhook | Test funzionali Webhook out bloccati dalla stessa policy SSRF | ✅ **VERIFIED 2026-04-30** con webhook-tester (`host.docker.internal:8800`). Delivery OK. |
+| 🔧 03.11.6.4 | 03 / GitLab | Test funzionali GitLab bloccati dalla stessa policy SSRF | ✅ **VERIFIED 2026-04-30** stesso pattern di Jira. |
+| 🔧 03.11.6.8 | 03 / YouTrack | Saltato in questa sessione (pattern atteso uguale), test rinviato a post-fix | ✅ **VERIFIED 2026-04-30** stesso pattern di Jira. |
 | ⏸️ 03.12.6–15 | 03 / Agent inventory | Agent install OK ma initial scan 403/401 con messaggio fuorviante "Invalid API key". Key attiva nel DB (`active=t`, usage_count=3). Root cause vero nascosto da messaggio generico | **Message migliorato** dopo [03.12.14] fix (commit `4327d27`) ma root cause reale (`[03.13.2]` Push Agents gated su Community) resta — upgrade a Professional richiesto per test completo |
 | 🔧 04.1.3 (Phase 04 intera) | 04 / Portal Customer OTP | OTP email non arriva nonostante response 200 OK. Regressione confermata: funzionava 7 giorni fa, rotto ≥ 2026-04-24. Intero portal customer (dashboard, licenses, downloads, support, checkout) non raggiungibile | **Unblocked** dopo fix SentriKat-web commit `524208b` (root cause: `send_email` swallow con `BackgroundTasks`, NON era PR #231). Re-test: login portal con OTP in prod dopo deploy |
 | 🔧 06.6.1 (dim 4 RBAC matrix) | 06 / App SaaS RBAC | Matrix role-based dei 3 users SaaS Starter non testabile: i 2 user creati (manager, user) non ricevono invite email (stesso cluster SMTP di 04.1.3) | **Unblocked** presunto dopo fix `524208b` (stesso cluster `send_email`). Re-test: inviare invite e verificare delivery |

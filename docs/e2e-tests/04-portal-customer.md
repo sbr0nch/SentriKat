@@ -49,7 +49,7 @@
 - **Follow-up TODO 04.1.2a**: copiare il testo esatto del messaggio di errore e valutare contro best practice NIST / OWASP A07 Identification and Authentication Failures
 - **Discovered**: 2026-04-24
 
-### [04.1.3] 🔴 **CRITICAL** — OTP email NON arriva dopo request-otp (regressione confermata: funzionava 7 giorni fa)
+### [04.1.3] ✅ **VERIFIED 2026-04-30** — OTP email arriva regolarmente dopo deploy SentriKat-web `524208b` (era 🔴 CRITICAL, root cause `BackgroundTasks.send_email` silent swallow)
 
 - **Fase**: 04
 - **Area**: Login OTP / email delivery
@@ -127,19 +127,16 @@
 
 ## Status fase
 
-**⏸️ FASE 04 BLOCCATA** dal bug [04.1.3]: senza OTP l'intero portal post-login (Dashboard, Account, Licenses, Downloads, Support, Checkout, Upgrade) è **non testabile dal customer reale**.
+**🔧 → ✅ FASE 04 SBLOCCATA 2026-04-30** — bug `[04.1.3]` ✅ VERIFIED dopo deploy SentriKat-web `524208b` (root cause: `BackgroundTasks.send_email` swallow silent, NON era PR #231 sospettata).
 
-### Workaround possibili per sbloccare testing
+**Evidenza verify** (2026-04-30):
+- Login OTP testato in incognito su `https://portal.sentrikat.com` con `muscleaddiction49@gmail.com`.
+- Email arrivata da `noreply@sentrikat.com` con subject "Your Verification Code", body branded SentriKat (logo viola), 6-digit code (esempio: `834487`), expire `10 minutes`, footer con link `sentrikat.com / Documentation / Support`.
+- Login completato → flow customer accessibile.
 
-| Opzione | Descrizione | Feasibility |
-|---|---|---|
-| A — Admin bypass DB | Insert sessione fake direttamente nel DB del license-server | richiede accesso prod DB |
-| B — Request OTP via API diretta + log scraping | `curl` a `/api/v1/portal/auth/request-otp` + vedere se OTP finisce nei log | richiede accesso prod logs |
-| C — Admin fallback login | Esiste un login admin portal (`ADMIN_API_KEY` bearer) che bypassa OTP customer | ✅ **viable** — da verificare se è il nostro case |
-| D — Wait for fix | Aspettare che il team fixi e ritenti | lungo, blocca ogni progresso fase 04 |
-| E — Test su altro ambiente | staging / local build SentriKat-web license-server + portal | servirebbe clone e run del repo SentriKat-web locale |
+**Aree 04.2–04.13 — happy path testato dall'utente in sessioni precedenti** (Dashboard, Account, Licenses, Downloads, Support, Checkout, Upgrade, Logout, 401 handling, cookie security, Feedback, Error pages). L'utente ha confermato funzionamento end-to-end customer-side, non documentato 7-dim qui per evitare duplicazione con Phase 02 (dove gli stessi flow post-login sono documentati per il SaaS analogo `[02.6]`/`[02.7]`/`[02.8]`).
 
-Raccomandazione: Opzione **C (admin portal bypass)** se possibile, perché permette di testare **almeno il lato admin** del portal (fase 05) senza dipendere dal fix OTP. Il lato customer resta bloccato.
+**Re-test 7-dim deferred** al secondo giro post-fix-cycle, quando si rifaranno tutte le fasi con framework completo. In quel momento serviranno screenshot puntuali per ogni page.
 
 ---
 

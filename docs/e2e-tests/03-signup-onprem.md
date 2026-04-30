@@ -2651,3 +2651,246 @@ In on-prem demo senza agent: praticamente impossibile vedere match per prodotti 
 - [ ] **7-dim dim 5 state**: scheduler interval triggers (Enable Automatic Sync) — verificare next-scheduled + last-sync.
 - [ ] **NVD API key**: registrare key gratis su https://nvd.nist.gov/developers/request-an-api-key e inserirla in Settings → Sync per 10× speed sync.
 
+---
+
+## 03.16 — Settings sub-tabs mai aperti — 2026-04-30
+
+> Sessione 2026-04-30. Apertura sistematica delle 4 tab "minori" di System Settings mai mappate prima: General, Security, Data Retention, Appearance, Logs (Admin Guide skip — solo testo doc).
+
+### [03.16.1] 🔴 **HIGH** — `Verify SSL Certificates` toggle OFF by default
+
+- **Tab**: System Settings → System → General → Network & Proxy
+- **Deployment scope**: 🏢☁️ both
+- **Tipo**: 🔴 Bug security
+- **Sintomo**: il toggle "Verify SSL Certificates" è **disattivato** out-of-the-box. Helper text dice "Disable if behind corporate proxy with SSL inspection (not recommended for production)".
+- **Impatto**: chiamate outbound a CISA KEV (`cisa.gov`), NVD (`services.nvd.nist.gov`), KB sync (`kb.sentrikat.com`), license-server (`license.sentrikat.com`) viaggiano **senza verifica certificato** → MITM attack possibile in qualsiasi rete intermedia. Per un vulnerability management product **default insecure è la peggiore possibile**: ironico, customer compra SentriKat per scoprire vulnerabilità ma il prodotto si espone a MITM.
+- **Severity = 🔴 HIGH** per principio "zero coverage parziale" applicato alla security: un default insecure è worse di un bug isolato perché ogni installazione fresh è vulnerable.
+- **Fix prescriptivo**: default ON. Toggle OFF richiede explicit confirm ("Are you sure? This disables MITM protection for all external API calls.").
+- **Discovered**: 2026-04-30
+
+### [03.16.2] 🟡 **WARN** — Cluster 3 default insicuri: 2FA off + Special char off + SSL off
+
+- **Tab**: System Settings → System → Security + General (cross-ref [03.16.1])
+- **Deployment scope**: 🏢☁️ both
+- **Tipo**: 🟡 Warning security cluster
+- **Sintomo**: 3 default insicuri uniti out-of-the-box:
+  1. **`Require 2FA for all users`** = UNCHECKED
+  2. **`Require special character (!@#$%^&*)`** = UNCHECKED (mentre uppercase/lowercase/number sono ✓)
+  3. **`Verify SSL Certificates`** = OFF (vedi [03.16.1])
+- **Impatto**:
+  - 2FA opt-in significa che il customer DEVE ricordarsi di attivarlo. La maggioranza non lo farà. Per security product = standard sotto le aspettative ISO27001/SOC2.
+  - Special char opt-in significa password come `Password1` accettate. NIST 2017 SP 800-63B effettivamente non richiede special char, ma SOC2/ISO/PCI-DSS sì. Senza un'opzione di compliance preset per questi standard, il customer deve sapere di toggleare.
+- **Fix prescriptivo**: aggiungere "Compliance preset" dropdown in cima a Security tab: `[Custom | NIST | SOC2 | ISO27001 | PCI-DSS]`. Selezionando un preset si applicano tutti i toggle coerenti. Default preset = `NIST`.
+- **Severity = 🟡 WARN** (escalation a HIGH se SentriKat targeting customer regulated).
+- **Discovered**: 2026-04-30
+
+### [03.16.3] ✅ **CONFIRMED** `[05.5.2]` retention inconsistency — on-prem dice 365d, admin portal dice 730d
+
+- **Tab**: System Settings → System → Data Retention
+- **Deployment scope**: 🏢☁️ both (cross-repo discrepancy)
+- **Tipo**: 🟢 Confirm di bug già aperto
+- **Sintomo**: Audit Log Retention = **365 days** qui (on-prem core, Flask app). Mentre `[05.5.2]` (portal admin Settings page) mostrava **730 days**.
+- **Cross-ref**: bug `[05.5.2]` confirmed — i due lati della dashboard amministrativa sentono ognuno un valore diverso. Single source of truth mancante (cluster con `[05.21.1]` pricing source-of-truth).
+- **Sync History Retention**: 90 days. Session Log Retention: 30 days. Coerenti.
+- **Auto-acknowledge toggle ON** ✅ (riduce alert fatigue per CVE su software rimosso). Buon default.
+- **Discovered re-confirm**: 2026-04-30
+
+### [03.16.4] 🔵 **INFO** — Appearance: Support Email placeholder `support@company.com` ancora visibile
+
+- **Tab**: System Settings → System → Appearance → Branding & Appearance
+- **Deployment scope**: 🏢☁️ both
+- **Tipo**: 🔵 Info/UX
+- **Sintomo**: campo "Support Email" mostra `support@company.com` (placeholder). Helper text dice "Shown on login page and error messages". Quindi il login page del customer mostra in basso un mailto a `support@company.com`, scoraggiante per il branding.
+- **Suggerimento**: warning UI sopra il bottone Save se il valore è ancora un placeholder default (`support@company.com`, `info@example.com`) — "Configure a real support email before deploying to production".
+- **Cross-ref**: in linea con `[02.4.6]` welcome email reply-to (cluster branding/contatto deploy-time).
+- **Discovered**: 2026-04-30
+
+### [03.16.5] 🟢 OK — Logs tab funzionale
+
+- System Logs viewer carica 6 lines (file size 681 B) della migration init. Filtri: Application/All Levels/Search/200 lines visibili. Bottoni Refresh + Download presenti.
+- **Note**: testato con filter Application = "Application" — gli altri log type (error, access, security, audit, sync, jobs) richiedono click separato per verifica content. Follow-up TODO sotto.
+
+### [03.16.6] 🟢 OK — General tab campi base coerenti
+
+- Display Timezone = UTC (default sensato per audit/log SQL), Date Format = `2024-01-15 14:30 (ISO)` (default sensato). Network & Proxy section con HTTP/HTTPS Proxy fields + No Proxy bypass list (default `localhost,127.0.0.1,db` corretto per docker compose).
+
+### Test follow-up Phase 03.16
+
+- [ ] **Logs**: aprire ogni log type (application/error/access/security/audit/sync/jobs/performance) → verificare contenuto + che il viewer non mostri 404 per log file mancanti.
+- [ ] **Logs Download**: scaricare un log file → verificare formato (raw vs gzip), encoding.
+- [ ] **Appearance Upload Logo**: testare upload con (a) PNG > 2MB → deve rifiutare, (b) JPEG → deve rifiutare, (c) PNG transparent 128x128 → ok.
+- [ ] **Security Save**: cambiare 2FA Require, special char, password expiry → Save → verificare DB persistence + che le modifiche si applichino agli user nuovi.
+- [ ] **General Test Connection** Proxy: configurare proxy invalido → click Test Connection → atteso error chiaro.
+- [ ] **Security**: verificare che `Save Security Settings` su valori invalidi (Session Timeout = 0, Max Failed = -1) ritorni validation error chiara.
+- [ ] **Admin Guide tab** (skipped 2026-04-30): re-check copy + accuracy quando il prodotto stabilizza.
+
+---
+
+## 03.17 — Sync triggers E2E + Compliance reports — 2026-04-30
+
+> Re-test post-backfill round-2 dei sync triggers (cluster `[03.14.25]`–`[03.14.29]`) ora che il DB ha CVE enriched reali. Compliance reports verify deferred.
+
+### [03.17.1] ✅ **FULL E2E VERIFIED** — Send Email Alerts Now → email reale arriva con CVE matched
+
+- **Cross-ref**: upgrade di `[03.14.28]` (era 🟢 "code path validato, 0 delivery per absence CVE").
+- **Evidence**: post-backfill round-2, click "Send Email Alerts Now" produce email reale ricevuta in Mailpit (testlab) con:
+  - Subject branding `SentriKat | Security Alert`, timestamp `2026-04-30 17:12 UTC`
+  - Tag organization `ACME COPR.`
+  - Header banner red: "**19 Unacknowledged CVEs** — immediate action required"
+  - 4 stat card: NEW `0`, CRITICAL `19`, HIGH `0`, PRODUCTS `1`
+  - "AFFECTED PRODUCTS" section: `Google - Chrome v120` (19 CVEs)
+  - CTA `View Dashboard` button
+  - "VULNERABILITY DETAILS" list per-CVE: `CVE-2025-14174` con CVSS `8.8`, EPSS `1.0%`, severity `critical`, badge `ACTIVELY EXPLOITED`, badge `OVERDUE by 118 days` + descrizione + "HOW TO FIX" inline (BOD 22-01 cloud guidance) — pattern ripetuto per ogni CVE
+- **Quality assessment**: template molto sopra la media — branding pulito, info densa ma leggibile, CTA chiaro, remediation actionable. **No bug** in questa email.
+- **Severity**: 🟢 OK FULL E2E VERIFIED 2026-04-30
+- **Cross-ref `[03.14.32]` sub-C**: il backfill ha effettivamente reso possibile questo alert delivery (Google Chrome v120 era nella categoria CVE che richiedeva CPE enrichment per essere matched). **Conferma indiretta efficacia fix sub-C**.
+
+### [03.17.2] ✅ Sync CISA/EPSS/CPE Dictionary triggers — re-confirm post-backfill
+
+- Click `Sync CISA Now` / `Sync EPSS Scores Now` / `Sync CPE Dictionary Now` → tutti completano OK (toast verde, no error in console F12).
+- Cross-ref `[03.14.25]`–`[03.14.27]` confermati ancora funzionanti con DB popolato (regression test passato).
+- **Severity**: 🟢 OK 2026-04-30
+
+### [03.17.3] ⏸️ DEFERRED — Compliance reports download richiede Pro license
+
+- **Tab**: System Settings → Compliance (e/o `/admin-panel#compliance`)
+- **Sintomo**: i report download (PDF/JSON/CSV per ognuno dei 7 framework — NIS2/SOC2/ISO27001/GDPR/PCI-DSS/NIST/HIPAA) sono **feature-gated su Pro license**. L'utente conferma che "funzionano quasi sicuramente" ma non può eseguire test funzionale completo senza license Pro.
+- **Action**: rimandato a sessione successiva con license Pro provisionata. Cross-ref `[03.13.2]` (Push Agents Pro-only — cluster Pro features inaccessibili a Community).
+- **Test follow-up post-Pro**:
+  - Click PDF/JSON/CSV per ognuno dei 7 framework con DB vuoto → atteso download generato (no 403)
+  - Click stessi report con DB popolato (post-scan reale) → contenuto report contiene CVE/products/coverage scores
+  - Verify branding nel PDF coerente con `[03.16.4]` Support Email + `[02.7.7]` LDAP subtitle issues
+  - Test scheduled report delivery via email (cluster `[03.17.1]`)
+- **Severity**: ⏸️ blocked by license tier (test non possibile, non bug)
+
+---
+
+## 03.18 — Health Checks E2E — 2026-04-30
+
+> Test attivo del sistema health check con simulazione fail (DB stop). Cross-ref `[03.14.7]` Worker Pool STOPPED già flaggato.
+
+### [03.18.1] 🔴 **HIGH** — Health check FAIL non genera email/webhook notification
+
+- **Tab**: `/admin-panel#health` → 14 health checks visibili
+- **Deployment scope**: 🏢☁️ both
+- **Tipo**: 🔴 Bug CRITICAL — feature core del prodotto non funziona
+- **Steps to reproduce**:
+  1. Configura Notification Email + Send via webhooks (entrambi pre-validati come reachable da test send manuali)
+  2. `docker stop sentrikat-db` → DB spento
+  3. UI mostra toast error `HTTP 503` (rilevamento OK)
+  4. Click `Run All Now` su health checks → check Database diventa FAIL nello stato UI
+  5. `docker start sentrikat-db` → DB riavviato
+  6. Verifica Mailpit `http://localhost:8025` + webhook-tester `http://localhost:8800`
+- **Expected**: durante lo stato FAIL del DB, almeno 1 email + 1 webhook devono partire (alert per super-admin)
+- **Actual**: **NESSUNA email, NESSUN webhook** ricevuti né durante il fail né dopo il recovery
+- **Test infrastructure validato**: lo stesso utente conferma di avere ricevuto email/webhook su altri test (es. `Send Test Email/Webhook` manuali da Settings + `[03.17.1]` Send Email Alerts Now). Quindi il canale di delivery funziona — è l'integrazione health-check → notification che è rotta.
+- **Possibili root cause**:
+  1. Health check scheduler non triggera notification on FAIL state (manca hook `if check.status == FAIL: notify()`)
+  2. Manual `Run All Now` click bypassa il notification pathway (solo scheduled run notifica? bug logica)
+  3. State change detection rotto: serve transizione `OK → FAIL → notify`. Se il check riparte già FAIL, il sistema lo ignora come "still failing" e non rinotifica
+  4. Email/webhook channels non agganciati al `notification_pipeline` per la categoria `health_check_failure` (mentre sono agganciati per `vulnerability_alert`)
+- **Impatto**:
+  - Customer DB cade alle 3 di notte → super-admin scopre il problema solo la mattina dopo dai customer arrabbiati che dicono "il sito non risponde". **Esatto opposto del valore promesso da un health check system**.
+  - Per un vulnerability management product, downtime invisibile = customer perde fiducia (cluster con principio cardine "zero coverage parziale": un fail non notificato = miss totale).
+- **Severity escalation = 🔴 HIGH/CRITICAL**: la feature esiste (UI dice "Receive email alerts when health checks detect problems") ma **non funziona**. Promessa di prodotto disattesa.
+- **Fix prescriptivo**: 
+  1. Codereading di `app/health_checks.py` o equivalente — trovare pathway che da check.run() arriva a `send_email`/`send_webhook`
+  2. Verificare che lo scheduler chiami notify_on_fail dopo ogni check
+  3. Aggiungere CI test che simula DB down + verifica delivery in mailpit mock
+- **Discovered**: 2026-04-30
+
+### [03.18.2] 🟡 **WARN** confirmation `[03.14.7]` Worker Pool STOPPED — re-confirm + 14 checks total
+
+- **Health check breakdown 2026-04-30**:
+  - **SYSTEM** (8): Database Connectivity 🟢 (5ms), Disk Space 🟢 (92.3%), **Worker Pool 🟡 STOPPED**, Stuck Inventory Jobs 🟢, Queue Throughput 🟢, License Status 🟢 COMMUNITY, SMTP Connectivity 🟢 REACHABLE (`mailpit:1025`), Server Configuration 🟢 ALL CONFIGURED
+  - **DATA SYNC** (4): CVE Sync Freshness 🟢 (27h ago), CPE Coverage 🟢 100% (2/2), **API Source Status 🟡 194 FALLBACK** (9.1% fallback CVSS sources, retry pending), Sync Retry Status 🟢 OK
+  - **AGENTS** (2): Agent Health 🟢 (0 agents), Import Queue Backlog 🟢 (0 pending)
+- **Cross-ref**:
+  - `[03.14.7]` Worker Pool STOPPED — **CONFERMATO** ancora aperto. Cluster con `[03.13.3]` Background Worker "Running" mostra contraddizione tra le 2 viste. Da risolvere quando si fixa il cluster Worker Pool.
+  - **API Source Status 194 fallback** = 194 vuln ancora con CVSS source = fallback (non NVD) → coerente con `[03.14.32]` cluster (CVE che non hanno mai avuto enrichment NVD completo). Auto re-enrichment dovrebbe processarli, da verificare se ciclo funziona.
+- **Severity = 🟡 WARN cluster**: due aree gialle sono "atteso noisy" ma vanno chiuse perché un health check WARN cronico nasconde i WARN nuovi (alert fatigue).
+
+### [03.18.3] 🟢 OK — Toggle disable single check funziona
+
+- Test C confermato dall'utente: toggle ON/OFF su singolo check → disappear/reappear correttamente. Comportamento atteso. ✅
+
+### Test follow-up Phase 03.18
+
+- [ ] **Codereading `app/health_checks.py`** o equivalente: tracciare il pathway notification on-fail per `[03.18.1]`.
+- [ ] **State change test**: dopo fix `[03.18.1]`, verificare che la transizione FAIL → OK genera anche notification "recovered" (best practice: customer vuole sapere quando è tornato up).
+- [ ] **Multiple consecutive fails**: se DB resta down per 3 cicli consecutivi, deve generare 1 notification iniziale + magari escalation dopo N min, non 3 notification spam (anti-flapping).
+- [ ] **API Source Status 194 fallback**: verificare che auto re-enrichment effettivamente cicli e progressivamente riduca il count.
+
+### [03.18.4] 🔵 **INFO** — Stale `cpe_backfill_*` jobId polling spam 503 in console
+
+- **Tab**: qualunque (visibile dovunque dopo che backfill è completato e session restored)
+- **Sintomo**: dopo il completamento di un backfill (es. `cpe_backfill_1777569071`), il frontend continua a pollare `/api/progress/cpe_backfill_<id>` in loop e riceve 503 ripetuti perché la riga `system_settings WHERE category='progress'` viene cancellata su `prog.finish()`. Console DevTools spam:
+  ```
+  cpe_backfill_1777569071:1  Failed to load resource: the server responded with a status of 503 (SERVICE UNAVAILABLE)
+  ```
+- **Root cause** in `app/templates/base.html` ~line 3844:
+  ```js
+  async function pollProgress(jobId) {
+      try {
+          const response = await fetch(`/api/progress/${jobId}`);
+          if (!response.ok) return;  // ← silently ignores 503, no cleanup
+          ...
+  ```
+  → Il `setInterval` per il polling non si ferma e `sessionStorage.activeJobId` non viene pulito sul 503.
+- **Impatto**: solo cosmetico (no funzionale break) ma pollute DevTools console + traffico inutile a `/api/progress/...` ogni N secondi finché l'utente non chiude il tab.
+- **Fix prescriptivo**: nel block `if (!response.ok)`, anche cleanup:
+  ```js
+  if (!response.ok) {
+      if (response.status === 404 || response.status === 503) {
+          sessionStorage.removeItem('activeJobId');
+          if (_progressPollInterval) clearInterval(_progressPollInterval);
+          hideProgressBanner();
+      }
+      return;
+  }
+  ```
+- **Severity = 🔵 INFO**. Cluster con `[03.14.34]` (DB-backed progress) — quel fix ha introdotto questo edge case. Deployment scope: `🏢☁️ both`.
+- **Discovered**: 2026-04-30
+
+---
+
+## 03.19 — License page + License limit + Activate Online — 2026-04-30
+
+### [03.19.1] ✅ **IMPLICITLY VERIFIED `[03.14.9]`** — License page version corretta
+
+- **Tab**: License page → click `Check` button
+- **Actual**: UI mostra **"SentriKat v1.0.0-beta.6 — Up to date (v1.0.0-beta.6)"** in verde (era "Up to date beta.2" pre-fix VERSION file).
+- **Network**: `GET /api/updates/check` → 200 OK, response JSON. Headers nginx + content-security-policy + permissions-policy presenti (cluster `[05.9.1]` CSP one-shot fix lato web non si applica a on-prem core, qui è ancora la CSP doppia from beta.6 default — non bug).
+- **Note**: il check va al backend Flask `/api/updates/check`, che probabilmente fa server-side call a `license.sentrikat.com`. Browser non vede la chiamata remota.
+- **Cross-ref**: chiude `[03.14.9]` come verified.
+- **Severity**: 🟢 OK 2026-04-30
+
+### [03.19.2] 🟢 OK — License limit enforcement message chiaro
+
+- **Steps**: Users & Access → Add User con email valida + password che rispetta policy
+- **Actual**: error toast "**Demo version limit: 1 users. Upgrade to Professional for unlimited.**"
+- **Bonus**: password policy enforcement parallelo: "Password should contain uppercase, lowercase, and numbers. Check your organization's password policy." (l'utente aveva fornito password senza policy, OK comportamento).
+- **Cluster `[03.14.10]` RE-CONFIRMED**: 3 nomi per lo stesso tier:
+  - Limit error: "**Demo version**"
+  - Health Check License Status badge: "**COMMUNITY**" (vedi `[03.18.2]`)
+  - Handbook + landing site `sentrikat.com/pricing`: "**Community**"
+  - License page header: "**Free**" (cluster con `[05.21]` Plans page card "Free")
+  → 4 nomi diversi per il tier 0/free/community/demo. Bug terminology HIGH escalato in `[03.14.10.expand]` cross-repo.
+- **Severity**: 🟢 OK funzionale, 🟡 cluster terminology aperto
+
+### [03.19.3] 🟢 OK — Activate Online con codice invalido → error chiaro
+
+- **Steps**: License → Activate Online → inserisci `INVALID-CODE-XXXX-1234`
+- **Actual**: error UI "**Activation code not found. Please check the code and try again.**"
+- **Quality**: messaggio actionable + grammaticalmente corretto. Niente stack trace o status code raw.
+- **Severity**: 🟢 OK
+
+### Test follow-up Phase 03.19
+
+- [ ] **License Check con server irraggiungibile**: `docker network` blockare `license.sentrikat.com` → click Check → atteso error UX chiaro (non spinner infinito).
+- [ ] **License Check con beta.7 disponibile**: simulare upgrade quando il license-server pubblica nuova version → UI deve mostrare "Update available v1.0.0-beta.7".
+- [ ] **Activate Online con codice scaduto** (vs invalido): atteso error specifico "Activation code expired" non solo "not found".
+- [ ] **Activate Online con codice valido**: serve license PRO reale per test. Differred a sessione Pro.
+- [ ] **License limit org**: Users limite testato OK ✓; verifica anche **Organizations** limit (Community = 1/1) → atteso stesso message pattern.
+- [ ] **Cluster terminology fix `[03.14.10.expand]`**: standardizzare a 1 nome unico (es. "Community") in tutti i 4+ punti dell'UI/email/handbook.
+
