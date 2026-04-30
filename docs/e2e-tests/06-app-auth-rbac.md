@@ -652,6 +652,7 @@ System
 - **Possibile root cause**: API endpoint `/api/v1/assignments/<id>/transition` richiede payload o query param mancante. DevTools Network → catturare body 400 → quasi sicuramente dice quale field manca.
 - **Test follow-up post-fix**: verificare audit log entry per ogni transizione (cluster `[05.5.1]`).
 - **Discovered**: 2026-04-30
+- **🔧 Root cause reale + Fix 2026-04-30** (commit pending): non era payload mancante. Endpoint reale è `PUT /api/remediation/assignments/<id>` (commento intenzionale in `app/remediation_api.py:28-30` esplicita "CSRF is NOT exempted blueprint-wide... web pages include the CSRF token via flask-wtf"). Tutti gli **altri** blueprint API (`integrations_api`, `settings_api`, `reports_api`, `ldap_api`, `agent_api`, `routes`, ecc.) hanno `csrf.exempt(bp)` — `remediation_api` è l'eccezione. Frontend in `assignments.html` (4 button: in_progress / resolved / accepted_risk / delete) e in `dashboard.html` (4 fetch: quickStatusChange PUT, saveAssignmentDetail PUT, deleteAssignment DELETE, submitAssignment POST) non passavano `X-CSRFToken` → Flask-WTF rifiutava con 400 "CSRF token missing." Fix: aggiunto `'X-CSRFToken': getCSRFToken()` ai 6 fetch state-changing. Helper `getCSRFToken()` già definito globalmente in `base.html:3998`. Verifica pending: aprire assignment → click `In progress` → status update OK + audit log entry.
 
 ### [06.9.3] 🟡 **WARN** — Assignments table CVE column mostra HTML markup raw `<span class="text-muted">—</span>`
 

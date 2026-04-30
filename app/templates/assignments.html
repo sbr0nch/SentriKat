@@ -482,7 +482,7 @@
         try {
             const res = await fetch(`/api/remediation/assignments/${id}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken() },
                 body: JSON.stringify({ status: newStatus }),
             });
             const data = await res.json().catch(() => ({}));
@@ -507,7 +507,10 @@
         );
         if (!ok) return;
         try {
-            const res = await fetch(`/api/remediation/assignments/${id}`, { method: 'DELETE' });
+            const res = await fetch(`/api/remediation/assignments/${id}`, {
+                method: 'DELETE',
+                headers: { 'X-CSRFToken': getCSRFToken() },
+            });
             if (!res.ok && res.status !== 204) {
                 const j = await res.json().catch(() => ({}));
                 showToast(j.error || j.message || `HTTP ${res.status}`, 'danger');
