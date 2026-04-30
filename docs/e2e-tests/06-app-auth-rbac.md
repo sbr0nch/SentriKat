@@ -662,6 +662,7 @@ System
   2. Frontend: applicare classe `text-muted` nel template, non nel dato.
 - **Severity = 🟡 WARN** anti-pattern + cosmetico immediato. Cluster con `[05.14.1]` (badge-green leak) + `[05.21.2]` (-1 leak) → pattern "data presentation mixing".
 - **Discovered**: 2026-04-30
+- **🔧 Fix 2026-04-30** (commit pending): in `app/templates/assignments.html` `renderRow()` separato `cveId` (puro dato) da `cveCell` (HTML placeholder se mancante). Cella renderizzata senza `esc()` come già fatto per `productLabel` e `trackerCell`. Il dato CVE reale viene comunque escapato via `esc(cveId)`. Verifica pending: row Adobe → "—" muted renderizzato correttamente, no più stringa raw `<span...>`.
 
 ### [06.10.7a] ✅ SBOM Export download funzionante in Starter
 
