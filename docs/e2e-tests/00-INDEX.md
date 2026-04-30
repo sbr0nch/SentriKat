@@ -322,16 +322,16 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 **Post Phase 05 opening + verify round 2 — 2026-04-29** (PC casa, docker rebuild beta.6 fresh):
 
-- 🔴 Bug aperti: **22** *(20 + 2 fixati subito: [03.14.34] HIGH progress multi-worker ✅ VERIFIED, [03.14.36] HIGH rate limit polling 🔧 fix applicato — verify pending)*
+- 🔴 Bug aperti: **22** *(20 + 2 fixati subito: [03.14.34] HIGH progress multi-worker ✅ VERIFIED, [03.14.36] HIGH rate limit polling ✅ VERIFIED 2026-04-30)*
 - 🟡 Warning: **15** *(14 + 1: `[03.14.32]` WARN match 0)*
-- 🔵 Info/UX: **69** *(65 + 4: `[03.14.23]` admin-panel redirect, `[03.14.31]` localhost UI hint, `[03.14.33]` aria-hidden a11y, `[03.14.35]` Sync button cliccabile)*
+- 🔵 Info/UX: **69** *(65 + 4: `[03.14.23]` admin-panel redirect, `[03.14.31]` localhost UI hint, `[03.14.33]` aria-hidden a11y, `[03.14.35]` Sync button cliccabile ✅ VERIFIED 2026-04-30)*
 - ✅✅ Fix VERIFIED: **18** su 22, **+ 5 nuovi fix applicati 2026-04-29 sera** (B + C1 + C2 + C3 + sub-B `[03.14.32]`):
   - `[03.14.32]` sub-B `e3dc41f` — fallback keyword se `cpe_data IS NULL` ✅ VERIFIED (14 match invece di 5)
-  - `[03.14.32]` sub-A `7b5e661` — endpoint `/api/sync/cpe-backfill` per arricchire le 1799 CVE storiche (verify pending)
+  - `[03.14.32]` sub-A `7b5e661` — endpoint `/api/sync/cpe-backfill` ✅ wired in UI (commit `077b936` 2026-04-29); sub-C `1a3856c` fix loop early-stop + oldest_first + skip_awaiting (2026-04-30) — round-2 in corso, verify post-completion
   - `[03.15.1]` `13122e4` — 404/500 pages styled (verify pending)
-  - `[03.14.35]` `a49d6d4` — Sync button lock dopo refresh (verify pending)
-  - `[03.14.37]` `5ad37e5` — save NVD key con opt-out validation (verify pending)
-  - `[03.14.36]` rate limit verify pending dopo prossimo sync >6 min.
+  - `[03.14.35]` `a49d6d4` — Sync button lock dopo refresh ✅ VERIFIED 2026-04-30 (refresh durante backfill mantiene lock)
+  - `[03.14.37]` `5ad37e5` — save NVD key con opt-out validation ✅ VERIFIED 2026-04-30 (save <30s anche con backfill in corso)
+  - `[03.14.36]` rate limit polling ✅ VERIFIED 2026-04-30 (Network tab F12 durante backfill round-2: ≤15 req/30s).
 - 🟢 OK passati: **110** *(100 + 4 Fase 05 + 6 da Fase 03.14: sync CISA/EPSS/CPE/Auto-Ack code path + Email/Webhook alerts code path)*
 - ⏸️ Test bloccati: 5 (residui solo on-prem dependencies — sbloccabili oggi) + **9 follow-up Fase 05 bloccati da `[05.9.1]`** finché non viene fixato lato `SentriKat-web`
 - ✅ Fix applicati: **20** *(7 core + 13 web)*
