@@ -3889,7 +3889,24 @@ async function loadAllSettings() {
                     const httpProxy = SK.DOM.get('httpProxy');
                     const httpsProxy = SK.DOM.get('httpsProxy');
                     const noProxy = SK.DOM.get('noProxy');
-                    if (verifySSL) verifySSL.checked = general.verify_ssl !== false;
+                    if (verifySSL) {
+                        verifySSL.checked = general.verify_ssl !== false;
+                        if (!verifySSL.dataset.confirmBound) {
+                            verifySSL.dataset.confirmBound = '1';
+                            verifySSL.addEventListener('change', (e) => {
+                                if (!e.target.checked) {
+                                    const ok = confirm(
+                                        'Disable SSL certificate verification?\n\n' +
+                                        'This turns off MITM protection for ALL outbound API calls ' +
+                                        '(NVD, CISA KEV, license server, webhooks, issue trackers).\n\n' +
+                                        'Only disable in trusted corporate networks behind an SSL-inspecting ' +
+                                        'proxy. Never on the public internet.'
+                                    );
+                                    if (!ok) e.target.checked = true;
+                                }
+                            });
+                        }
+                    }
                     if (httpProxy) httpProxy.value = general.http_proxy || '';
                     if (httpsProxy) httpsProxy.value = general.https_proxy || '';
                     if (noProxy) noProxy.value = general.no_proxy || '';

@@ -2667,6 +2667,7 @@ In on-prem demo senza agent: praticamente impossibile vedere match per prodotti 
 - **Severity = 🔴 HIGH** per principio "zero coverage parziale" applicato alla security: un default insecure è worse di un bug isolato perché ogni installazione fresh è vulnerable.
 - **Fix prescriptivo**: default ON. Toggle OFF richiede explicit confirm ("Are you sure? This disables MITM protection for all external API calls.").
 - **Discovered**: 2026-04-30
+- **🔧 Fix 2026-04-30** (commit pending): code review evidenza che il default è **già `True`** in tutti i 6 punti (`config.py:118` env, `config.py:182` DB lookup, `settings_api.py:995` GET default `'true'`, template `admin_panel.html:2173` `checked`, `admin_panel.js:3892` `!== false`, `docker-compose.yml:80` `${VERIFY_SSL:-true}`). Il sintomo testato era da DB stale (toggle precedentemente disattivato in sessione test e persistito in `system_settings`). Aggiunta **guard di conferma** in `static/js/admin_panel.js` sul `change` di `#verifySSL`: se l'utente passa ON→OFF, `confirm()` browser chiede di confermare la disabilitazione MITM protection; cancel ripristina checked=true. Verifica pending: container fresh deploy → toggle ON; toggle OFF → dialog di conferma compare.
 
 ### [03.16.2] 🟡 **WARN** — Cluster 3 default insicuri: 2FA off + Special char off + SSL off
 
