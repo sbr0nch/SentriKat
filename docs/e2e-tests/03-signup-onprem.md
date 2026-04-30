@@ -2852,6 +2852,7 @@ In on-prem demo senza agent: praticamente impossibile vedere match per prodotti 
   ```
 - **Severity = 🔵 INFO**. Cluster con `[03.14.34]` (DB-backed progress) — quel fix ha introdotto questo edge case. Deployment scope: `🏢☁️ both`.
 - **Discovered**: 2026-04-30
+- **🔧 Fix 2026-04-30** (commit pending): in `app/templates/base.html` `pollProgress()`, su `!response.ok` con status 404/503 chiamiamo `hideProgressBanner()` che già fa il cleanup completo (`sessionStorage.removeItem('activeJobId')` + `clearInterval(_progressPollInterval)` + nullify + reset Sync button). Verifica pending: dopo backfill completed → console DevTools pulita, no più 503 spam.
 
 ---
 
