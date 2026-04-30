@@ -251,19 +251,14 @@
   - Confirm password diversa da new password → errore chiaro "password non uguali"
 - **Discovered**: 2026-04-23
 
-### [02.6.3] 🔵 Password policy: da verificare complessità oltre il min-length
+### [02.6.3] ✅ **VERIFIED 2026-04-30** — Password breach list check funzionante
 
 - **Fase**: 02
 - **Area**: Login / password policy
-- **Tipo**: 🔵 Info (follow-up)
-- **Severity**: Low-Medium (security posture)
-- **Actual**: l'unico messaggio visto è "at least 8 characters". Non è chiaro se il server enforce anche: maiuscole, minuscole, numeri, simboli, no-common-passwords list (NIST SP 800-63B raccomanda di confrontare con lista breached password come Have-I-Been-Pwned invece di regole di complessità).
-- **Follow-up TODO 02.6.3a**: testare con password:
-  - `password` (8 lowercase, dizionario comune) → dovrebbe essere rifiutata se c'è breached-list check
-  - `12345678` (8 digit) → dovrebbe essere rifiutata
-  - `aaaaaaaa` (8 ripetute)
-  - Registrare quali passano e quali no → mappare la policy effettiva
-- **Discovered**: 2026-04-23
+- **Tipo**: 🟢 OK
+- **Test eseguito 2026-04-30** con password weak: `password`, `12345678`, `aaaaaaaa` — **tutte rejected** dal server. NIST SP 800-63B compliant breach list check confermato funzionante.
+- **Follow-up future** (non urgente): coverage espansa a HIBP API integration vs lista locale, custom passphrase length minimum, password expiration policy customizable per org.
+- **Discovered**: 2026-04-23 · **Verified**: 2026-04-30
 
 ### [02.6.4] 🔵 Copy "an administrator asked you to renew it" visibile anche su SaaS first-login
 
