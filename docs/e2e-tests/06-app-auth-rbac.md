@@ -626,6 +626,7 @@ System
   5. Documentare in Admin Guide il modello org-admin vs super-admin.
 - **Severity = 🟡 WARN**: codice attuale è ragionevole ma UX/coverage incompleto.
 - **Discovered**: 2026-04-30
+- **🔧 Fix parziale 2026-04-30** (commit pending): punto 1 del fix prescriptivo applicato. `app/routes.py:6977` error string da "Only super admins can change usernames" → "Username is permanent and cannot be changed.". Punti 2-5 (reset password button, email change flow user-self, display name edit, admin guide doc) restano aperti come follow-up feature work.
 
 ### [06.8.2] ✅ SLA setup già configurato (cross-ref `[06.8.2a]`)
 
