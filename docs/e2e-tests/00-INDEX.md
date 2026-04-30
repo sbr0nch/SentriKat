@@ -327,7 +327,7 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 - 🔵 Info/UX: **69** *(65 + 4: `[03.14.23]` admin-panel redirect, `[03.14.31]` localhost UI hint, `[03.14.33]` aria-hidden a11y, `[03.14.35]` Sync button cliccabile ✅ VERIFIED 2026-04-30)*
 - ✅✅ Fix VERIFIED: **18** su 22, **+ 5 nuovi fix applicati 2026-04-29 sera** (B + C1 + C2 + C3 + sub-B `[03.14.32]`):
   - `[03.14.32]` sub-B `e3dc41f` — fallback keyword se `cpe_data IS NULL` ✅ VERIFIED (14 match invece di 5)
-  - `[03.14.32]` sub-A `7b5e661` — endpoint `/api/sync/cpe-backfill` ✅ wired in UI (commit `077b936` 2026-04-29); sub-C `1a3856c` fix loop early-stop + oldest_first + skip_awaiting (2026-04-30) — round-2 in corso, verify post-completion
+  - `[03.14.32]` sub-A `7b5e661` — endpoint `/api/sync/cpe-backfill` ✅ wired in UI (commit `077b936` 2026-04-29); sub-C `1a3856c` fix loop early-stop + oldest_first + skip_awaiting ✅ VERIFIED 2026-04-30 (round-2 ha enriched il pool NULL nvd_status come previsto)
   - `[03.15.1]` `13122e4` — 404/500 pages styled (verify pending)
   - `[03.14.35]` `a49d6d4` — Sync button lock dopo refresh ✅ VERIFIED 2026-04-30 (refresh durante backfill mantiene lock)
   - `[03.14.37]` `5ad37e5` — save NVD key con opt-out validation ✅ VERIFIED 2026-04-30 (save <30s anche con backfill in corso)
