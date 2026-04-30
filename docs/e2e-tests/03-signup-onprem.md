@@ -2799,6 +2799,20 @@ In on-prem demo senza agent: praticamente impossibile vedere match per prodotti 
   2. Verificare che lo scheduler chiami notify_on_fail dopo ogni check
   3. Aggiungere CI test che simula DB down + verifica delivery in mailpit mock
 - **Discovered**: 2026-04-30
+- **🔧 Root cause + Fix 2026-04-30** (commit pending): pathway notification ESISTE (`run_all_health_checks` → `_send_health_notifications` in `app/health_checks.py`), ma 3 problemi tutti dipendenti dal DB:
+  1. `is_health_checks_enabled()` e `is_check_enabled()` queryavano `SystemSettings` senza try/except → DB down → 500 al caller, intero ciclo abortito → nessun check eseguito → nessuna notifica.
+  2. **Nessun state-transition tracking**: il rate-limit "1 notification/ora" globale silenziava le edge change. Se la prima notifica era passata (per warning generico), un OK→FAIL successivo NON rinotificava.
+  3. Settings `health_check_notify_email` / `health_check_notify_webhook` letti da DB senza fallback → quando DB è il componente fallito, settings irraggiungibili → notification skip.
+  - **Fix applicato**:
+    - Wrappato `is_*_enabled()` in try/except con default sicuro (enabled).
+    - Aggiunto `_LAST_STATUS_CACHE` module-level: traccia stato precedente di ogni check in-process, sopravvive a DB down. Computa `transitions = {check: (old, new)}` ad ogni run.
+    - **Rate limit bypass su edge change**: `has_transition` triggera notifica anche entro 60min dall'ultima.
+    - **Recovery alerts** (FAIL→OK): cluster con follow-up `[03.18.x]` "transition FAIL→OK genera notification recovered".
+    - **Env fallback** per `health_check_notify_email` / `health_check_notify_webhook` toggle: `HEALTH_CHECK_NOTIFY_EMAIL` e `HEALTH_CHECK_NOTIFY_WEBHOOK_URL` env var permettono notifica anche con DB down.
+    - `_safe_label_message()` cattura DB query failure quando legge `HealthCheckResult` per il body — message diventa "detail unavailable (DB query failed)" invece di crashare.
+    - Update `last_notification` timestamp ora best-effort (non blocca la notifica se commit fallisce).
+  - **Verifica pending**: 1) Configurare `health_check_notify_email` + `health_check_notify_webhook=true`. 2) `docker stop sentrikat-db` → attendere 1-2 min (scheduler period) → mailpit `:8025` deve ricevere "CRITICAL: Database Connectivity". 3) `docker start sentrikat-db` → next run → mailpit deve ricevere "RECOVERED: Database Connectivity (critical -> ok)". 4) Verifica che multiple consecutive fails non spammano (rate limit attivo se nessuna transition).
+  - **Note follow-up `[03.18.x]`**: anti-flapping (debounce 2-3 cicli prima di critical) NON implementato — feature work residuo.
 
 ### [03.18.2] 🟡 **WARN** confirmation `[03.14.7]` Worker Pool STOPPED — re-confirm + 14 checks total
 
