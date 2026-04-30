@@ -23,6 +23,18 @@ from app.models import (
 
 logger = logging.getLogger(__name__)
 
+# In-process state cache. Survives even if the DB is the failing component
+# (the row in HealthCheckResult can't be read when the DB is down). Used to
+# detect OK<->FAIL transitions and force a notification on edge changes,
+# bypassing the global per-hour rate limit (which would otherwise hide the
+# very alert the operator needs).
+_LAST_STATUS_CACHE = {}
+
+# Notification fallback channels read from environment for the case when
+# the DB itself is down — the SystemSettings table can't be queried.
+_ENV_NOTIFY_EMAIL = 'HEALTH_CHECK_NOTIFY_EMAIL'
+_ENV_NOTIFY_WEBHOOK = 'HEALTH_CHECK_NOTIFY_WEBHOOK_URL'
+
 # Default check configuration: check_name -> {category, description, default_enabled}
 HEALTH_CHECKS = {
     'database': {
@@ -113,22 +125,45 @@ HEALTH_CHECKS = {
 
 
 def is_check_enabled(check_name):
-    """Check if a specific health check is enabled in settings."""
-    setting = SystemSettings.query.filter_by(
-        key=f'health_check_{check_name}_enabled'
-    ).first()
-    if setting:
-        return setting.value == 'true'
+    """Check if a specific health check is enabled in settings.
+
+    Resilient to DB failures: if the settings query itself raises (e.g. the
+    database is the very component that just went down — the scenario the
+    health check system is supposed to alert on), fall back to the default
+    so the runner can still execute and report 'critical' on check_database.
+    """
+    try:
+        setting = SystemSettings.query.filter_by(
+            key=f'health_check_{check_name}_enabled'
+        ).first()
+        if setting:
+            return setting.value == 'true'
+    except Exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
     # Default from config
     check_config = HEALTH_CHECKS.get(check_name, {})
     return check_config.get('default_enabled', True)
 
 
 def is_health_checks_enabled():
-    """Check if the health check system is globally enabled."""
-    setting = SystemSettings.query.filter_by(key='health_checks_enabled').first()
-    if setting:
-        return setting.value == 'true'
+    """Check if the health check system is globally enabled.
+
+    Resilient to DB failures (see is_check_enabled docstring): defaults to
+    enabled when the settings query raises, so a DB outage doesn't silently
+    disable the very alerting that should fire.
+    """
+    try:
+        setting = SystemSettings.query.filter_by(key='health_checks_enabled').first()
+        if setting:
+            return setting.value == 'true'
+    except Exception:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
     return True  # Enabled by default
 
 
@@ -791,54 +826,131 @@ def run_all_health_checks():
             _record(check_name, 'error', f'Check failed: {str(e)[:200]}')
             results[check_name] = 'error'
 
-    # Send notifications for warnings/criticals
-    _send_health_notifications(results)
+    # Compute state transitions BEFORE notifying. A transition (OK -> FAIL or
+    # FAIL -> OK) bypasses the per-hour rate limit so operators always learn
+    # about edge changes — that's the whole point of a health alert.
+    transitions = {}
+    for name, status in results.items():
+        prev = _LAST_STATUS_CACHE.get(name)
+        if prev != status:
+            transitions[name] = (prev, status)
+    _LAST_STATUS_CACHE.update(results)
+
+    # Send notifications for warnings/criticals (or recoveries on transition)
+    _send_health_notifications(results, transitions)
 
     return results
 
 
-def _send_health_notifications(results):
-    """Send email and webhook notifications for critical/warning health checks."""
+def _send_health_notifications(results, transitions=None):
+    """Send email and webhook notifications for critical/warning health checks.
+
+    A transition map (`{check_name: (old_status, new_status)}`) bypasses the
+    rate limit so OK->FAIL and FAIL->OK edges always reach the operator.
+    """
+    transitions = transitions or {}
     try:
-        # Only notify if there are problems
+        # Only notify if there are problems OR a check just recovered
         problems = {k: v for k, v in results.items() if v in ('warning', 'critical', 'error')}
-        if not problems:
+        recoveries = {
+            k: v for k, (old, v) in transitions.items()
+            if v == 'ok' and old in ('warning', 'critical', 'error')
+        }
+        if not problems and not recoveries:
             return
 
-        # Rate limit: don't send more than once per hour
-        last_notif = SystemSettings.query.filter_by(key='health_check_last_notification').first()
-        if last_notif and last_notif.value:
+        # Rate limit applies only when there's no edge transition. A check
+        # going OK->FAIL or FAIL->OK is the kind of event the operator must
+        # see immediately even if we already alerted on something else this
+        # hour (otherwise the second incident in a noisy window is lost).
+        has_transition = bool(transitions) and any(
+            old != new for old, new in transitions.values()
+        )
+        if not has_transition:
             try:
-                last_time = datetime.fromisoformat(last_notif.value)
-                if (datetime.utcnow() - last_time).total_seconds() < 3600:
-                    return  # Too soon
-            except (ValueError, TypeError):
-                pass
+                last_notif = SystemSettings.query.filter_by(key='health_check_last_notification').first()
+                if last_notif and last_notif.value:
+                    try:
+                        last_time = datetime.fromisoformat(last_notif.value)
+                        if (datetime.utcnow() - last_time).total_seconds() < 3600:
+                            return  # Too soon
+                    except (ValueError, TypeError):
+                        pass
+            except Exception:
+                # DB query failing here means the DB is the failing component.
+                # Don't suppress the alert — fall through to the env fallback.
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
 
         # Build notification message
         critical_checks = [k for k, v in problems.items() if v == 'critical']
         warning_checks = [k for k, v in problems.items() if v in ('warning', 'error')]
+        recovered_checks = list(recoveries.keys())
 
-        if not critical_checks and not warning_checks:
+        if not critical_checks and not warning_checks and not recovered_checks:
             return
 
         # Build shared message content
-        subject = f"SentriKat Health Alert: {len(critical_checks)} critical, {len(warning_checks)} warnings"
+        subject_parts = []
+        if critical_checks:
+            subject_parts.append(f"{len(critical_checks)} critical")
+        if warning_checks:
+            subject_parts.append(f"{len(warning_checks)} warnings")
+        if recovered_checks:
+            subject_parts.append(f"{len(recovered_checks)} recovered")
+        subject = f"SentriKat Health Alert: {', '.join(subject_parts)}"
         body_lines = ["SentriKat Health Check Results:\n"]
+
+        def _safe_label_message(check_name):
+            label = HEALTH_CHECKS.get(check_name, {}).get('label', check_name)
+            try:
+                result = HealthCheckResult.query.filter_by(check_name=check_name).first()
+                msg = result.message if result else 'Unknown'
+            except Exception:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+                msg = 'detail unavailable (DB query failed)'
+            return label, msg
+
         for check_name in critical_checks:
-            result = HealthCheckResult.query.filter_by(check_name=check_name).first()
-            label = HEALTH_CHECKS.get(check_name, {}).get('label', check_name)
-            body_lines.append(f"  CRITICAL: {label} - {result.message if result else 'Unknown'}")
+            label, msg = _safe_label_message(check_name)
+            body_lines.append(f"  CRITICAL: {label} - {msg}")
         for check_name in warning_checks:
-            result = HealthCheckResult.query.filter_by(check_name=check_name).first()
+            label, msg = _safe_label_message(check_name)
+            body_lines.append(f"  WARNING: {label} - {msg}")
+        for check_name in recovered_checks:
             label = HEALTH_CHECKS.get(check_name, {}).get('label', check_name)
-            body_lines.append(f"  WARNING: {label} - {result.message if result else 'Unknown'}")
+            old_status = transitions.get(check_name, (None, None))[0] or 'unknown'
+            body_lines.append(f"  RECOVERED: {label} ({old_status} -> ok)")
         body = '\n'.join(body_lines)
 
         notification_sent = False
 
-        # Send via email if SMTP and notification emails are configured
-        setting = SystemSettings.query.filter_by(key='health_check_notify_email').first()
+        # Resolve notification email: DB first, then env fallback so the
+        # alert still fires when the DB itself is the failing component.
+        notify_email_value = None
+        try:
+            setting = SystemSettings.query.filter_by(key='health_check_notify_email').first()
+            if setting and setting.value:
+                notify_email_value = setting.value
+        except Exception:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+        if not notify_email_value:
+            notify_email_value = os.environ.get(_ENV_NOTIFY_EMAIL)
+
+        # Synthesize a setting-like object so the existing branch below works
+        # for both DB and env paths without further refactoring.
+        class _S:  # noqa: E501
+            pass
+        setting = _S()
+        setting.value = notify_email_value or ''
         if setting and setting.value:
             try:
                 from app.email_alerts import EmailAlertManager
@@ -854,9 +966,20 @@ def _send_health_notifications(results):
             except Exception as e:
                 logger.warning(f"Could not send health notification email: {e}")
 
-        # Send via webhooks if health_check_notify_webhook is enabled
-        webhook_setting = SystemSettings.query.filter_by(key='health_check_notify_webhook').first()
-        webhook_enabled = webhook_setting and webhook_setting.value == 'true'
+        # Send via webhooks if health_check_notify_webhook is enabled.
+        # Same DB-down fallback: if the toggle can't be read, allow when
+        # HEALTH_CHECK_NOTIFY_WEBHOOK_URL env var is set (used by
+        # _send_health_webhook generic path).
+        webhook_enabled = False
+        try:
+            webhook_setting = SystemSettings.query.filter_by(key='health_check_notify_webhook').first()
+            webhook_enabled = bool(webhook_setting and webhook_setting.value == 'true')
+        except Exception:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            webhook_enabled = bool(os.environ.get(_ENV_NOTIFY_WEBHOOK))
         if webhook_enabled:
             try:
                 _send_health_webhook(critical_checks, warning_checks, body)
@@ -864,17 +987,26 @@ def _send_health_notifications(results):
             except Exception as e:
                 logger.warning(f"Could not send health notification webhook: {e}")
 
-        # Update last notification time if any notification was sent
+        # Update last notification time if any notification was sent.
+        # Best-effort: if the DB is down we just skip the timestamp update;
+        # the in-process cache still tracks state to avoid duplicate alerts.
         if notification_sent:
-            if last_notif:
-                last_notif.value = datetime.utcnow().isoformat()
-            else:
-                db.session.add(SystemSettings(
-                    key='health_check_last_notification',
-                    value=datetime.utcnow().isoformat(),
-                    category='health'
-                ))
-            db.session.commit()
+            try:
+                last_notif_row = SystemSettings.query.filter_by(key='health_check_last_notification').first()
+                if last_notif_row:
+                    last_notif_row.value = datetime.utcnow().isoformat()
+                else:
+                    db.session.add(SystemSettings(
+                        key='health_check_last_notification',
+                        value=datetime.utcnow().isoformat(),
+                        category='health'
+                    ))
+                db.session.commit()
+            except Exception:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
 
     except Exception as e:
         logger.error(f"Error in health notification: {e}")

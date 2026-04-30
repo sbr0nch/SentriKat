@@ -2911,8 +2911,63 @@ async function testProxyConnection() {
 // Security Settings
 // ============================================================================
 
+// [03.16.2] Compliance presets — single source of truth for the toggles a
+// preset enforces. 'custom' is an explicit no-op; the user manages each
+// field individually and the dropdown just remembers the choice.
+const COMPLIANCE_PRESETS = {
+    nist: {
+        // NIST SP 800-63B AAL2: MFA required, but special chars are NOT
+        // mandated (length + breach-check are the recommended path).
+        require_2fa: true,
+        password_require_special: false,
+        password_min_length: 8,
+        verify_ssl: true,
+    },
+    soc2: {
+        require_2fa: true,
+        password_require_special: true,
+        password_min_length: 12,
+        verify_ssl: true,
+    },
+    iso27001: {
+        require_2fa: true,
+        password_require_special: true,
+        password_min_length: 10,
+        verify_ssl: true,
+    },
+    pci_dss: {
+        // PCI-DSS v4.0 8.3.x: 12 chars, complexity, MFA, secure transport.
+        require_2fa: true,
+        password_require_special: true,
+        password_min_length: 12,
+        password_expiry_days: 90,
+        verify_ssl: true,
+    },
+};
+
+function applyCompliancePreset(presetKey) {
+    const preset = COMPLIANCE_PRESETS[presetKey];
+    if (!preset) return;  // 'custom' or unknown — leave fields untouched
+    const setIf = (id, key, asChecked) => {
+        if (!(key in preset)) return;
+        const el = SK.DOM.get(id);
+        if (!el) return;
+        if (asChecked) el.checked = !!preset[key];
+        else el.value = preset[key];
+    };
+    setIf('require2FA', 'require_2fa', true);
+    setIf('passwordRequireSpecial', 'password_require_special', true);
+    setIf('passwordMinLength', 'password_min_length', false);
+    setIf('passwordExpiryDays', 'password_expiry_days', false);
+    // Cross-tab: SSL verification lives in General > Network. Apply only
+    // when that field is mounted (admin opened the General tab at least
+    // once). Otherwise it'll be picked up on next save via the preset key.
+    setIf('verifySSL', 'verify_ssl', true);
+}
+
 async function saveSecuritySettings() {
     const settings = {
+        compliance_preset: SK.DOM.getValue('compliancePreset') || 'custom',
         session_timeout: parseInt(SK.DOM.getValue('sessionTimeout')) || 480,
         max_failed_logins: parseInt(SK.DOM.getValue('maxFailedLogins')) || 5,
         lockout_duration: parseInt(SK.DOM.getValue('lockoutDuration')) || 30,
@@ -2971,6 +3026,18 @@ async function loadSecuritySettings() {
             const require2FA = SK.DOM.get('require2FA');
             if (passwordExpiryDays) passwordExpiryDays.value = settings.password_expiry_days || 0;
             if (require2FA) require2FA.checked = settings.require_2fa === true;
+
+            // [03.16.2] Restore last selected preset (defaults to 'nist').
+            const compliancePreset = SK.DOM.get('compliancePreset');
+            if (compliancePreset) {
+                compliancePreset.value = settings.compliance_preset || 'nist';
+                if (!compliancePreset.dataset.changeBound) {
+                    compliancePreset.dataset.changeBound = '1';
+                    compliancePreset.addEventListener('change', (e) => {
+                        applyCompliancePreset(e.target.value);
+                    });
+                }
+            }
         }
     } catch (error) {
         console.error('Error loading security settings:', error);
@@ -3889,7 +3956,24 @@ async function loadAllSettings() {
                     const httpProxy = SK.DOM.get('httpProxy');
                     const httpsProxy = SK.DOM.get('httpsProxy');
                     const noProxy = SK.DOM.get('noProxy');
-                    if (verifySSL) verifySSL.checked = general.verify_ssl !== false;
+                    if (verifySSL) {
+                        verifySSL.checked = general.verify_ssl !== false;
+                        if (!verifySSL.dataset.confirmBound) {
+                            verifySSL.dataset.confirmBound = '1';
+                            verifySSL.addEventListener('change', (e) => {
+                                if (!e.target.checked) {
+                                    const ok = confirm(
+                                        'Disable SSL certificate verification?\n\n' +
+                                        'This turns off MITM protection for ALL outbound API calls ' +
+                                        '(NVD, CISA KEV, license server, webhooks, issue trackers).\n\n' +
+                                        'Only disable in trusted corporate networks behind an SSL-inspecting ' +
+                                        'proxy. Never on the public internet.'
+                                    );
+                                    if (!ok) e.target.checked = true;
+                                }
+                            });
+                        }
+                    }
                     if (httpProxy) httpProxy.value = general.http_proxy || '';
                     if (httpsProxy) httpsProxy.value = general.https_proxy || '';
                     if (noProxy) noProxy.value = general.no_proxy || '';

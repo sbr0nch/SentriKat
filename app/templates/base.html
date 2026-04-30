@@ -3842,7 +3842,15 @@
         async function pollProgress(jobId) {
             try {
                 const response = await fetch(`/api/progress/${jobId}`);
-                if (!response.ok) return;
+                if (!response.ok) {
+                    // [03.18.4] stale jobId (404) or progress row deleted on
+                    // finish (503) — stop polling and clear session marker so
+                    // the loop doesn't spam DevTools console forever.
+                    if (response.status === 404 || response.status === 503) {
+                        hideProgressBanner();
+                    }
+                    return;
+                }
                 const p = await response.json();
 
                 const descEl = document.getElementById('progressDesc');

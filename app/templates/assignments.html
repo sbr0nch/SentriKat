@@ -233,7 +233,8 @@
 
     function renderRow(a) {
         const overdueClass = a.is_overdue ? 'overdue' : '';
-        const cveLabel = (a.cve_info && a.cve_info.cve_id) || a.cve_id || '<span class="text-muted">—</span>';
+        const cveId = (a.cve_info && a.cve_info.cve_id) || a.cve_id || null;
+        const cveCell = cveId ? esc(cveId) : '<span class="text-muted">—</span>';
         const productLabel = a.product_name
             ? `${esc(a.product_name)} <small class="text-muted">${esc(a.product_version || '')}</small>`
             : '<span class="text-muted">—</span>';
@@ -243,7 +244,7 @@
 
         return `
           <tr class="assignment-row ${overdueClass}" data-id="${a.id}">
-            <td class="fw-semibold">${esc(cveLabel)}</td>
+            <td class="fw-semibold">${cveCell}</td>
             <td>${productLabel}</td>
             <td>${esc(a.assigned_to || '')}</td>
             <td>${priorityBadge(a.priority)}</td>
@@ -481,7 +482,7 @@
         try {
             const res = await fetch(`/api/remediation/assignments/${id}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken() },
                 body: JSON.stringify({ status: newStatus }),
             });
             const data = await res.json().catch(() => ({}));
@@ -506,7 +507,10 @@
         );
         if (!ok) return;
         try {
-            const res = await fetch(`/api/remediation/assignments/${id}`, { method: 'DELETE' });
+            const res = await fetch(`/api/remediation/assignments/${id}`, {
+                method: 'DELETE',
+                headers: { 'X-CSRFToken': getCSRFToken() },
+            });
             if (!res.ok && res.status !== 204) {
                 const j = await res.json().catch(() => ({}));
                 showToast(j.error || j.message || `HTTP ${res.status}`, 'danger');

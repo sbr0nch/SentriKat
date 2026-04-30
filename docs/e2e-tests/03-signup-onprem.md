@@ -2667,6 +2667,7 @@ In on-prem demo senza agent: praticamente impossibile vedere match per prodotti 
 - **Severity = 🔴 HIGH** per principio "zero coverage parziale" applicato alla security: un default insecure è worse di un bug isolato perché ogni installazione fresh è vulnerable.
 - **Fix prescriptivo**: default ON. Toggle OFF richiede explicit confirm ("Are you sure? This disables MITM protection for all external API calls.").
 - **Discovered**: 2026-04-30
+- **🔧 Fix 2026-04-30** (commit pending): code review evidenza che il default è **già `True`** in tutti i 6 punti (`config.py:118` env, `config.py:182` DB lookup, `settings_api.py:995` GET default `'true'`, template `admin_panel.html:2173` `checked`, `admin_panel.js:3892` `!== false`, `docker-compose.yml:80` `${VERIFY_SSL:-true}`). Il sintomo testato era da DB stale (toggle precedentemente disattivato in sessione test e persistito in `system_settings`). Aggiunta **guard di conferma** in `static/js/admin_panel.js` sul `change` di `#verifySSL`: se l'utente passa ON→OFF, `confirm()` browser chiede di confermare la disabilitazione MITM protection; cancel ripristina checked=true. Verifica pending: container fresh deploy → toggle ON; toggle OFF → dialog di conferma compare.
 
 ### [03.16.2] 🟡 **WARN** — Cluster 3 default insicuri: 2FA off + Special char off + SSL off
 
@@ -2682,6 +2683,7 @@ In on-prem demo senza agent: praticamente impossibile vedere match per prodotti 
   - Special char opt-in significa password come `Password1` accettate. NIST 2017 SP 800-63B effettivamente non richiede special char, ma SOC2/ISO/PCI-DSS sì. Senza un'opzione di compliance preset per questi standard, il customer deve sapere di toggleare.
 - **Fix prescriptivo**: aggiungere "Compliance preset" dropdown in cima a Security tab: `[Custom | NIST | SOC2 | ISO27001 | PCI-DSS]`. Selezionando un preset si applicano tutti i toggle coerenti. Default preset = `NIST`.
 - **Severity = 🟡 WARN** (escalation a HIGH se SentriKat targeting customer regulated).
+- **🔧 Fix 2026-04-30** (commit pending): dropdown aggiunto in cima al Security tab (`app/templates/admin_panel.html` securitySettings pane) con 5 opzioni e default `NIST`. JS handler `applyCompliancePreset()` in `static/js/admin_panel.js` con tabella `COMPLIANCE_PRESETS` come single source of truth — ogni preset definisce `require_2fa`, `password_require_special`, `password_min_length`, `password_expiry_days`, `verify_ssl` (SSL cross-tab in General/Network). NIST: 2FA ON, special char OFF (per NIST SP 800-63B), SSL ON. SOC2/ISO27001: 2FA + special + SSL ON. PCI-DSS: aggiunge expiry 90gg + min length 12. `Custom` lascia tutto invariato. Backend persiste `compliance_preset` in `SystemSettings` via `/api/settings/security` GET/POST per ricordare la scelta. Verifica pending: aprire Security → dropdown visibile con NIST selected → cambiare a PCI-DSS → vedere min length=12, expiry=90, 2FA+special+SSL ON; salvare → reload → preset rimane PCI-DSS.
 - **Discovered**: 2026-04-30
 
 ### [03.16.3] ✅ **CONFIRMED** `[05.5.2]` retention inconsistency — on-prem dice 365d, admin portal dice 730d
@@ -2798,6 +2800,20 @@ In on-prem demo senza agent: praticamente impossibile vedere match per prodotti 
   2. Verificare che lo scheduler chiami notify_on_fail dopo ogni check
   3. Aggiungere CI test che simula DB down + verifica delivery in mailpit mock
 - **Discovered**: 2026-04-30
+- **🔧 Root cause + Fix 2026-04-30** (commit pending): pathway notification ESISTE (`run_all_health_checks` → `_send_health_notifications` in `app/health_checks.py`), ma 3 problemi tutti dipendenti dal DB:
+  1. `is_health_checks_enabled()` e `is_check_enabled()` queryavano `SystemSettings` senza try/except → DB down → 500 al caller, intero ciclo abortito → nessun check eseguito → nessuna notifica.
+  2. **Nessun state-transition tracking**: il rate-limit "1 notification/ora" globale silenziava le edge change. Se la prima notifica era passata (per warning generico), un OK→FAIL successivo NON rinotificava.
+  3. Settings `health_check_notify_email` / `health_check_notify_webhook` letti da DB senza fallback → quando DB è il componente fallito, settings irraggiungibili → notification skip.
+  - **Fix applicato**:
+    - Wrappato `is_*_enabled()` in try/except con default sicuro (enabled).
+    - Aggiunto `_LAST_STATUS_CACHE` module-level: traccia stato precedente di ogni check in-process, sopravvive a DB down. Computa `transitions = {check: (old, new)}` ad ogni run.
+    - **Rate limit bypass su edge change**: `has_transition` triggera notifica anche entro 60min dall'ultima.
+    - **Recovery alerts** (FAIL→OK): cluster con follow-up `[03.18.x]` "transition FAIL→OK genera notification recovered".
+    - **Env fallback** per `health_check_notify_email` / `health_check_notify_webhook` toggle: `HEALTH_CHECK_NOTIFY_EMAIL` e `HEALTH_CHECK_NOTIFY_WEBHOOK_URL` env var permettono notifica anche con DB down.
+    - `_safe_label_message()` cattura DB query failure quando legge `HealthCheckResult` per il body — message diventa "detail unavailable (DB query failed)" invece di crashare.
+    - Update `last_notification` timestamp ora best-effort (non blocca la notifica se commit fallisce).
+  - **Verifica pending**: 1) Configurare `health_check_notify_email` + `health_check_notify_webhook=true`. 2) `docker stop sentrikat-db` → attendere 1-2 min (scheduler period) → mailpit `:8025` deve ricevere "CRITICAL: Database Connectivity". 3) `docker start sentrikat-db` → next run → mailpit deve ricevere "RECOVERED: Database Connectivity (critical -> ok)". 4) Verifica che multiple consecutive fails non spammano (rate limit attivo se nessuna transition).
+  - **Note follow-up `[03.18.x]`**: anti-flapping (debounce 2-3 cicli prima di critical) NON implementato — feature work residuo.
 
 ### [03.18.2] 🟡 **WARN** confirmation `[03.14.7]` Worker Pool STOPPED — re-confirm + 14 checks total
 
@@ -2851,6 +2867,7 @@ In on-prem demo senza agent: praticamente impossibile vedere match per prodotti 
   ```
 - **Severity = 🔵 INFO**. Cluster con `[03.14.34]` (DB-backed progress) — quel fix ha introdotto questo edge case. Deployment scope: `🏢☁️ both`.
 - **Discovered**: 2026-04-30
+- **🔧 Fix 2026-04-30** (commit pending): in `app/templates/base.html` `pollProgress()`, su `!response.ok` con status 404/503 chiamiamo `hideProgressBanner()` che già fa il cleanup completo (`sessionStorage.removeItem('activeJobId')` + `clearInterval(_progressPollInterval)` + nullify + reset Sync button). Verifica pending: dopo backfill completed → console DevTools pulita, no più 503 spam.
 
 ---
 

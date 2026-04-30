@@ -3454,7 +3454,7 @@
         try {
             const resp = await fetch(`/api/remediation/assignments/${id}`, {
                 method: 'PUT',
-                headers: {'Content-Type': 'application/json'},
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken()},
                 body: JSON.stringify({status: newStatus})
             });
             if (resp.ok) {
@@ -3513,7 +3513,7 @@
         try {
             const resp = await fetch(`/api/remediation/assignments/${id}`, {
                 method: 'PUT',
-                headers: {'Content-Type': 'application/json'},
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken()},
                 body: JSON.stringify(payload)
             });
             if (resp.ok) {
@@ -3533,7 +3533,10 @@
         const id = document.getElementById('detailAssignmentId').value;
         if (!confirm('Delete this assignment?')) return;
         try {
-            const resp = await fetch(`/api/remediation/assignments/${id}`, { method: 'DELETE' });
+            const resp = await fetch(`/api/remediation/assignments/${id}`, {
+                method: 'DELETE',
+                headers: {'X-CSRFToken': getCSRFToken()},
+            });
             if (resp.ok) {
                 const m = bootstrap.Modal.getInstance(document.getElementById('assignmentDetailModal'));
                 if (m) m.hide();
@@ -3585,7 +3588,7 @@
         try {
             const resp = await fetch('/api/remediation/assignments', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken()},
                 body: JSON.stringify({
                     product_id: productId,
                     assigned_to: assignTo,
