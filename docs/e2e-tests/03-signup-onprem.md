@@ -2763,3 +2763,61 @@ In on-prem demo senza agent: praticamente impossibile vedere match per prodotti 
   - Test scheduled report delivery via email (cluster `[03.17.1]`)
 - **Severity**: ⏸️ blocked by license tier (test non possibile, non bug)
 
+---
+
+## 03.18 — Health Checks E2E — 2026-04-30
+
+> Test attivo del sistema health check con simulazione fail (DB stop). Cross-ref `[03.14.7]` Worker Pool STOPPED già flaggato.
+
+### [03.18.1] 🔴 **HIGH** — Health check FAIL non genera email/webhook notification
+
+- **Tab**: `/admin-panel#health` → 14 health checks visibili
+- **Deployment scope**: 🏢☁️ both
+- **Tipo**: 🔴 Bug CRITICAL — feature core del prodotto non funziona
+- **Steps to reproduce**:
+  1. Configura Notification Email + Send via webhooks (entrambi pre-validati come reachable da test send manuali)
+  2. `docker stop sentrikat-db` → DB spento
+  3. UI mostra toast error `HTTP 503` (rilevamento OK)
+  4. Click `Run All Now` su health checks → check Database diventa FAIL nello stato UI
+  5. `docker start sentrikat-db` → DB riavviato
+  6. Verifica Mailpit `http://localhost:8025` + webhook-tester `http://localhost:8800`
+- **Expected**: durante lo stato FAIL del DB, almeno 1 email + 1 webhook devono partire (alert per super-admin)
+- **Actual**: **NESSUNA email, NESSUN webhook** ricevuti né durante il fail né dopo il recovery
+- **Test infrastructure validato**: lo stesso utente conferma di avere ricevuto email/webhook su altri test (es. `Send Test Email/Webhook` manuali da Settings + `[03.17.1]` Send Email Alerts Now). Quindi il canale di delivery funziona — è l'integrazione health-check → notification che è rotta.
+- **Possibili root cause**:
+  1. Health check scheduler non triggera notification on FAIL state (manca hook `if check.status == FAIL: notify()`)
+  2. Manual `Run All Now` click bypassa il notification pathway (solo scheduled run notifica? bug logica)
+  3. State change detection rotto: serve transizione `OK → FAIL → notify`. Se il check riparte già FAIL, il sistema lo ignora come "still failing" e non rinotifica
+  4. Email/webhook channels non agganciati al `notification_pipeline` per la categoria `health_check_failure` (mentre sono agganciati per `vulnerability_alert`)
+- **Impatto**:
+  - Customer DB cade alle 3 di notte → super-admin scopre il problema solo la mattina dopo dai customer arrabbiati che dicono "il sito non risponde". **Esatto opposto del valore promesso da un health check system**.
+  - Per un vulnerability management product, downtime invisibile = customer perde fiducia (cluster con principio cardine "zero coverage parziale": un fail non notificato = miss totale).
+- **Severity escalation = 🔴 HIGH/CRITICAL**: la feature esiste (UI dice "Receive email alerts when health checks detect problems") ma **non funziona**. Promessa di prodotto disattesa.
+- **Fix prescriptivo**: 
+  1. Codereading di `app/health_checks.py` o equivalente — trovare pathway che da check.run() arriva a `send_email`/`send_webhook`
+  2. Verificare che lo scheduler chiami notify_on_fail dopo ogni check
+  3. Aggiungere CI test che simula DB down + verifica delivery in mailpit mock
+- **Discovered**: 2026-04-30
+
+### [03.18.2] 🟡 **WARN** confirmation `[03.14.7]` Worker Pool STOPPED — re-confirm + 14 checks total
+
+- **Health check breakdown 2026-04-30**:
+  - **SYSTEM** (8): Database Connectivity 🟢 (5ms), Disk Space 🟢 (92.3%), **Worker Pool 🟡 STOPPED**, Stuck Inventory Jobs 🟢, Queue Throughput 🟢, License Status 🟢 COMMUNITY, SMTP Connectivity 🟢 REACHABLE (`mailpit:1025`), Server Configuration 🟢 ALL CONFIGURED
+  - **DATA SYNC** (4): CVE Sync Freshness 🟢 (27h ago), CPE Coverage 🟢 100% (2/2), **API Source Status 🟡 194 FALLBACK** (9.1% fallback CVSS sources, retry pending), Sync Retry Status 🟢 OK
+  - **AGENTS** (2): Agent Health 🟢 (0 agents), Import Queue Backlog 🟢 (0 pending)
+- **Cross-ref**:
+  - `[03.14.7]` Worker Pool STOPPED — **CONFERMATO** ancora aperto. Cluster con `[03.13.3]` Background Worker "Running" mostra contraddizione tra le 2 viste. Da risolvere quando si fixa il cluster Worker Pool.
+  - **API Source Status 194 fallback** = 194 vuln ancora con CVSS source = fallback (non NVD) → coerente con `[03.14.32]` cluster (CVE che non hanno mai avuto enrichment NVD completo). Auto re-enrichment dovrebbe processarli, da verificare se ciclo funziona.
+- **Severity = 🟡 WARN cluster**: due aree gialle sono "atteso noisy" ma vanno chiuse perché un health check WARN cronico nasconde i WARN nuovi (alert fatigue).
+
+### [03.18.3] 🟢 OK — Toggle disable single check funziona
+
+- Test C confermato dall'utente: toggle ON/OFF su singolo check → disappear/reappear correttamente. Comportamento atteso. ✅
+
+### Test follow-up Phase 03.18
+
+- [ ] **Codereading `app/health_checks.py`** o equivalente: tracciare il pathway notification on-fail per `[03.18.1]`.
+- [ ] **State change test**: dopo fix `[03.18.1]`, verificare che la transizione FAIL → OK genera anche notification "recovered" (best practice: customer vuole sapere quando è tornato up).
+- [ ] **Multiple consecutive fails**: se DB resta down per 3 cicli consecutivi, deve generare 1 notification iniziale + magari escalation dopo N min, non 3 notification spam (anti-flapping).
+- [ ] **API Source Status 194 fallback**: verificare che auto re-enrichment effettivamente cicli e progressivamente riduca il count.
+
