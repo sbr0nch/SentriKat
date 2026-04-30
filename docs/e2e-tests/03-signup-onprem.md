@@ -2724,3 +2724,42 @@ In on-prem demo senza agent: praticamente impossibile vedere match per prodotti 
 - [ ] **Security**: verificare che `Save Security Settings` su valori invalidi (Session Timeout = 0, Max Failed = -1) ritorni validation error chiara.
 - [ ] **Admin Guide tab** (skipped 2026-04-30): re-check copy + accuracy quando il prodotto stabilizza.
 
+---
+
+## 03.17 — Sync triggers E2E + Compliance reports — 2026-04-30
+
+> Re-test post-backfill round-2 dei sync triggers (cluster `[03.14.25]`–`[03.14.29]`) ora che il DB ha CVE enriched reali. Compliance reports verify deferred.
+
+### [03.17.1] ✅ **FULL E2E VERIFIED** — Send Email Alerts Now → email reale arriva con CVE matched
+
+- **Cross-ref**: upgrade di `[03.14.28]` (era 🟢 "code path validato, 0 delivery per absence CVE").
+- **Evidence**: post-backfill round-2, click "Send Email Alerts Now" produce email reale ricevuta in Mailpit (testlab) con:
+  - Subject branding `SentriKat | Security Alert`, timestamp `2026-04-30 17:12 UTC`
+  - Tag organization `ACME COPR.`
+  - Header banner red: "**19 Unacknowledged CVEs** — immediate action required"
+  - 4 stat card: NEW `0`, CRITICAL `19`, HIGH `0`, PRODUCTS `1`
+  - "AFFECTED PRODUCTS" section: `Google - Chrome v120` (19 CVEs)
+  - CTA `View Dashboard` button
+  - "VULNERABILITY DETAILS" list per-CVE: `CVE-2025-14174` con CVSS `8.8`, EPSS `1.0%`, severity `critical`, badge `ACTIVELY EXPLOITED`, badge `OVERDUE by 118 days` + descrizione + "HOW TO FIX" inline (BOD 22-01 cloud guidance) — pattern ripetuto per ogni CVE
+- **Quality assessment**: template molto sopra la media — branding pulito, info densa ma leggibile, CTA chiaro, remediation actionable. **No bug** in questa email.
+- **Severity**: 🟢 OK FULL E2E VERIFIED 2026-04-30
+- **Cross-ref `[03.14.32]` sub-C**: il backfill ha effettivamente reso possibile questo alert delivery (Google Chrome v120 era nella categoria CVE che richiedeva CPE enrichment per essere matched). **Conferma indiretta efficacia fix sub-C**.
+
+### [03.17.2] ✅ Sync CISA/EPSS/CPE Dictionary triggers — re-confirm post-backfill
+
+- Click `Sync CISA Now` / `Sync EPSS Scores Now` / `Sync CPE Dictionary Now` → tutti completano OK (toast verde, no error in console F12).
+- Cross-ref `[03.14.25]`–`[03.14.27]` confermati ancora funzionanti con DB popolato (regression test passato).
+- **Severity**: 🟢 OK 2026-04-30
+
+### [03.17.3] ⏸️ DEFERRED — Compliance reports download richiede Pro license
+
+- **Tab**: System Settings → Compliance (e/o `/admin-panel#compliance`)
+- **Sintomo**: i report download (PDF/JSON/CSV per ognuno dei 7 framework — NIS2/SOC2/ISO27001/GDPR/PCI-DSS/NIST/HIPAA) sono **feature-gated su Pro license**. L'utente conferma che "funzionano quasi sicuramente" ma non può eseguire test funzionale completo senza license Pro.
+- **Action**: rimandato a sessione successiva con license Pro provisionata. Cross-ref `[03.13.2]` (Push Agents Pro-only — cluster Pro features inaccessibili a Community).
+- **Test follow-up post-Pro**:
+  - Click PDF/JSON/CSV per ognuno dei 7 framework con DB vuoto → atteso download generato (no 403)
+  - Click stessi report con DB popolato (post-scan reale) → contenuto report contiene CVE/products/coverage scores
+  - Verify branding nel PDF coerente con `[03.16.4]` Support Email + `[02.7.7]` LDAP subtitle issues
+  - Test scheduled report delivery via email (cluster `[03.17.1]`)
+- **Severity**: ⏸️ blocked by license tier (test non possibile, non bug)
+
