@@ -2821,3 +2821,76 @@ In on-prem demo senza agent: praticamente impossibile vedere match per prodotti 
 - [ ] **Multiple consecutive fails**: se DB resta down per 3 cicli consecutivi, deve generare 1 notification iniziale + magari escalation dopo N min, non 3 notification spam (anti-flapping).
 - [ ] **API Source Status 194 fallback**: verificare che auto re-enrichment effettivamente cicli e progressivamente riduca il count.
 
+### [03.18.4] 🔵 **INFO** — Stale `cpe_backfill_*` jobId polling spam 503 in console
+
+- **Tab**: qualunque (visibile dovunque dopo che backfill è completato e session restored)
+- **Sintomo**: dopo il completamento di un backfill (es. `cpe_backfill_1777569071`), il frontend continua a pollare `/api/progress/cpe_backfill_<id>` in loop e riceve 503 ripetuti perché la riga `system_settings WHERE category='progress'` viene cancellata su `prog.finish()`. Console DevTools spam:
+  ```
+  cpe_backfill_1777569071:1  Failed to load resource: the server responded with a status of 503 (SERVICE UNAVAILABLE)
+  ```
+- **Root cause** in `app/templates/base.html` ~line 3844:
+  ```js
+  async function pollProgress(jobId) {
+      try {
+          const response = await fetch(`/api/progress/${jobId}`);
+          if (!response.ok) return;  // ← silently ignores 503, no cleanup
+          ...
+  ```
+  → Il `setInterval` per il polling non si ferma e `sessionStorage.activeJobId` non viene pulito sul 503.
+- **Impatto**: solo cosmetico (no funzionale break) ma pollute DevTools console + traffico inutile a `/api/progress/...` ogni N secondi finché l'utente non chiude il tab.
+- **Fix prescriptivo**: nel block `if (!response.ok)`, anche cleanup:
+  ```js
+  if (!response.ok) {
+      if (response.status === 404 || response.status === 503) {
+          sessionStorage.removeItem('activeJobId');
+          if (_progressPollInterval) clearInterval(_progressPollInterval);
+          hideProgressBanner();
+      }
+      return;
+  }
+  ```
+- **Severity = 🔵 INFO**. Cluster con `[03.14.34]` (DB-backed progress) — quel fix ha introdotto questo edge case. Deployment scope: `🏢☁️ both`.
+- **Discovered**: 2026-04-30
+
+---
+
+## 03.19 — License page + License limit + Activate Online — 2026-04-30
+
+### [03.19.1] ✅ **IMPLICITLY VERIFIED `[03.14.9]`** — License page version corretta
+
+- **Tab**: License page → click `Check` button
+- **Actual**: UI mostra **"SentriKat v1.0.0-beta.6 — Up to date (v1.0.0-beta.6)"** in verde (era "Up to date beta.2" pre-fix VERSION file).
+- **Network**: `GET /api/updates/check` → 200 OK, response JSON. Headers nginx + content-security-policy + permissions-policy presenti (cluster `[05.9.1]` CSP one-shot fix lato web non si applica a on-prem core, qui è ancora la CSP doppia from beta.6 default — non bug).
+- **Note**: il check va al backend Flask `/api/updates/check`, che probabilmente fa server-side call a `license.sentrikat.com`. Browser non vede la chiamata remota.
+- **Cross-ref**: chiude `[03.14.9]` come verified.
+- **Severity**: 🟢 OK 2026-04-30
+
+### [03.19.2] 🟢 OK — License limit enforcement message chiaro
+
+- **Steps**: Users & Access → Add User con email valida + password che rispetta policy
+- **Actual**: error toast "**Demo version limit: 1 users. Upgrade to Professional for unlimited.**"
+- **Bonus**: password policy enforcement parallelo: "Password should contain uppercase, lowercase, and numbers. Check your organization's password policy." (l'utente aveva fornito password senza policy, OK comportamento).
+- **Cluster `[03.14.10]` RE-CONFIRMED**: 3 nomi per lo stesso tier:
+  - Limit error: "**Demo version**"
+  - Health Check License Status badge: "**COMMUNITY**" (vedi `[03.18.2]`)
+  - Handbook + landing site `sentrikat.com/pricing`: "**Community**"
+  - License page header: "**Free**" (cluster con `[05.21]` Plans page card "Free")
+  → 4 nomi diversi per il tier 0/free/community/demo. Bug terminology HIGH escalato in `[03.14.10.expand]` cross-repo.
+- **Severity**: 🟢 OK funzionale, 🟡 cluster terminology aperto
+
+### [03.19.3] 🟢 OK — Activate Online con codice invalido → error chiaro
+
+- **Steps**: License → Activate Online → inserisci `INVALID-CODE-XXXX-1234`
+- **Actual**: error UI "**Activation code not found. Please check the code and try again.**"
+- **Quality**: messaggio actionable + grammaticalmente corretto. Niente stack trace o status code raw.
+- **Severity**: 🟢 OK
+
+### Test follow-up Phase 03.19
+
+- [ ] **License Check con server irraggiungibile**: `docker network` blockare `license.sentrikat.com` → click Check → atteso error UX chiaro (non spinner infinito).
+- [ ] **License Check con beta.7 disponibile**: simulare upgrade quando il license-server pubblica nuova version → UI deve mostrare "Update available v1.0.0-beta.7".
+- [ ] **Activate Online con codice scaduto** (vs invalido): atteso error specifico "Activation code expired" non solo "not found".
+- [ ] **Activate Online con codice valido**: serve license PRO reale per test. Differred a sessione Pro.
+- [ ] **License limit org**: Users limite testato OK ✓; verifica anche **Organizations** limit (Community = 1/1) → atteso stesso message pattern.
+- [ ] **Cluster terminology fix `[03.14.10.expand]`**: standardizzare a 1 nome unico (es. "Community") in tutti i 4+ punti dell'UI/email/handbook.
+
