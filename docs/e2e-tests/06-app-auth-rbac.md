@@ -589,3 +589,82 @@ System
   - Questa è **asimmetria intenzionale** (SaaS paga un canone, on-prem Community è free-with-limit) oppure **nuovo bug** di inconsistenza tier-mapping
 - **Follow-up TODO 06.13.1a**: sul SaaS Starter, dopo fix del cluster email, creare un agent key + deploy + vedere se su **SaaS** l'agent riesce a pushare (mentre on-prem Community NO). Se funziona → conferma asimmetria intenzionale, se fallisce con stesso messaggio → bug gating SaaS
 - **Discovered (re-check)**: 2026-04-25
+
+---
+
+## 06.14 — Follow-up TODO sweep — 2026-04-30
+
+> Re-test orchestrato dei TODO segnati durante le sessioni precedenti, ora che Phase 04 è sbloccata e i fix recenti (524208b, 23ce9da, backfill round-2) sono in prod.
+
+### [06.3.4] ✅ Update / Delete user — re-tested (org admin scope)
+
+- **User loggato**: `cliente1@test.com` (org admin di Acme Italia SRL).
+- **Edit user**: tentato cambio username/email → error "**Only super admins can change usernames**" → vedi `[06.3.12]` sotto per design issue.
+- **Delete user**: action presente.
+- **Severity**: 🟢 funzionalità presente, cluster permission model `[06.3.12]` aperto.
+
+### [06.3.7a] ✅ Disabled user login → reject confermato
+
+- Disable user → tentativo login da incognito con quelle credenziali → reject con messaggio chiaro (utente conferma OK).
+- **Severity**: 🟢 OK chiude `[06.3.7a]`.
+
+### [06.3.12] 🟡 **WARN** — Permission model org admin: review necessaria
+
+- **Tipo**: 🟡 design issue, non bug isolato
+- **Sintomo**: org admin (`cliente1@test.com`) tenta di modificare username/email di un user nella **propria org** → bloccato con "Only super admins can change usernames".
+- **Domanda valida sollevata dall'utente**: in un SaaS multi-tenant, "super admin" = noi sviluppatori, non il customer. L'org admin del customer dovrebbe avere pieno controllo della SUA org. Ma sicurezza: cambiare email senza notifica = attack vector.
+- **Pattern industria SaaS**:
+  - **Display name (`full_name`)** → org admin CAN edit. Cosmetico.
+  - **Username** → **immutabile dopo creazione** (GitHub/Slack/Notion/Atlassian/M365). Rompe SSO/audit/joins. Comportamento attuale SentriKat è in linea con la prassi MA messaggio UX sbagliato — customer non sa chi è super admin (siamo noi). **Fix UX**: "Username is permanent and cannot be changed".
+  - **Email** → 🥇 pattern Stripe/AWS/Google: solo l'utente STESSO può cambiare la SUA email + conferma link sulla nuova address. Org admin non può.
+  - **Password** → org admin **NON** setta password. Può solo trigger **Reset Password** (email magic link). Pattern universale.
+- **Fix prescriptivo**:
+  1. Cambiare error message su username change → "Username is permanent and cannot be changed."
+  2. Aggiungere bottone "Reset Password" visibile a org admin per ogni user della sua org.
+  3. Implementare email change flow: user-self only, con confirmation link.
+  4. "Edit Display Name" abilitato per org admin.
+  5. Documentare in Admin Guide il modello org-admin vs super-admin.
+- **Severity = 🟡 WARN**: codice attuale è ragionevole ma UX/coverage incompleto.
+- **Discovered**: 2026-04-30
+
+### [06.8.2] ✅ SLA setup già configurato (cross-ref `[06.8.2a]`)
+
+- SLA Compliance widget popolato:
+  - CRITICAL within 1d → 0% (0 OK / **1 overdue** / 1 total) — overdue = Adobe Acrobat
+  - HIGH within 30d → 100% (249 OK / 0 / 249)
+  - MEDIUM within 90d → 100% (145 OK / 0 / 145)
+  - LOW within 180d → 100% (17 OK / 0 / 17)
+- **Remediation Overview**: 14 products, 412 total open CVEs, 1 critical, 0 actively exploited. Highest impact: Adobe Acrobat Reader DC MUI (349 CVEs).
+- **Severity**: 🟢 OK chiude `[06.8.2a]`.
+
+### [06.9.2] 🔴 **HIGH** — Assignment state transitions tutti ritornano 400
+
+- **Tab**: Assignments → click row → modal "Assignment detail #1"
+- **Steps**: click `In progress` o `Resolved` o `Accepted risk` o `Delete`
+- **Actual**: tutti e 4 i bottoni → **HTTP 400**
+- **Expected**: state transition Open → In Progress (etc.) con persistenza + audit log entry
+- **Impatto**: feature core "remediation workflow" morta. Customer può solo READ assignments, non aggiornare. Senza state transitions:
+  - SLA tracking bugiardo (assignment overdue ma irrisolvibile)
+  - Workflow ticketing inutile
+  - Audit log non popolato
+- **Severity = 🔴 HIGH**
+- **Possibile root cause**: API endpoint `/api/v1/assignments/<id>/transition` richiede payload o query param mancante. DevTools Network → catturare body 400 → quasi sicuramente dice quale field manca.
+- **Test follow-up post-fix**: verificare audit log entry per ogni transizione (cluster `[05.5.1]`).
+- **Discovered**: 2026-04-30
+
+### [06.9.3] 🟡 **WARN** — Assignments table CVE column mostra HTML markup raw `<span class="text-muted">—</span>`
+
+- **Sintomo**: colonna CVE row Adobe mostra letteralmente la stringa **`<span class="text-muted">—</span>`** invece di renderizzare "—" muted. Il modal detail invece mostra "—" correttamente.
+- **Root cause**: backend memorizza/restituisce CVE-vuoto come HTML markup invece di null/em-dash. Renderer table escapa l'HTML (XSS protection → mostra come testo). Renderer modal applica innerHTML correttamente.
+- **Anti-pattern security**: mescolare HTML nel data layer. Se renderer table cambia in futuro (innerHTML), exploit XSS possibile.
+- **Fix prescriptivo**:
+  1. Backend: store/return null o "—" pulito. Niente HTML nel data layer.
+  2. Frontend: applicare classe `text-muted` nel template, non nel dato.
+- **Severity = 🟡 WARN** anti-pattern + cosmetico immediato. Cluster con `[05.14.1]` (badge-green leak) + `[05.21.2]` (-1 leak) → pattern "data presentation mixing".
+- **Discovered**: 2026-04-30
+
+### [06.10.7a] ✅ SBOM Export download funzionante in Starter
+
+- L'utente conferma SBOM Export (JSON/CycloneDX/SPDX) **funziona** in Starter SaaS.
+- **Cluster `[02.7.11]`**: la mismatch è solo nel display "Features Included" matrix (Starter dice SBOM ❌ ma in pratica ✅). Display bug, non gating.
+- **Severity**: 🟢 OK funzionale. `[02.7.11]` resta aperto (display fix).
