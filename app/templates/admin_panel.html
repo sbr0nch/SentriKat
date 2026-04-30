@@ -2226,7 +2226,21 @@
                             <form id="securitySettingsForm">
                                 <div class="row g-3">
                                     <div class="col-12">
-                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-clock me-2"></i>Session Settings</h6>
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-shield-check me-2"></i>Compliance Preset</h6>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="compliancePreset" class="form-label fw-semibold">Apply preset</label>
+                                        <select class="form-select" id="compliancePreset">
+                                            <option value="custom">Custom (manual)</option>
+                                            <option value="nist" selected>NIST SP 800-63B</option>
+                                            <option value="soc2">SOC 2</option>
+                                            <option value="iso27001">ISO/IEC 27001</option>
+                                            <option value="pci_dss">PCI-DSS v4.0</option>
+                                        </select>
+                                        <small class="form-text text-muted">Applying a preset toggles 2FA, password complexity, and SSL verification to compliance-coherent values. Choose Custom to manage each setting individually.</small>
+                                    </div>
+                                    <div class="col-12">
+                                        <h6 class="text-muted border-bottom pb-2 mt-3"><i class="bi bi-clock me-2"></i>Session Settings</h6>
                                     </div>
                                     <div class="col-md-6">
                                         <label for="sessionTimeout" class="form-label fw-semibold">Session Timeout (minutes)</label>

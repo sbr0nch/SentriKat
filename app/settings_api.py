@@ -1043,7 +1043,10 @@ def get_security_settings():
         'password_require_numbers': get_setting('password_require_numbers', 'true') == 'true',
         'password_require_special': get_setting('password_require_special', 'false') == 'true',
         'password_expiry_days': int(get_setting('password_expiry_days', '0')),  # 0 = disabled
-        'require_2fa': get_setting('require_2fa', 'false') == 'true'
+        'require_2fa': get_setting('require_2fa', 'false') == 'true',
+        # [03.16.2] compliance preset — UI helper that drives the toggles
+        # above. Persisted only so the dropdown remembers the last choice.
+        'compliance_preset': get_setting('compliance_preset', 'nist'),
     }
     return jsonify(settings)
 
@@ -1064,6 +1067,9 @@ def save_security_settings():
         set_setting('password_require_special', 'true' if data.get('password_require_special') else 'false', 'security', 'Require special character')
         set_setting('password_expiry_days', str(data.get('password_expiry_days', 0)), 'security', 'Password expiration (days, 0 = disabled)')
         set_setting('require_2fa', 'true' if data.get('require_2fa') else 'false', 'security', 'Require 2FA for all local users')
+        preset = data.get('compliance_preset', 'nist')
+        if preset in ('custom', 'nist', 'soc2', 'iso27001', 'pci_dss'):
+            set_setting('compliance_preset', preset, 'security', 'Compliance preset selection')
 
         log_audit_event('UPDATE', 'settings', details={
             'category': 'security',
