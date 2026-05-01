@@ -1132,6 +1132,7 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
   - Security: un 500 può esporre stack trace in dev mode; in prod idealmente dovrebbe loggare e ritornare 400 / 500 generico con `Sentry ID` per debug
 - **Fix candidato**: wrap di `/api/integrations/issue-tracker/test` con try/except che catturi `SSRFError` (o equivalente) e restituisca 400 strutturato
 - **Discovered**: 2026-04-23
+- **🔧 Root cause + Fix 2026-05-01** (commit pending): non era SSRFError ma `ValueError` da `JiraTracker.__init__()` (`app/issue_trackers.py:67` `raise ValueError(f"Invalid Jira URL: {error}")` quando `validate_url_for_request` fallisce). Catturato dal `except Exception` generico in `test_issue_tracker()` → 500. Fix in `app/integrations_api.py:2142`: 3 branch separati: (1) `ValueError` → 400 con `error` originale (validation/SSRF/missing field); (2) `requests.ConnectionError`/`Timeout`/`SSLError` → 502 con `Connection to tracker failed: <ExceptionName>` (upstream issue, non nostro); (3) generic Exception → 500 ma con `logger.exception` server-side + messaggio client sanitizzato "Internal error testing tracker connection. Check server logs.". Verifica pending: Test Connection Jira con URL privato in `FLASK_ENV=production` → DevTools Network 400 + body `{"error": "Invalid Jira URL: URL must not target..."}`. Webhook tracker resta a 200 con success=false (è già strutturato).
 
 #### [03.11.5.4] 🟡 Warning — log CRITI ripetuto per richiesta invece di 1 volta al boot
 

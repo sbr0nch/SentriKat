@@ -196,6 +196,7 @@ System
 - **Fix candidato**: verificare il router client-side per handling del query param; alternativamente redirect pulito a `/profile` (senza query) dopo l'azione
 - **Follow-up TODO 06.3.5a**: verificare con DevTools Network se il server-side request ha ritornato 200/302 ma il client-side ha fatto render 404, oppure server ha ritornato 404 davvero
 - **Discovered**: 2026-04-25
+- **🔧 Root cause + Fix 2026-05-01** (commit pending): non c'è nessun client-side render strano — il path `/profile` **non esiste come route Flask**. Il 2FA setup vive in un Bootstrap modal in `base.html` apribile via dropdown user → "Security Settings" → `openSecuritySettings()`. Il login redirect (`login.html:468,530`) mandava su `/profile?setup_2fa=required` senza nessun handler. Refresh "auto-recuperava" perché la dashboard caricava normalmente nascondendo l'errore. Fix: redirect cambiato a `/?setup_2fa=required` (root, route esiste) + `DOMContentLoaded` listener in `base.html` che, se trova `setup_2fa=required`, apre `openSecuritySettings()` automaticamente e ripulisce la query string via `history.replaceState`. Verifica pending: admin force 2FA su user → user logga → atterra su dashboard con modal Security già aperto + URL pulito.
 
 ### [06.3.6] Dim 3 Update role user ✅
 
@@ -387,6 +388,7 @@ System
 - **Fix candidato (per fase fix)**: la label "Latest" deve essere fetchata da un endpoint `/api/releases/latest` che query GitHub Releases API (o un cache interno aggiornato via `license_heartbeat` job ogni 12h)
 - **Follow-up TODO 06.10.2a**: verificare se la stessa label compare anche in on-prem → se sì aggiornare scope a `🏢☁️ both`
 - **Discovered**: 2026-04-25
+- **🔧 Root cause + Fix 2026-05-01** (commit pending): la versione **non era hardcoded a `1.0.0`**. `_get_latest_agent_versions()` in `app/agent_api.py:4393` fa `APP_VERSION.split('-')[0]` per stripppare il pre-release (es. `1.0.0-beta.6` → `1.0.0`). Era un workaround perché `_version_compare` faceva `int(x)` su ogni dotted part e crashava sul `0-beta`. Stripping rendeva la comparison numerica funzionante ma mostrava label errata. **Doppio fix**: (1) restituire `APP_VERSION` intero senza strip (`1.0.0-beta.6`); (2) `_version_compare` ora semver-aware (https://semver.org/#spec-item-11): pre-release ranks lower del release release puro, identifiers numerici < alphanumerici, dot-by-dot compare. Test cases inclusi nel commit (9 casi: equal, beta vs release, beta vs beta, rc vs beta, alpha < alpha.1, ecc.) — tutti pass. Verifica pending: Endpoints page mostra `Latest: linux: v1.0.0-beta.6, ...` corretto + agent installati appaiono `current` solo se versione esattamente uguale.
 
 ### [06.10.3] 🔵 NVD online/offline indicator fluttua dinamicamente
 
@@ -491,6 +493,7 @@ System
 - **Fix candidato**: aggiungere `Alert Management` come terza tab nella tab bar di Settings (attualmente solo 2). Così le 3 voci sidebar e le 3 tab combaciano
 - **Cross-ref [02.7.8]**: breadcrumb "Home / Administration" inconsistente su SaaS, stessa area navigation rotta
 - **Discovered**: 2026-04-25
+- **🔧 Fix 2026-05-01** (commit pending): non era spostabile dentro `admin_panel.html` (`alerts_settings.html` è una pagina standalone con widget complessi specifici delivery channels), quindi cross-link bidirectional. (1) `alerts_settings.html`: aggiunto `nav-tabs` header in cima con 3 tab — Alert Management active, Email & Notifications + Subscription come link a `/admin-panel#settings:email` / `#settings:subscription`. (2) `admin_panel.html` settings tab bar: aggiunto `<a>` link-style pill "Alert Management" prima del tab Email che linka a `/alerts/settings`. Risultato: da qualunque delle 3 pagine, le altre 2 sono visibili e raggiungibili nella tab bar. Sidebar grouping invariata. Verifica pending: navigare via tab bar tra le 3 pagine senza dover ripiegare sulla sidebar.
 
 ### [06.11.3] 🔵 Info — Delivery badges `NO EMAILS` / `NO SMTP` visibili per quick diagnosis
 

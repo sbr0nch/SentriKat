@@ -5756,6 +5756,24 @@
         document.getElementById('verify2FACode')?.addEventListener('input', function(e) {
             this.value = this.value.replace(/[^0-9]/g, '').slice(0, 6);
         });
+
+        // [06.3.5] Open the Security modal automatically when login lands on
+        // /?setup_2fa=required (admin forced 2FA setup). Old code redirected
+        // to /profile which produced a 404 — there is no /profile route.
+        document.addEventListener('DOMContentLoaded', function() {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('setup_2fa') === 'required') {
+                if (typeof openSecuritySettings === 'function') {
+                    setTimeout(openSecuritySettings, 100);
+                }
+                // Drop the query so a refresh doesn't loop the modal open.
+                params.delete('setup_2fa');
+                const cleaned = window.location.pathname +
+                    (params.toString() ? '?' + params.toString() : '') +
+                    window.location.hash;
+                history.replaceState(null, '', cleaned);
+            }
+        });
     </script>
 
     <!-- Session Timeout Handler -->
