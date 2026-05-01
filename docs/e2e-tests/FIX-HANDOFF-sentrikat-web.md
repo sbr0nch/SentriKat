@@ -456,3 +456,47 @@ Scrivete un Progress log nello stesso file (sezione "🛑 UPDATE 2026-04-29") co
 - Sign Out: ✅ funziona
 - Console F12 admin pages: zero CSP errors visibili dall'utente.
 - `[05.5.1]` `[05.6.1]` da ri-verificare puntualmente lato `portal.sentrikat.com/admin/users` (last_login admin) e `portal.sentrikat.com/admin/logs` (audit entries) — eseguire dopo aver chiuso il sync core in corso.
+
+---
+
+## ✅ Progress log — 2026-05-01 (sentrikat-web Round 1+2)
+
+**Branch**: `claude/fix-sentrikat-web-handoff-I26pC` (5 commit pushati, no PR auto — la apre l'utente).
+
+| Bug | Sev | Commit | Note tecniche |
+|---|---|---|---|
+| `[05.13.1]` + `[05.22.1]` | 🔴 | `a1e2169` | Cluster auth: rimossi 2 `verify_admin_key` locali in `newsletter.py` e `ea_tenants.py`, ridiretti alla canonica in `admin.py:95` (accetta sia env API key sia JWT user-token). -36 righe nette. |
+| `[05.1.1]` | 🔴 | `b5bcce0` | Estratto `_do_sync_github_releases(db)` helper riusabile + `releases_sync_scheduler()` (boot+60s, poi ogni 6h) registrato accanto agli altri 8 schedulers in `lifespan`. |
+| `[05.4.1]` | 🔴 | `6fd0041` | `/api/health/services` ora include `_get_data_sources_health()` che legge ultimo probe per ogni `DataSource` enum + folds nel campo `overall`. Banner pubblico onesto: non più "All Operational" mentre NVD/CVE.org sono DOWN. Aggiunto `data_sources[]` nella response per UI iteration future. |
+| `[05.3.1]` | 🔴 | `0679375` | Frontend `datasources.astro` trattava la response come array ma è envelope `{sources:{...}, summary:{...}}` → un solo card bogus "Unknown" status undefined contato come Down. Unwrap via `Object.values(data.sources)`. |
+| `[05.8.1]` | 🔴 | `0679375` | `get_system_info` leggeva `os.getenv("RSA_PRIVATE_KEY")`, ma il signer carica da `settings.license_private_key_path` (file). Sostituito con check reale del file. |
+
+### Note tecniche da segnalare al verify
+
+1. Il fix `[05.13.1]`/`[05.22.1]` introduce `from app.api.admin import verify_admin_key` in `ea_tenants.py` e `newsletter.py`. Non circolare oggi (`admin.py` importa da `app.api.provision` ma non da newsletter/ea_tenants). Se in futuro viene aggiunto un import da `admin.py` verso uno di questi due, attenzione.
+2. Lo scheduler releases logga warning su HTTPException (es. `GITHUB_TOKEN` non valido) ma non blocca. Se il token è rotto, le release restano vuote silenziosamente — solo log warning. Da verificare al primo boot post-deploy.
+3. `[05.4.1]` rispetta semantica `DataSourceStatus.UNKNOWN → 'unknown' → NON peggiora overall`. Se il probe non è mai stato scritto (DB nuovo) il banner resta verde. **Comportamento intenzionale** per evitare falsi positivi al primo boot, MA va chiuso da `[05.3.1]` (seed/migration) — fixato nello stesso round, OK.
+
+### `[05.21.1]` — NOT taken in Round 2 (intenzionale)
+
+**Correzione di premessa importante**: la "4ª fonte" landing **NON è cross-repo**. `landing/` è una directory dentro `sentrikat-web` (mono-repo) — vedi `landing/src/pages/`, `landing/src/components/Pricing.astro`. Confermato dal checkout della sessione web.
+
+Implicazioni:
+- Niente handoff a un altro repo per la 4ª fonte.
+- Il fix resta strutturale: unificare Pydantic model in `license-server` + Pricing Calculator + Reference table + landing `Pricing.astro`.
+- **Round 3 dedicato**, non più "out of scope".
+
+### Verify pending (per l'utente al deploy)
+
+- `[05.13.1]` `/admin/newsletter` subscribers list popola (Active=6 atteso).
+- `[05.22.1]` `/admin/saas-tenants` stats card mostra numeri reali (EA Capacity 6/30 atteso).
+- `[05.1.1]` `/admin/releases` pagina mostra release (>0 dopo primo cycle scheduler, ~60s dopo boot).
+- `[05.4.1]` status pubblico riflette stato reale data sources.
+- `[05.3.1]` no più card "Unknown" bogus su `/admin/datasources`.
+- `[05.8.1]` UI `RSA_PRIVATE_KEY` mostra `configured` se file presente.
+
+### Round 3 candidates (dopo PR merge)
+
+- `[05.21.1]` 🔴 HIGH — pricing 3-source-of-truth (4ª fonte landing inclusa, mono-repo).
+- `[04.2.2]` 🟠 OPEN — Chart.js `new Function()` CSP (admin only, `unsafe-eval` o bundle locale).
+- 3 WARN + 11 INFO residui.
