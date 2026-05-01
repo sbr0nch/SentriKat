@@ -4401,11 +4401,16 @@ def _get_latest_agent_versions():
     'latest_agent_version_linux', 'latest_agent_version_windows',
     'latest_agent_version_macos' — useful for pinning a platform to an older
     version or testing a new agent on one platform first.
+
+    [06.10.2] The full semver string (e.g. "1.0.0-beta.6") is returned as-is.
+    The previous implementation stripped the pre-release suffix to keep the
+    numeric comparison happy, which made the UI label "Latest: v1.0.0"
+    while every agent in the fleet ran v1.0.0-beta.6 — they all looked
+    "current" against a fictitious 1.0.0 release that never shipped.
+    _version_compare below now understands semver pre-releases.
     """
     from app import APP_VERSION
-    # Strip pre-release suffixes (e.g., "1.0.0-beta.1" -> "1.0.0") for version
-    # comparison since agents use simple numeric version strings
-    base_version = APP_VERSION.split('-')[0] if APP_VERSION else '0.0.0'
+    base_version = APP_VERSION if APP_VERSION else '0.0.0'
     versions = {
         'linux': base_version,
         'windows': base_version,
@@ -4757,24 +4762,73 @@ def _inject_agent_version(script_content, version, platform):
 
 def _version_compare(v1, v2):
     """
-    Compare two version strings (e.g., '1.0.0' vs '1.1.0').
-    Returns: -1 if v1 < v2, 0 if equal, 1 if v1 > v2
+    Compare two version strings, semver-aware.
+
+    Handles pre-release suffixes per https://semver.org/#spec-item-11:
+        1.0.0-alpha < 1.0.0-beta < 1.0.0-rc.1 < 1.0.0
+    A version with a pre-release ranks lower than the same numeric
+    version without one. Within pre-releases, identifiers are compared
+    dot-by-dot — integer identifiers numerically, alphanumeric ones
+    lexicographically (numerics rank lower than alphanumerics).
+
+    Returns: -1 if v1 < v2, 0 if equal, 1 if v1 > v2.
     """
+    def _parse(v):
+        s = str(v).lstrip('v').strip()
+        core, _, pre = s.partition('-')
+        try:
+            nums = tuple(int(x) for x in core.split('.'))
+        except ValueError:
+            nums = (0,)
+        return nums, pre
+
+    def _cmp_pre_ids(a, b):
+        # numeric identifiers always have lower precedence than alphanumerics
+        a_is_num = a.isdigit()
+        b_is_num = b.isdigit()
+        if a_is_num and b_is_num:
+            ai, bi = int(a), int(b)
+            return -1 if ai < bi else (1 if ai > bi else 0)
+        if a_is_num:
+            return -1
+        if b_is_num:
+            return 1
+        return -1 if a < b else (1 if a > b else 0)
+
     try:
-        parts1 = [int(x) for x in v1.split('.')]
-        parts2 = [int(x) for x in v2.split('.')]
+        n1, pre1 = _parse(v1)
+        n2, pre2 = _parse(v2)
 
-        # Pad shorter version with zeros
-        while len(parts1) < len(parts2):
-            parts1.append(0)
-        while len(parts2) < len(parts1):
-            parts2.append(0)
+        # Pad shorter numeric tuple with zeros
+        if len(n1) < len(n2):
+            n1 = n1 + (0,) * (len(n2) - len(n1))
+        elif len(n2) < len(n1):
+            n2 = n2 + (0,) * (len(n1) - len(n2))
 
-        for p1, p2 in zip(parts1, parts2):
-            if p1 < p2:
-                return -1
-            if p1 > p2:
-                return 1
+        if n1 < n2:
+            return -1
+        if n1 > n2:
+            return 1
+
+        # Numeric parts equal — pre-release decides
+        if pre1 == pre2:
+            return 0
+        if not pre1 and pre2:
+            return 1   # 1.0.0 > 1.0.0-beta
+        if pre1 and not pre2:
+            return -1  # 1.0.0-beta < 1.0.0
+
+        ids1 = pre1.split('.')
+        ids2 = pre2.split('.')
+        for a, b in zip(ids1, ids2):
+            c = _cmp_pre_ids(a, b)
+            if c != 0:
+                return c
+        # Equal so far: shorter pre-release ranks lower (per semver)
+        if len(ids1) < len(ids2):
+            return -1
+        if len(ids1) > len(ids2):
+            return 1
         return 0
     except (ValueError, TypeError, IndexError, AttributeError):
         return 0

@@ -388,6 +388,7 @@ System
 - **Fix candidato (per fase fix)**: la label "Latest" deve essere fetchata da un endpoint `/api/releases/latest` che query GitHub Releases API (o un cache interno aggiornato via `license_heartbeat` job ogni 12h)
 - **Follow-up TODO 06.10.2a**: verificare se la stessa label compare anche in on-prem → se sì aggiornare scope a `🏢☁️ both`
 - **Discovered**: 2026-04-25
+- **🔧 Root cause + Fix 2026-05-01** (commit pending): la versione **non era hardcoded a `1.0.0`**. `_get_latest_agent_versions()` in `app/agent_api.py:4393` fa `APP_VERSION.split('-')[0]` per stripppare il pre-release (es. `1.0.0-beta.6` → `1.0.0`). Era un workaround perché `_version_compare` faceva `int(x)` su ogni dotted part e crashava sul `0-beta`. Stripping rendeva la comparison numerica funzionante ma mostrava label errata. **Doppio fix**: (1) restituire `APP_VERSION` intero senza strip (`1.0.0-beta.6`); (2) `_version_compare` ora semver-aware (https://semver.org/#spec-item-11): pre-release ranks lower del release release puro, identifiers numerici < alphanumerici, dot-by-dot compare. Test cases inclusi nel commit (9 casi: equal, beta vs release, beta vs beta, rc vs beta, alpha < alpha.1, ecc.) — tutti pass. Verifica pending: Endpoints page mostra `Latest: linux: v1.0.0-beta.6, ...` corretto + agent installati appaiono `current` solo se versione esattamente uguale.
 
 ### [06.10.3] 🔵 NVD online/offline indicator fluttua dinamicamente
 
