@@ -334,8 +334,20 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
   - `[03.14.36]` rate limit polling ✅ VERIFIED 2026-04-30 (Network tab F12 durante backfill round-2: ≤15 req/30s).
 - 🟢 OK passati: **110** *(100 + 4 Fase 05 + 6 da Fase 03.14: sync CISA/EPSS/CPE/Auto-Ack code path + Email/Webhook alerts code path)*
 - ⏸️ Test bloccati: 5 (residui solo on-prem dependencies — sbloccabili oggi) + **9 follow-up Fase 05 bloccati da `[05.9.1]`** finché non viene fixato lato `SentriKat-web`
-- ✅ Fix applicati: **20** *(7 core + 13 web)*
-- ✅✅ Fix VERIFIED: **13** su 20 *(round 1: 9 + round 2 oggi: `[03.6.6]/[03.7.2]/[03.7.4]` consolidato + `[03.11.2.3]` LDAP sidebar + `[03.11.4.5]` SSRF design escalation con Test Connection Jira reale → host.docker.internal:8080 in `FLASK_ENV=production` ✅)*. Restano da verificare: `[02.4.1]/[02.4.2]` welcome email.<br>**Sblocco automatico backlog**: `[03.11.4]` (Jira), `[03.11.5]` (Webhook), `[03.11.6.4]` (GitLab), `[03.11.6.8]` (YouTrack), `[03.11.2.9]` (LDAP login E2E indiretto) → da test in produzione mode senza più toccare FLASK_ENV.
+- ✅ Fix applicati: **27** *(14 core + 13 web)* — **+7 core 2026-05-01** branch `claude/resume-sentrikat-KRdT6`
+- ✅✅ Fix VERIFIED: **13** su 20 *(round 1: 9 + round 2 oggi: `[03.6.6]/[03.7.2]/[03.7.4]` consolidato + `[03.11.2.3]` LDAP sidebar + `[03.11.4.5]` SSRF design escalation con Test Connection Jira reale → host.docker.internal:8080 in `FLASK_ENV=production` ✅)*. Restano da verificare: `[02.4.1]/[02.4.2]` welcome email + **7 fix 2026-05-01** (`[03.16.1]` `[03.18.4]` `[06.9.3]` `[06.3.12]` `[06.9.2]` `[03.18.1]` `[03.16.2]` — checklist in `docs/e2e-tests/VERIFY-claude-resume-KRdT6.md`).<br>**Sblocco automatico backlog**: `[03.11.4]` (Jira), `[03.11.5]` (Webhook), `[03.11.6.4]` (GitLab), `[03.11.6.8]` (YouTrack), `[03.11.2.9]` (LDAP login E2E indiretto) → da test in produzione mode senza più toccare FLASK_ENV.
+
+### 2026-05-01 — batch fix `claude/resume-sentrikat-KRdT6` (7 fix core, unverified)
+
+| Bug | Sev | Commit | Fix sintetico |
+|---|---|---|---|
+| `[03.16.1]` | 🔴 | `8818d9d` | SSL Verify default era già ON in 6 punti; aggiunta `confirm()` guard su disabilitazione |
+| `[03.18.4]` | 🔵 | `708a093` | `pollProgress()` cleanup su 404/503 via `hideProgressBanner()` |
+| `[06.9.3]` | 🟡 | `89436ef` | Assignments CVE cell — separato `cveId` (data) da `cveCell` (HTML placeholder) |
+| `[06.3.12]` | 🟡 | `c3b773f` | Username error → "Username is permanent and cannot be changed." (punto 1 del fix prescriptivo; punti 2-5 follow-up) |
+| `[06.9.2]` | 🔴 | `2a44f4b` | Root cause: CSRF token mancante (non payload). 6 fetch (assignments + dashboard) ora passano `X-CSRFToken: getCSRFToken()` |
+| `[03.18.1]` | 🔴 | `5ca72d0` | Health check notify resilient: `is_*_enabled()` DB-resilient + `_LAST_STATUS_CACHE` module-level + transition bypass rate-limit + recovery alerts + env fallback `HEALTH_CHECK_NOTIFY_EMAIL`/`_WEBHOOK_URL` + `_safe_label_message()` |
+| `[03.16.2]` | 🟡 | `1fc1dff` | Compliance preset dropdown (Custom/NIST/SOC2/ISO27001/PCI-DSS) cross-tab apply, default NIST, persisted via `/api/settings/security` |
 
 *(aggiornati a mano ad ogni commit)*
 
