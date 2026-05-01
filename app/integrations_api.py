@@ -2139,8 +2139,31 @@ def test_issue_tracker():
             'tracker_name': tracker.get_tracker_name()
         })
 
+    except ValueError as e:
+        # [03.11.5.3] Validation errors (SSRF blocked, malformed URL, missing
+        # required fields raised from tracker constructors) are 4xx, not 5xx.
+        # Previously these surfaced as 500 INTERNAL SERVER ERROR with no UX
+        # message, which made users think the server was broken when in fact
+        # they had supplied a private URL.
+        return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        # Network failures (DNS, timeout, refused) are upstream-side, not our
+        # bug. Map them to 502 so the UI can present a connectivity message
+        # instead of 'internal server error'. Generic exceptions stay as 500
+        # but get logged with the trace; the client sees a sanitized message.
+        import requests as _req
+        if isinstance(e, (_req.exceptions.ConnectionError,
+                          _req.exceptions.Timeout,
+                          _req.exceptions.SSLError)):
+            return jsonify({
+                'success': False,
+                'error': f'Connection to tracker failed: {type(e).__name__}'
+            }), 502
+        logger.exception("Unexpected error in /api/integrations/issue-tracker/test")
+        return jsonify({
+            'success': False,
+            'error': 'Internal error testing tracker connection. Check server logs.'
+        }), 500
 
 
 @bp.route('/api/integrations/jira/issue-types', methods=['POST'])
