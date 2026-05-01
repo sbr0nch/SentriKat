@@ -121,7 +121,7 @@
     and (subscription.plan.max_organizations or 1) <= 1
 ) %}
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center mb-3">
     <div>
         <h2 class="h4 fw-bold mb-1"><i class="bi bi-bell me-2"></i>Alert Management</h2>
         {% if is_single_org_tenant %}
@@ -131,6 +131,33 @@
         {% endif %}
     </div>
 </div>
+
+{# [06.11.2] Cross-page tab nav. The sidebar groups Alert Management,
+   Email & Notifications, and Subscription as siblings, but Alert
+   Management is a standalone page while the other two live as tabs
+   inside /admin-panel. Without this header strip the user lands on
+   Alert Management and sees no way back to the other two without
+   reaching for the sidebar. The two siblings link out to admin-panel
+   with the right hash so the matching settings tab opens directly. #}
+<ul class="nav nav-tabs mb-4" role="tablist">
+    <li class="nav-item" role="presentation">
+        <a class="nav-link active" aria-current="page" href="/alerts/settings">
+            <i class="bi bi-bell me-1"></i>Alert Management
+        </a>
+    </li>
+    <li class="nav-item" role="presentation">
+        <a class="nav-link" href="/admin-panel#settings:email">
+            <i class="bi bi-envelope me-1"></i>{% if saas_mode and not is_platform_admin %}Email &amp; Notifications{% else %}Email (SMTP){% endif %}
+        </a>
+    </li>
+    {% if saas_mode %}
+    <li class="nav-item" role="presentation">
+        <a class="nav-link" href="/admin-panel#settings:subscription">
+            <i class="bi bi-credit-card me-1"></i>Subscription
+        </a>
+    </li>
+    {% endif %}
+</ul>
 
 <!-- Delivery Channels Overview -->
 {#

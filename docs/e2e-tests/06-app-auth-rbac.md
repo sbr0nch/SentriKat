@@ -493,6 +493,7 @@ System
 - **Fix candidato**: aggiungere `Alert Management` come terza tab nella tab bar di Settings (attualmente solo 2). Così le 3 voci sidebar e le 3 tab combaciano
 - **Cross-ref [02.7.8]**: breadcrumb "Home / Administration" inconsistente su SaaS, stessa area navigation rotta
 - **Discovered**: 2026-04-25
+- **🔧 Fix 2026-05-01** (commit pending): non era spostabile dentro `admin_panel.html` (`alerts_settings.html` è una pagina standalone con widget complessi specifici delivery channels), quindi cross-link bidirectional. (1) `alerts_settings.html`: aggiunto `nav-tabs` header in cima con 3 tab — Alert Management active, Email & Notifications + Subscription come link a `/admin-panel#settings:email` / `#settings:subscription`. (2) `admin_panel.html` settings tab bar: aggiunto `<a>` link-style pill "Alert Management" prima del tab Email che linka a `/alerts/settings`. Risultato: da qualunque delle 3 pagine, le altre 2 sono visibili e raggiungibili nella tab bar. Sidebar grouping invariata. Verifica pending: navigare via tab bar tra le 3 pagine senza dover ripiegare sulla sidebar.
 
 ### [06.11.3] 🔵 Info — Delivery badges `NO EMAILS` / `NO SMTP` visibili per quick diagnosis
 

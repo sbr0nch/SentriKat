@@ -1236,6 +1236,16 @@
                 </li>
                 {% endif %}
                 {% if has_email_tab %}
+                {# [06.11.2] Alert Management is a sibling page (lives at /alerts/settings,
+                   not as a tab inside this panel) but the sidebar groups it with Email
+                   & Subscription. Surface it as a link-style pill here so the trio is
+                   visible from this tab bar too — matches the sidebar grouping and
+                   stops Alert Management from looking like an orphaned section. #}
+                <li class="nav-item" role="presentation">
+                    <a class="nav-link" href="/alerts/settings">
+                        <i class="bi bi-bell me-2"></i>Alert Management
+                    </a>
+                </li>
                 <li class="nav-item" role="presentation">
                     <button class="nav-link {% if not has_auth_tab %}active{% endif %}" id="email-settings-tab" type="button" onclick="showSettingsGroup('email', this)">
                         <i class="bi bi-envelope me-2"></i>{% if saas_mode and not is_platform_admin %}Email & Notifications{% else %}Email & Alerts{% endif %}
