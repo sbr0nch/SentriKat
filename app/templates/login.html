@@ -465,7 +465,7 @@
                         // Admin requires 2FA setup - redirect to security settings
                         showSuccess('Login successful! You are required to set up two-factor authentication. Redirecting to security settings...');
                         setTimeout(() => {
-                            window.location.href = '/profile?setup_2fa=required';
+                            window.location.href = '/?setup_2fa=required';
                         }, 1500);
                     } else {
                         // Success - show message and redirect
@@ -527,7 +527,7 @@
                     } else if (data.must_setup_2fa) {
                         showSuccess('Login successful! Redirecting to security settings...');
                         setTimeout(() => {
-                            window.location.href = '/profile?setup_2fa=required';
+                            window.location.href = '/?setup_2fa=required';
                         }, 1000);
                     } else {
                         window.location.href = nextUrl;
