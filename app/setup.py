@@ -38,17 +38,45 @@ def is_setup_complete():
         return False
 
 def _is_setup_blocked():
-    """Check if setup API calls should be blocked.
+    """Check if setup API calls should be blocked (security-sensitive endpoints).
 
     Returns True if setup is complete AND the user is NOT in an active
     setup wizard session.  Steps 4-6 (seed catalog, proxy, sync) run
     after the org + user are created, so is_setup_complete() is already
     True while the wizard is still in progress.  The session flag lets
     those later steps through.
+
+    [03.6.3] This function is reliable for /create-organization and
+    /create-admin (security-sensitive: they can mint privileges if not
+    gated). For idempotent wizard endpoints (seed-services, save-proxy,
+    initial-sync) the session flag was lost in real reproductions —
+    those now use _is_wizard_window() instead, which is data-driven and
+    survives a session reset.
     """
     if not is_setup_complete():
         return False
     return not session.get('_setup_in_progress')
+
+
+def _is_wizard_window():
+    """True while the setup wizard is still the primary user of the app.
+
+    'Wizard window' = the install has reached step 3 (org + admin
+    created, so is_setup_complete() flips True) but no second user has
+    been invited yet. In that bounded time the idempotent post-step-3
+    endpoints (seed-services, save-proxy, initial-sync) accept POSTs
+    even if the session flag was lost. After the second user lands,
+    the admin UI is available and these endpoints lock down.
+
+    This is intentionally narrower than 'setup_complete?' alone: it
+    closes after the first invite, not at step 3, so the wizard can
+    actually finish steps 4-6 in the real world where session cookies
+    sometimes get rotated mid-flow.
+    """
+    try:
+        return User.query.count() <= 1
+    except Exception:
+        return False
 
 @setup_bp.route('/setup', methods=['GET'])
 def setup_wizard():
@@ -242,8 +270,8 @@ def create_admin_user():
 def save_proxy_settings():
     """Save proxy settings to system settings"""
     try:
-        # Block access after setup is complete (unless wizard is still in progress)
-        if _is_setup_blocked():
+        # [03.6.3] Wizard window only — admin panel handles proxy after.
+        if not _is_wizard_window():
             return jsonify({'error': 'Setup already completed. Use admin panel to manage proxy settings.'}), 403
 
         from app.models import SystemSettings
@@ -298,9 +326,11 @@ def save_proxy_settings():
 def seed_service_catalog():
     """Seed the service catalog with common enterprise services"""
     try:
-        # Block access after setup is complete (unless wizard is still in progress)
-        if _is_setup_blocked():
-            return jsonify({'error': 'Setup already completed.'}), 403
+        # [03.6.3] Allow during the wizard window (org+admin exist, no
+        # second user yet). After someone invites a colleague the admin
+        # panel takes over for catalog management.
+        if not _is_wizard_window():
+            return jsonify({'error': 'Setup already completed. Use the admin panel to seed the catalog.'}), 403
 
         # Check if services already exist
         existing_count = ServiceCatalog.query.count()
@@ -413,8 +443,8 @@ def seed_service_catalog():
 def run_initial_sync():
     """Run initial CISA KEV sync"""
     try:
-        # Block access after setup is complete (unless wizard is still in progress)
-        if _is_setup_blocked():
+        # [03.6.3] Wizard window only — admin panel exposes Sync afterwards.
+        if not _is_wizard_window():
             return jsonify({'error': 'Setup already completed. Use admin panel to trigger sync.'}), 403
 
         # Check if proxy is configured
