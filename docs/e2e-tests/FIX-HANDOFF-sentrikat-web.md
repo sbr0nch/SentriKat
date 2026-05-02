@@ -500,3 +500,47 @@ Implicazioni:
 - `[05.21.1]` 🔴 HIGH — pricing 3-source-of-truth (4ª fonte landing inclusa, mono-repo).
 - `[04.2.2]` 🟠 OPEN — Chart.js `new Function()` CSP (admin only, `unsafe-eval` o bundle locale).
 - 3 WARN + 11 INFO residui.
+
+---
+
+## ✅ Audit `[05.21.1]` 2026-05-01 — Pricing source-of-truth (REPO STATE VERIFIED)
+
+> Audit completato dalla sessione `claude/fix-sentrikat-web-handoff-I26pC` su `sentrikat-web/main`. Sostituisce la mia ipotesi precedente sulle "4 fonti divergenti", che era imprecisa. **Round 3 deve partire da queste premesse**.
+
+### Stato reale — 3 fonti distinte (non 4)
+
+- **`license-server/app/core/plans_config.py`** è già la **canonical SoT** (docstring esplicito "Centralized product configuration — single source of truth"). Espone `get_full_config()` via `GET /api/v1/admin/config/plans` (admin auth).
+- **`portal/src/pages/admin/pricing.astro`** (Calculator + Reference table, **stessa pagina**) legge già `/config/plans` → 100% dinamico.
+- **`portal/src/pages/admin/plans.astro`** tenta `/api/v1/admin/saas/plans` (PROXY a `${SAAS_PROVISION_URL}/plans`, ovvero **SaaS core esterno** `sbr0nch/sentrikat`) e fa fallback su `/config/plans`. Il drift `€199/mo 25/5` osservato in test viene da quel proxy → DB del repo core, NON da divergenza nel codice sentrikat-web.
+- **`landing/src/components/Pricing.astro:14-147`** è hardcoded (TS const arrays: `saasPlans`, `onPremPlans`, `agentPacks`, `compliancePack`).
+
+### Falsi positivi del mio report originale
+
+- I numeri "€4999 vs €249 vs €199" **NON divergono per lo stesso piano**: sono on-prem Pro, SaaS Pro normale, SaaS Pro proxy-stale rispettivamente. Plus l'EA tier (25 agents 5 users) della landing matcha `EA_CONFIG.plans["pro"]` correttamente.
+- Calculator + Reference table contati come 2 fonti separate ma sono la stessa pagina.
+
+### Azioni effettive Round 3 (in ordine, ridotte vs proposta originale)
+
+1. **Public pricing endpoint** — `GET /api/v1/pricing/plans` (no auth, cache-friendly, restituisce `get_full_config()` filtrato per campi pubblici, escludendo chiavi sensibili come `early_access.saas_capacity` se vogliamo).
+2. **Landing build-time fetch** — frontmatter di `landing/src/components/Pricing.astro` sostituisce le const arrays con `await fetch(${PUBLIC_API_URL}/api/v1/pricing/plans)` in fase di build (Astro SSG: il fetch si risolve a build time, NO client runtime). Mappare `saasPlans` da `cfg.saas_plans`, `onPremPlans` da `cfg.onprem_editions`, `eaAgents/eaUsers` da `cfg.early_access.plans[<key>]` per preservare la semantica EA-tier corrente.
+3. **`/admin/plans` SaaS proxy** — decidere: (a) tenere il primary path verso SaaS core e accettare drift cross-repo, (b) rimuoverlo e leggere solo `/config/plans` (cambia semantica: `/admin/plans` mostra canonical config invece dello stato live del SaaS instance). **Decisione architetturale, NON code-fix.**
+4. **Test acceptance** (corretto):
+   - `pricing-consistency.test.ts`: builda landing e parsa `dist/`, fa fetch `/api/v1/pricing/plans` in CI, verifica per ogni `(plan_key, field)`: `landing[plan_key].futureMonthlyPrice === api.saas_plans[plan_key].monthly_eur`, `landing.eaAgents === api.early_access.plans[plan_key].max_agents`, ecc.
+   - **NON** confrontare numeri raw: confrontare `(prodotto, scope EA/non-EA, plan_key)` deve dare identico valore.
+5. **Pydantic model (opzionale)** — `plans_config.py` è dict-based. Refactor a `class PricingPlan(BaseModel)` migliora type safety ma è cosmetico, non urgente.
+
+**Effort stimato**: 1 endpoint pubblico + refactor frontmatter landing + test CI. ~150 righe nette. Niente coordinamento landing-as-other-repo (è mono-repo).
+
+### NON-azioni
+
+- Non creare `license-server/app/pricing.py`: usare il file esistente `plans_config.py`.
+- Non toccare `pricing.astro` admin (già dinamico).
+- Non toccare i numeri in `plans_config.py` come parte del fix (separato per business decision).
+
+### Decisione architetturale richiesta all'utente prima di Round 3
+
+**Scelta su `/admin/plans` proxy** (punto 3 sopra): mantenere o eliminare? Implicazioni:
+- **Mantieni proxy `/saas/plans`**: `/admin/plans` resta "fonte vera" per lo stato live SaaS (multi-tenant). Drift è bug di sync, non architetturale. Va fixato sul SaaS core.
+- **Rimuovi proxy**: `/admin/plans` diventa specchio di `/config/plans` (canonical). Perde visibilità su stato live SaaS multi-tenant ma elimina cross-repo drift.
+
+L'utente deve scegliere prima che Round 3 inizi.
