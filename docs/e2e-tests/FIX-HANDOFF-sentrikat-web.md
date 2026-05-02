@@ -523,7 +523,11 @@ Implicazioni:
 
 1. **Public pricing endpoint** — `GET /api/v1/pricing/plans` (no auth, cache-friendly, restituisce `get_full_config()` filtrato per campi pubblici, escludendo chiavi sensibili come `early_access.saas_capacity` se vogliamo).
 2. **Landing build-time fetch** — frontmatter di `landing/src/components/Pricing.astro` sostituisce le const arrays con `await fetch(${PUBLIC_API_URL}/api/v1/pricing/plans)` in fase di build (Astro SSG: il fetch si risolve a build time, NO client runtime). Mappare `saasPlans` da `cfg.saas_plans`, `onPremPlans` da `cfg.onprem_editions`, `eaAgents/eaUsers` da `cfg.early_access.plans[<key>]` per preservare la semantica EA-tier corrente.
-3. **`/admin/plans` SaaS proxy** — decidere: (a) tenere il primary path verso SaaS core e accettare drift cross-repo, (b) rimuoverlo e leggere solo `/config/plans` (cambia semantica: `/admin/plans` mostra canonical config invece dello stato live del SaaS instance). **Decisione architetturale, NON code-fix.**
+3. **`/admin/plans` SaaS proxy** — **DECISIONE 2026-05-01: opzione B, rimuovere il proxy.** L'utente ha confermato la scelta industry-standard (Stripe/GitHub/Atlassian pattern): single source of truth su `plans_config.py`, niente fallback cross-repo. Implementazione concreta:
+   - Rimuovere il primary path verso `${SAAS_PROVISION_URL}/plans` da `portal/src/pages/admin/plans.astro`
+   - La pagina ora legge solo `/api/v1/admin/config/plans` (canonical), come già fa `pricing.astro`
+   - **Vista live tenant count** (es. "47 tenant attivi su PRO"): NON va incrociata col display dei piani. Se serve, aggiungere endpoint dedicato separato `/api/v1/admin/tenants/by-plan` che ritorna solo `{pro: 47, starter: 23, ...}` — feature nuova, fuori scope di Round 3, da pianificare quando il count tenant > 50 e diventa preziosa.
+   - Acceptance: cambiare `monthly_eur` per "pro" in `plans_config.py` → `/admin/plans` mostra il nuovo numero al refresh (no più drift verso il SaaS core).
 4. **Test acceptance** (corretto):
    - `pricing-consistency.test.ts`: builda landing e parsa `dist/`, fa fetch `/api/v1/pricing/plans` in CI, verifica per ogni `(plan_key, field)`: `landing[plan_key].futureMonthlyPrice === api.saas_plans[plan_key].monthly_eur`, `landing.eaAgents === api.early_access.plans[plan_key].max_agents`, ecc.
    - **NON** confrontare numeri raw: confrontare `(prodotto, scope EA/non-EA, plan_key)` deve dare identico valore.
@@ -537,10 +541,10 @@ Implicazioni:
 - Non toccare `pricing.astro` admin (già dinamico).
 - Non toccare i numeri in `plans_config.py` come parte del fix (separato per business decision).
 
-### Decisione architetturale richiesta all'utente prima di Round 3
+### Decisione architetturale — RISOLTA 2026-05-01
 
-**Scelta su `/admin/plans` proxy** (punto 3 sopra): mantenere o eliminare? Implicazioni:
-- **Mantieni proxy `/saas/plans`**: `/admin/plans` resta "fonte vera" per lo stato live SaaS (multi-tenant). Drift è bug di sync, non architetturale. Va fixato sul SaaS core.
-- **Rimuovi proxy**: `/admin/plans` diventa specchio di `/config/plans` (canonical). Perde visibilità su stato live SaaS multi-tenant ma elimina cross-repo drift.
+**`/admin/plans` proxy: RIMUOVERE (opzione B).** Industry-standard pattern (Stripe / GitHub / Atlassian / Vercel): single config source + N consumer che leggono via API. Niente fallback cross-repo. Niente lavoro manuale di sync prezzi tra `sentrikat-web` e `sentrikat` core.
 
-L'utente deve scegliere prima che Round 3 inizi.
+Trade-off accettato consciamente: la vista "live tenant count per plan" sparisce dal portal admin. Recovery path se serve in futuro: endpoint dedicato `/api/v1/admin/tenants/by-plan` (~1h di lavoro), separato dalla config dei piani.
+
+Round 3 deve implementare le 5 azioni con questa decisione fissa.
