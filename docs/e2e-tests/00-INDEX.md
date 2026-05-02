@@ -334,7 +334,7 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
   - `[03.14.36]` rate limit polling ✅ VERIFIED 2026-04-30 (Network tab F12 durante backfill round-2: ≤15 req/30s).
 - 🟢 OK passati: **110** *(100 + 4 Fase 05 + 6 da Fase 03.14: sync CISA/EPSS/CPE/Auto-Ack code path + Email/Webhook alerts code path)*
 - ⏸️ Test bloccati: 5 (residui solo on-prem dependencies — sbloccabili oggi) + **9 follow-up Fase 05 bloccati da `[05.9.1]`** finché non viene fixato lato `SentriKat-web`
-- ✅ Fix applicati: **27** *(14 core + 13 web)* — **+7 core 2026-05-01** branch `claude/resume-sentrikat-KRdT6`
+- ✅ Fix applicati: **35** *(18 core + 13 web pre-2026-05-01 + 5 web Round 1+2 2026-05-01)* — **+7 core Round 1+2 + 4 core Round 3 + 1 rebranding cluster + 1 LDAP UX callout + 1 [06.4.1] audit 2026-05-01** branch `claude/resume-sentrikat-KRdT6` + `claude/fix-round3-core-316ec1`
 - ✅✅ Fix VERIFIED: **13** su 20 *(round 1: 9 + round 2 oggi: `[03.6.6]/[03.7.2]/[03.7.4]` consolidato + `[03.11.2.3]` LDAP sidebar + `[03.11.4.5]` SSRF design escalation con Test Connection Jira reale → host.docker.internal:8080 in `FLASK_ENV=production` ✅)*. Restano da verificare: `[02.4.1]/[02.4.2]` welcome email + **7 fix 2026-05-01** (`[03.16.1]` `[03.18.4]` `[06.9.3]` `[06.3.12]` `[06.9.2]` `[03.18.1]` `[03.16.2]` — checklist in `docs/e2e-tests/VERIFY-claude-resume-KRdT6.md`).<br>**Sblocco automatico backlog**: `[03.11.4]` (Jira), `[03.11.5]` (Webhook), `[03.11.6.4]` (GitLab), `[03.11.6.8]` (YouTrack), `[03.11.2.9]` (LDAP login E2E indiretto) → da test in produzione mode senza più toccare FLASK_ENV.
 
 ### 2026-05-01 — batch fix `claude/resume-sentrikat-KRdT6` (7 fix core, unverified)
@@ -348,6 +348,18 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 | `[06.9.2]` | 🔴 | `2a44f4b` | Root cause: CSRF token mancante (non payload). 6 fetch (assignments + dashboard) ora passano `X-CSRFToken: getCSRFToken()` |
 | `[03.18.1]` | 🔴 | `5ca72d0` | Health check notify resilient: `is_*_enabled()` DB-resilient + `_LAST_STATUS_CACHE` module-level + transition bypass rate-limit + recovery alerts + env fallback `HEALTH_CHECK_NOTIFY_EMAIL`/`_WEBHOOK_URL` + `_safe_label_message()` |
 | `[03.16.2]` | 🟡 | `1fc1dff` | Compliance preset dropdown (Custom/NIST/SOC2/ISO27001/PCI-DSS) cross-tab apply, default NIST, persisted via `/api/settings/security` |
+
+### 2026-05-01 — batch fix `claude/fix-round3-core-316ec1` (4 core HIGH + cluster rebranding + LDAP UX + audit, unverified)
+
+| Bug | Sev | Commit | Fix sintetico |
+|---|---|---|---|
+| `[06.3.5]` | 🔴 | `9cfc00a` | Post-login `setup_2fa=required` → root `/` + auto-open Security modal + `history.replaceState` cleanup |
+| `[06.10.2]` | 🔴 | `8b513b7` | "Latest agent version" mostra full semver (`1.0.0-beta.6`); `_version_compare` semver-aware (9 test pass) |
+| `[06.11.2]` | 🟡 | `ad28576` | Tab nav bidirezionale Alert Management ↔ Email/Subscription (3-tab strip su `/alerts/settings`, pill su admin-panel) |
+| `[03.11.5.3]` | 🔴 | `8882644` | `/api/integrations/issue-tracker/test` ValueError→400, network→502, generic→500 sanitizzato |
+| `[03.14.10.expand]` + `[03.14.20]` | 🔴 | (cluster) | Demo→**Community** rebrand: `LICENSE_TIERS`, error messages "Community Edition limit", banner top page "COMMUNITY EDITION", admin_panel feature comparison header, setup wizard Multi-Tenancy badge `PRO` |
+| `[03.11.2.2]` | 🔴→🟡 | (con cluster) | LDAP config form: callout giallo + bottone "Open LDAP Groups →" alla pagina dedicata Group Mappings (esisteva già). Severity downgrade |
+| `[06.4.1]` | 🔴→🔍 | (audit only) | Riclassificato come **feature mancante**, non bug delivery. `POST /api/users` richiede password obbligatoria; nessun invite path. Out of scope autonomous, da pianificare come `[06.4.1.feature]` BUILD |
 
 *(aggiornati a mano ad ogni commit)*
 

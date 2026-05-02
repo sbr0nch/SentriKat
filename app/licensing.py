@@ -146,15 +146,20 @@ EDITION_MAP = {
 }
 
 # License tiers and their limits
-# Note: Internal key is 'community' for backwards compatibility, but displayed as 'Demo'
+# [03.14.10.expand] Public-facing name is "Community Edition" — matches the
+# industry FOSS convention (GitLab CE, MySQL Community, etc.), the License
+# page UI, the Health Check banner, and the internal EDITION_MAP key. The
+# is_demo flag is kept under that name for backwards compat with code that
+# already imports it; it now means "is the free Community tier" rather than
+# "trial/demo".
 LICENSE_TIERS = {
     'community': {
-        'name': 'Demo',  # Changed from 'Demo' - this is a trial/demo version
-        'display_name': 'Demo Version',
+        'name': 'Community',
+        'display_name': 'Community Edition',
         'max_users': 1,
         'max_organizations': 1,
         'max_products': 50,
-        'max_agents': 5,  # Demo includes 5 agents
+        'max_agents': 5,
         'features': [],
         'powered_by_required': True,
         'is_demo': True
@@ -516,8 +521,8 @@ class LicenseInfo:
             edition = self.get_effective_edition()
             if edition == 'community':
                 if limit_type in ['agents', 'agent_api_keys']:
-                    return False, limit, f'Demo version limit: {limit} agents. Upgrade to Professional for more agents.'
-                return False, limit, f'Demo version limit: {limit} {limit_type}. Upgrade to Professional for unlimited.'
+                    return False, limit, f'Community Edition limit: {limit} agents. Upgrade to Professional for more agents.'
+                return False, limit, f'Community Edition limit: {limit} {limit_type}. Upgrade to Professional for unlimited.'
             return False, limit, f'License limit reached: {limit} {limit_type}. Purchase an agent pack to increase.'
 
         return True, limit, None
@@ -527,7 +532,7 @@ class LicenseInfo:
         if self.error:
             return f'License error: {self.error}'
         if not self.is_valid:
-            return 'Demo Version - Upgrade to Professional for full features'
+            return 'Community Edition - Upgrade to Professional for full features'
         if not self.is_hardware_match:
             return 'License not valid for this installation'
         if self.is_expired:
@@ -536,7 +541,7 @@ class LicenseInfo:
             return f'License expires in {self.days_until_expiry} days'
         if self.is_professional():
             return f'Professional license for {self.customer}'
-        return 'Demo Version'
+        return 'Community Edition'
 
     def to_dict(self):
         """Convert to dictionary for API responses"""
@@ -548,8 +553,8 @@ class LicenseInfo:
         return {
             'edition': self.edition,
             'effective_edition': effective_edition,
-            'edition_name': tier.get('name', 'Demo'),
-            'edition_display_name': tier.get('display_name', 'Demo Version'),
+            'edition_name': tier.get('name', 'Community'),
+            'edition_display_name': tier.get('display_name', 'Community Edition'),
             'is_demo': tier.get('is_demo', True),
             'customer': self.customer,
             'license_id': self.license_id,
@@ -1036,7 +1041,7 @@ def save_license(license_key):
 
 
 def remove_license():
-    """Remove license and revert to Demo version."""
+    """Remove license and revert to Community Edition."""
     from app.models import SystemSettings
     from app import db
 
@@ -1046,7 +1051,7 @@ def remove_license():
         db.session.commit()
 
     reload_license()
-    return True, 'License removed. Reverted to Demo version.'
+    return True, 'License removed. Reverted to Community Edition.'
 
 
 # ============================================================================
@@ -1860,7 +1865,7 @@ def _check_activation_rate_limit():
 
 @license_bp.route('/api/license', methods=['DELETE'])
 def deactivate_license():
-    """Remove license and revert to Demo (on-premise only)"""
+    """Remove license and revert to Community Edition (on-premise only)"""
     from app.saas import is_saas_mode
     if is_saas_mode():
         return jsonify({'error': 'License management is not available in SaaS mode.'}), 403

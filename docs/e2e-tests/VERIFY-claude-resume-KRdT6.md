@@ -170,3 +170,101 @@ Per ogni fail, aprire nuovo bug ID `[FF.S.B.x]` con sintomo + step ripro + commi
 - Bug Phase 05 SentriKat-web: scope di altra sessione (`claude/fix-sentrikat-web-handoff-*`).
 - Phase 03.14 cluster CPE backfill: già ✅ VERIFIED 2026-04-30.
 - LDAP/SAML/SSRF integrations: già ✅ VERIFIED 2026-04-30.
+
+---
+
+# Round 3 — branch `claude/fix-round3-core-316ec1` (PR #?)
+
+> Aggiunto 2026-05-01. 4 fix HIGH + 1 audit + 1 rebranding cluster + 1 callout UX. Pre-requisito: stessa procedura pre-flight della sezione Round 1+2 sopra (pull + rebuild fresh).
+
+## ✅ [06.3.5] 🔴 Force setup 2FA → 404 redirect — `9cfc00a`
+
+1. `cliente1@test.com` (org admin) → Users & Access → click su un user qualunque → Edit → "Force setup 2FA" / equivalent toggle "Require 2FA at next login" → Save.
+2. Logout. Login come quel user (in incognito).
+3. **Expected**: dopo password OK, atterri su **dashboard `/`** (non più `/profile?...`), modal Security Settings **già aperto** sulla card "Two-Factor Authentication".
+4. **Expected** URL bar: `https://app.sentrikat.com/` (no più `?setup_2fa=required`, ripulito via `history.replaceState`).
+5. F5 sulla pagina → modal NON si riapre (query è stata rimossa).
+
+**Pass** se: 3 ✅ + 4 ✅ + 5 ✅.
+**Fail** se: ancora 404 → controllare hard reload (cache `login.html`); se modal non apre → console `getElementById('securitySettingsModal')` per esistenza.
+
+## ✅ [06.10.2] 🔴 Latest agent version label — `8b513b7`
+
+1. `/admin#endpoints` o equivalent endpoints page con sezione `Agent Versions`.
+2. Label deve mostrare **"Latest: linux: v1.0.0-beta.6, macos: v1.0.0-beta.6, windows: v1.0.0-beta.6"** (full semver, **NON** `v1.0.0`).
+3. Se installi un agent con versione esattamente `1.0.0-beta.6` → conta in `CURRENT`.
+4. Se installi/simuli un agent con versione `1.0.0-beta.5` → conta in `OUTDATED`.
+5. Se installi/simuli un agent con versione `1.0.0-rc.1` o `1.0.0` → conta `UP_TO_DATE` (rc.1/release > beta.6).
+
+**Pass** se: 2 ✅ semver completo. 3-5 sono test ottimali (richiedono manipolare DB Asset table o multipli agent install).
+**Fail mode**: ancora `v1.0.0` puro → docker compose restart sentrikat per ricaricare agent_api.py.
+
+## ✅ [06.11.2] 🟡 Tab nav siblings (Alert Management / Email / Subscription) — `ad28576`
+
+1. `/alerts/settings` → in cima alla pagina, sotto il titolo "Alert Management", deve esserci una **nav-tabs** strip con 3 tab:
+   - "Alert Management" (active, current page)
+   - "Email & Notifications" (link a `/admin-panel#settings:email`)
+   - "Subscription" (link a `/admin-panel#settings:subscription`) — **solo SaaS**
+2. Click "Email & Notifications" → atterri su admin-panel con il tab Email aperto.
+3. Sulla settings tab bar di admin-panel, click pill "Alert Management" (icon bell) → atterri su `/alerts/settings`.
+
+**Pass** se: 1 ✅ tab visibili + 2 ✅ navigazione + 3 ✅ ritorno.
+**Fail mode**: se in admin-panel non vedi "Alert Management" pill → la tua org/role potrebbe non avere `email_alerts` feature. Verifica con super_admin login.
+
+## ✅ [03.11.5.3] 🔴 Test Connection error mapping — `8882644`
+
+1. Settings → Authentication / Integrations → Issue Tracker tab.
+2. Configura tipo "Jira", URL = `http://host.docker.internal:8080` (privato → triggera SSRF).
+3. Click "Test Connection".
+4. **Expected** F12 Network: `POST /api/integrations/issue-tracker/test` → **400 Bad Request** (non più 500).
+5. **Expected** body: `{"success": false, "error": "Invalid Jira URL: URL must not target..."}` o simile.
+6. Toast UI: messaggio chiaro, no più "internal server error".
+7. (Bonus) Configura tipo Jira con URL pubblico irraggiungibile (es. `https://example-fake-jira-12345.com`) → `502 Bad Gateway` con `error: "Connection to tracker failed: ConnectionError"`.
+8. (Bonus) Configura tipo "webhook" con URL privato → resta `200 OK` con `success: false` (era già strutturato, niente regressione).
+
+**Pass** se: 4 ✅ codice 400 + 5 ✅ body strutturato + 6 ✅ toast leggibile.
+**Fail mode**: ancora 500 → check server logs `docker logs sentrikat | grep -i "test_issue_tracker"`.
+
+## ✅ Rebranding `[03.14.10.expand]` + `[03.14.20]` — Demo→Community — `<commit>`
+
+1. Login come admin senza license PRO (Community).
+2. Banner top page: deve mostrare **"COMMUNITY EDITION"** (non più "DEMO VERSION").
+3. License page: già mostrava "COMMUNITY EDITION" (no regressione).
+4. Health Check page: già diceva "COMMUNITY" (no regressione).
+5. Tentativo invite user oltre limit (1 user max in Community): error message **"Community Edition limit: 1 users. Upgrade to Professional for unlimited."** (non più "Demo version limit").
+6. Tentativo create org oltre limit: stesso pattern "Community Edition limit: ...".
+7. Settings → System → admin_panel feature comparison table: header colonna sinistra **"Community"** (non "Demo").
+8. License page → "Remove License" button → message "License removed. Reverted to Community Edition." (non "Demo version").
+9. Setup wizard welcome card "Multi-Tenancy" → ora ha badge **"PRO"** accanto al titolo (cluster `[03.6.2]`).
+
+**Pass** se: 5/9 OK. È rename + UX consistency, regressioni improbabili.
+**Fail mode**: stringhe stale in cache browser → hard reload. Se Python still mostra "Demo" → probabilmente importi cached, restart container.
+
+## ⚠️ `[03.11.2.2]` LDAP Group Mapping — partial fix UX callout — `<commit>`
+
+> NON fix completo del bug. Era un'**inconsistenza di percezione**: la feature Group Mapping esiste già come pagina dedicata `/admin-panel#ldapGroups` (con discovery, role mapping matrix, sync dashboard, auto-provision toggle). Il bug originario era che dalla LDAP **config form** non c'era nessun puntatore a quella pagina, quindi sembrava feature mancante.
+
+1. Settings → Authentication → LDAP / Active Directory Configuration form.
+2. **Expected**: sotto l'alert info standard di setup, deve esserci un **alert giallo** con: "Group & role mappings: assign LDAP/AD groups to SentriKat roles and organizations on the dedicated LDAP Groups page (auto-provision, default role, sync dashboard)" + bottone "Open LDAP Groups →".
+3. Click bottone → atterri su `/admin-panel#ldapGroups` con la pagina Group Mappings + Sync Dashboard tab.
+4. Bug originale chiuso parzialmente: fields espliciti "Group Search Base" / "Group Filter" / "Member Attribute" non sono inline nel config form (by design — sono nella discovery panel della pagina dedicata). Decisione architetturale, non fix.
+
+**Pass** se: 2 ✅ callout visibile + 3 ✅ navigation funziona.
+**Note**: il bug doc resta open con etichetta "discoverability fix only". Per richiedere fields inline nel config form, riaprire `[03.11.2.2.b]`.
+
+## 🔍 `[06.4.1]` Admin invite email — audit only
+
+> NON fixato. Audit ha rivelato che **NON è un bug di delivery email** (come ipotizzato cluster con `[04.1.3]`). È **feature mancante**:
+>
+> - `POST /api/users` (`app/routes.py:6832 create_user`) richiede `password` obbligatoria → admin DEVE settare la password e comunicarla out-of-band al user. **Nessun path invite email** per local users esiste.
+> - `send_user_invite_email()` esiste in `app/email_alerts.py:989` ma è chiamata SOLO da `ldap_manager.py` (LDAP discover flow). Local user create non la chiama mai.
+> - Il fix lato `sentrikat-web` `524208b` (BackgroundTasks SMTP) non si applica: era per OTP customer SaaS, path completamente diverso.
+>
+> **Conclusione audit**: il bug è in realtà *"feature da costruire"*, non *"feature rotta da fixare"*. Implementarlo richiede:
+> 1. Schema change User: aggiungere `invite_token` + `invite_expires_at` colonne (oppure riusare token JWT firmato).
+> 2. Endpoint `POST /api/users` accetta `send_invite=true` opzionale → genera token, salva user con password=null + `must_set_password=true`, chiama `send_user_invite_email`.
+> 3. Endpoint pubblico `GET /accept-invite?token=...` → form set password, attiva user.
+> 4. Email template invite.
+>
+> Stima: 200-400 righe + UI + test. Out of scope di sessione autonomous. Va aperto come **`[06.4.1.feature]` BUILD** in roadmap separata. Marcato 🔍 **AUDITED** finché non viene pianificato.
+
