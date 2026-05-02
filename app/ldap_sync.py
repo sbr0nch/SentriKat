@@ -495,6 +495,25 @@ class LDAPSyncEngine:
                     'error': None
                 }
 
+            # [03.14.21] Enforce license user limit before creating a brand
+            # new account. Without this LDAP auto-provision is the same
+            # backdoor as SAML: any matching mapping silently grows the
+            # fleet past the tier cap. Existing-user paths above stay
+            # unaffected since they don't increment the count.
+            from app.licensing import check_user_limit
+            allowed, limit, message = check_user_limit()
+            if not allowed:
+                logger.warning(
+                    f"LDAP auto-provision blocked by license: {username} "
+                    f"(current users at limit {limit}). {message}"
+                )
+                return {
+                    'success': False,
+                    'user': None,
+                    'created': False,
+                    'error': message or 'License user limit reached.'
+                }
+
             # Determine role and organization from highest priority mapping
             role_priority = {'super_admin': 4, 'org_admin': 3, 'manager': 2, 'user': 1}
             highest_mapping = max(mappings, key=lambda m: (

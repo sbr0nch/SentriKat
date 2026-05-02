@@ -307,7 +307,7 @@ def process_saml_response(request) -> Tuple[bool, Optional[Dict], Optional[str]]
         return False, None, str(e)
 
 
-def get_or_create_saml_user(user_data: Dict) -> Tuple[Optional[Any], bool]:
+def get_or_create_saml_user(user_data: Dict) -> Tuple[Optional[Any], bool, Optional[str]]:
     """
     Get or create a user from SAML data.
 
@@ -315,7 +315,12 @@ def get_or_create_saml_user(user_data: Dict) -> Tuple[Optional[Any], bool]:
         user_data: Dict with email, username, first_name, last_name, etc.
 
     Returns:
-        Tuple of (user, created) where created is True if user was just created
+        Tuple of (user, created, error_code) where:
+          - user is None if lookup or creation failed
+          - created is True if user was just created (False for existing or failure)
+          - error_code is None on success, or one of: 'no_email', 'no_org',
+            'license_limit' — used by the ACS handler to surface the right
+            redirect message on the login page.
     """
     from app import db
     from app.models import User, Organization
@@ -324,7 +329,7 @@ def get_or_create_saml_user(user_data: Dict) -> Tuple[Optional[Any], bool]:
     email = user_data.get('email')
     if not email:
         logger.error("SAML response missing email")
-        return None, False
+        return None, False, 'no_email'
 
     # Use normalized email to catch Gmail aliases (user+tag,
     # u.s.e.r, @googlemail.com → same canonical address).
@@ -356,14 +361,27 @@ def get_or_create_saml_user(user_data: Dict) -> Tuple[Optional[Any], bool]:
                 user.display_name = user_data['display_name']
             user.last_login = datetime.utcnow()
             db.session.commit()
-            return user, False
+            return user, False, None
         else:
             # Existing local/ldap user - allow SAML login but preserve their auth_type
             # so password login keeps working
             logger.info(f"SAML login for existing {user.auth_type} user: {user.email}")
             user.last_login = datetime.utcnow()
             db.session.commit()
-            return user, False
+            return user, False, None
+
+    # New user — enforce license user limit BEFORE creating the row.
+    # [03.14.21] Without this check SAML/SSO is a free pass around the
+    # Community 1-user (or paid-tier capped) limit: configure any IdP and
+    # auto-provision N users without ever clicking 'Invite'.
+    from app.licensing import check_user_limit
+    allowed, limit, message = check_user_limit()
+    if not allowed:
+        logger.warning(
+            f"SAML auto-provision blocked by license: {email} "
+            f"(current users at limit {limit}). {message}"
+        )
+        return None, False, 'license_limit'
 
     # Create new user
     default_org_id = get_setting('saml_default_org_id', '')
@@ -380,7 +398,7 @@ def get_or_create_saml_user(user_data: Dict) -> Tuple[Optional[Any], bool]:
 
     if not org:
         logger.error("No organization available for SAML user")
-        return None, False
+        return None, False, 'no_org'
 
     username = user_data.get('username') or email.split('@')[0]
 
@@ -411,7 +429,7 @@ def get_or_create_saml_user(user_data: Dict) -> Tuple[Optional[Any], bool]:
     db.session.commit()
 
     logger.info(f"Created SAML user: {username} ({email})")
-    return user, True
+    return user, True, None
 
 
 def get_saml_metadata() -> Optional[str]:

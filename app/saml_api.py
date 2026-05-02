@@ -234,9 +234,16 @@ def saml_acs():
             logger.warning(f"SAML user not found and auto-provision disabled: {user_data.get('email')}")
             return redirect(url_for('auth.login', error='saml_user_not_found'))
     else:
-        user, created = get_or_create_saml_user(user_data)
+        user, created, error_code = get_or_create_saml_user(user_data)
         if not user:
-            return redirect(url_for('auth.login', error='saml_user_create_failed'))
+            # [03.14.21] Surface license_limit specifically so the user sees
+            # 'tier limit reached' instead of a generic 'create_failed' that
+            # hides the real reason and looks like a server bug.
+            redirect_error = (
+                'saml_license_limit' if error_code == 'license_limit'
+                else 'saml_user_create_failed'
+            )
+            return redirect(url_for('auth.login', error=redirect_error))
 
         if created:
             logger.info(f"Created new SAML user: {user.username}")
