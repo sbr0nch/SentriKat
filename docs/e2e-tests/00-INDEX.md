@@ -334,7 +334,7 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
   - `[03.14.36]` rate limit polling ✅ VERIFIED 2026-04-30 (Network tab F12 durante backfill round-2: ≤15 req/30s).
 - 🟢 OK passati: **110** *(100 + 4 Fase 05 + 6 da Fase 03.14: sync CISA/EPSS/CPE/Auto-Ack code path + Email/Webhook alerts code path)*
 - ⏸️ Test bloccati: 5 (residui solo on-prem dependencies — sbloccabili oggi) + **9 follow-up Fase 05 bloccati da `[05.9.1]`** finché non viene fixato lato `SentriKat-web`
-- ✅ Fix applicati: **35** *(18 core + 13 web pre-2026-05-01 + 5 web Round 1+2 2026-05-01)* — **+7 core Round 1+2 + 4 core Round 3 + 1 rebranding cluster + 1 LDAP UX callout + 1 [06.4.1] audit 2026-05-01** branch `claude/resume-sentrikat-KRdT6` + `claude/fix-round3-core-316ec1`
+- ✅ Fix applicati: **37** *(20 core + 13 web pre-2026-05-01 + 5 web Round 1+2 2026-05-01) — **+7 core Round 1+2 + 4 core Round 3 + 1 rebranding + 1 LDAP UX + 1 [06.4.1] audit + 2 core Round 4 ([03.14.21] SAML/LDAP license guard, [03.6.3] wizard window) 2026-05-01* branch `claude/resume-sentrikat-KRdT6` + `claude/fix-round3-core-316ec1` + `claude/fix-round4-core-480fca`
 - ✅✅ Fix VERIFIED: **13** su 20 *(round 1: 9 + round 2 oggi: `[03.6.6]/[03.7.2]/[03.7.4]` consolidato + `[03.11.2.3]` LDAP sidebar + `[03.11.4.5]` SSRF design escalation con Test Connection Jira reale → host.docker.internal:8080 in `FLASK_ENV=production` ✅)*. Restano da verificare: `[02.4.1]/[02.4.2]` welcome email + **7 fix 2026-05-01** (`[03.16.1]` `[03.18.4]` `[06.9.3]` `[06.3.12]` `[06.9.2]` `[03.18.1]` `[03.16.2]` — checklist in `docs/e2e-tests/VERIFY-claude-resume-KRdT6.md`).<br>**Sblocco automatico backlog**: `[03.11.4]` (Jira), `[03.11.5]` (Webhook), `[03.11.6.4]` (GitLab), `[03.11.6.8]` (YouTrack), `[03.11.2.9]` (LDAP login E2E indiretto) → da test in produzione mode senza più toccare FLASK_ENV.
 
 ### 2026-05-01 — batch fix `claude/resume-sentrikat-KRdT6` (7 fix core, unverified)
@@ -360,6 +360,14 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 | `[03.14.10.expand]` + `[03.14.20]` | 🔴 | (cluster) | Demo→**Community** rebrand: `LICENSE_TIERS`, error messages "Community Edition limit", banner top page "COMMUNITY EDITION", admin_panel feature comparison header, setup wizard Multi-Tenancy badge `PRO` |
 | `[03.11.2.2]` | 🔴→🟡 | (con cluster) | LDAP config form: callout giallo + bottone "Open LDAP Groups →" alla pagina dedicata Group Mappings (esisteva già). Severity downgrade |
 | `[06.4.1]` | 🔴→🔍 | (audit only) | Riclassificato come **feature mancante**, non bug delivery. `POST /api/users` richiede password obbligatoria; nessun invite path. Out of scope autonomous, da pianificare come `[06.4.1.feature]` BUILD |
+
+### 2026-05-01 — batch fix `claude/fix-round4-core-480fca` (2 core HIGH + handoff doc, unverified)
+
+| Bug | Sev | Commit | Fix sintetico |
+|---|---|---|---|
+| `[03.14.21]` | 🔴 | `8158a17` | SAML/LDAP auto-provision enforce `check_user_limit()` prima di `db.session.add(user)`. Signature `get_or_create_saml_user` ora 3-tupla `(user, created, error_code)`. Login page mostra "saml_license_limit" message |
+| `[03.6.3]` | 🔴 | `d6b1f66` | Setup wizard step 4-6 (seed/proxy/sync) ora gated da `_is_wizard_window()` data-driven (`User.query.count() <= 1`) invece che session flag persa in produzione. Step 1-3 mantengono `_is_setup_blocked()` security check |
+| `[05.21.1]` audit | 📋 | `ea96b07` | Handoff doc `FIX-HANDOFF-sentrikat-web.md` aggiornato con audit precise dalla sessione web: 3 fonti (non 4), `plans_config.py` è già SoT, fix reduce a public endpoint + landing build-time fetch + admin/plans proxy decision |
 
 *(aggiornati a mano ad ogni commit)*
 

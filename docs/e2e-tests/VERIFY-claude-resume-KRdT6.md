@@ -268,3 +268,71 @@ Per ogni fail, aprire nuovo bug ID `[FF.S.B.x]` con sintomo + step ripro + commi
 >
 > Stima: 200-400 righe + UI + test. Out of scope di sessione autonomous. Va aperto come **`[06.4.1.feature]` BUILD** in roadmap separata. Marcato 🔍 **AUDITED** finché non viene pianificato.
 
+
+---
+
+# Round 4 — branch `claude/fix-round4-core-480fca` (PR #?)
+
+> Aggiunto 2026-05-01. 2 fix HIGH + 1 handoff doc cross-repo. Pre-requisito: pull main fresh dopo merge Round 3.
+
+## ✅ [03.14.21] 🔴 SAML/LDAP auto-provision license bypass — `8158a17`
+
+**Setup**: Community Edition (1 user max). User esistente: solo `admin` (1/1 al limite).
+
+### SAML side
+
+1. Configura SAML con Keycloak testlab (host `localhost:8180` / `host.docker.internal:8180`).
+2. Da incognito → vai su `/login` → click bottone "SSO Sign In" → atterri su Keycloak.
+3. Loggati come **utente diverso** da `admin` (es. `keycloak-user@test.local` con account già in Keycloak).
+4. Keycloak fa redirect ACS a SentriKat.
+5. **Expected**: redirect su `/login?error=saml_license_limit` con messaggio sotto: "User limit for this license has been reached. Contact your administrator to upgrade or remove an inactive user before logging in via SSO."
+6. **Expected DB**: `User.query.count()` ancora 1 (no nuovo user creato).
+7. **Expected logs** `docker logs sentrikat | grep "SAML auto-provision blocked"`: deve esserci 1 entry con email + limit.
+8. Cancella `admin` o aggiungi license PRO → riprova SAML login → **stavolta** crea il nuovo user.
+
+**Pass** se: 5 ✅ message + 6 ✅ count invariato + 7 ✅ log entry.
+**Fail** se: nuovo user creato silenziosamente → check `app/saml_manager.py:get_or_create_saml_user`, l'import `from app.licensing import check_user_limit` dev'essere caricato senza ImportError (test `python3 -c "from app.saml_manager import get_or_create_saml_user; print('OK')"` dentro container).
+
+### LDAP side
+
+(Path attualmente non chiamato in tree, ma il fix è proattivo per quando `[03.11.2.3]` LDAP sidebar viene riattivato.)
+
+9. Bypass test diretto: invocare `LDAPSync.auto_provision_user_on_login('test', ['CN=mappedgroup,...'])` da Python shell quando users == 1/1.
+10. **Expected**: dict `{success: False, user: None, created: False, error: 'Community Edition limit: 1 users...'}`.
+11. **Expected logs**: "LDAP auto-provision blocked by license: test ..." entry.
+
+**Pass** se: 10 ✅. Step 9 e 11 sono test bonus difficili senza LDAP attivo.
+
+## ✅ [03.6.3] 🔴 Setup wizard auto-lock — `d6b1f66`
+
+**Setup**: wipe completo. `docker compose down -v && docker compose up -d --build`. Browser fresh, no cookie.
+
+1. Apri `http://localhost/setup` → step 1 Welcome.
+2. Step 2 Organization: nome "Test Org" + Create →.
+3. Step 3 Admin: username `admin`, email, password 8+ chars + Create →.
+4. **Critical step** — step 4 Service Catalog: click "Seed Catalog →".
+5. **Expected**: response 200 OK + "Successfully seeded N services!" + auto-advance step 5.
+6. **Old behavior** (era bug): 403 "Setup already completed." → wizard stallato.
+7. Step 5 Proxy: skip (no proxy) o configura → Save →.
+8. Step 6 Initial Sync: click "Run Initial Sync →" → CISA KEV sync parte.
+9. Final → click "Complete Setup" → redirect su `/login`.
+10. Login come `admin` → entrare nella dashboard → ServiceCatalog popolato (admin panel → Service Catalog → 80+ servizi).
+
+**Pass** se: 5 ✅ wizard avanza + 9 ✅ login + 10 ✅ catalog popolato.
+**Fail** se: ancora 403 step 4 → check container logs `docker logs sentrikat | grep "wizard_window\|setup_blocked"`. Verifica `User.query.count()` post step 3 = 1 (atteso); se è 0 il check `<= 1` passa, se è 2+ qualcun altro ha invitato user → falla manualmente lo `delete from users where username != 'admin'`.
+
+### Edge — locking dopo invite secondo user
+
+11. Post-wizard: invite un secondo user `manager@test.local`.
+12. Da DevTools console: `await fetch('/api/setup/seed-services', {method:'POST'}).then(r=>r.status)`.
+13. **Expected**: `403` (User.query.count() = 2, wizard window chiusa).
+
+**Pass** se: 13 ✅ 403.
+**Note**: questa è la difesa post-wizard. Se ritorna 200 means data-driven gate non funziona; se ritorna 401/403 con altro motivo means c'è auth redirect prima del check.
+
+## 📋 `[05.21.1]` audit handoff — `ea96b07` (cross-repo, no test core)
+
+> NON è un fix core. È solo doc update di `FIX-HANDOFF-sentrikat-web.md` con audit preciso del web session. Niente da testare nel container core.
+
+Verifica veloce: pull main → `cat docs/e2e-tests/FIX-HANDOFF-sentrikat-web.md | grep -A2 "05.21.1"` → deve esserci sezione "Audit `[05.21.1]` 2026-05-01 — Pricing source-of-truth (REPO STATE VERIFIED)".
+
