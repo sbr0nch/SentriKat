@@ -299,6 +299,7 @@ System
   - **NON impatta** welcome email signup (02.4.1) che arrivava ieri — diverso trigger
 - **Status test**: **⏸️ BLOCKED** — dim 4 role-based matrix completa bloccata (non possiamo loggare come manager/user senza invite email)
 - **Discovered**: 2026-04-25
+- **🔍 AUDIT 2026-05-01**: la triage iniziale (cluster con `[04.1.3]` SMTP rotto) era **errata**. Code review di `app/routes.py:6832 create_user` rivela che NON esiste nessun path invite email per local users: l'endpoint `POST /api/users` richiede `password` come campo obbligatorio (line 6877-6878 `if not data.get('password'): return jsonify({'error': 'Password is required for local users'}), 400`). `send_user_invite_email()` (`app/email_alerts.py:989`) esiste ma è chiamata SOLO da `app/ldap_manager.py` per LDAP discover flow, mai per local user create. Il messaggio UI "User created, invitation email sent" è **bugiardo**. Riclassificazione: **non è bug delivery, è feature mancante**. Il fix `524208b` lato `sentrikat-web` (BackgroundTasks SMTP) era per OTP customer SaaS, path diverso, non si applica. Da implementare come feature build separata `[06.4.1.feature]`: schema change User (`invite_token` + `invite_expires_at`), `POST /api/users send_invite=true` flag, endpoint pubblico `GET /accept-invite?token=...` con form set-password, email template. Stima 200-400 righe + UI + test. **Out of scope per round autonomous**, va planificata in roadmap. Status aggiornato: **🔍 AUDITED** (era 🔴 BLOCKED).
 
 ---
 

@@ -665,6 +665,7 @@ PLATFORM OPERATIONS          ← SEZIONE SaaS-ONLY, non dovrebbe essere qui
 - **Correlato**: [03.11.2.3] sidebar Users & Access non mostra voci LDAP
 - **File sospetto**: template della pagina Authentication/LDAP + possibile pagina "LDAP Group Mapping" separata non linkata dalla sidebar
 - **Discovered**: 2026-04-23
+- **🔧 Fix parziale 2026-05-01 — discoverability only** (commit pending): la triage iniziale era "feature mancante" ma codereading rivela che **tutta la group mapping UI esiste già** come pagina dedicata `/admin-panel#ldapGroups` (`app/templates/admin_panel.html:537-628`), con: Group Discovery panel (search base + Search button), Group Mappings table, Sync Dashboard sub-tab, mapping LDAP group→SentriKat role+org, auto-provision toggle, members count. Backend pieno: `app/ldap_group_api.py`, `app/ldap_sync.py:53` query `LDAPGroupMapping` + sync logic + audit log. Bug reale: dalla LDAP **config form** (server connection / user search base) NON c'era nessun puntatore alla pagina Group Mappings → l'admin pensava che la feature fosse monca. Fix UX: aggiunto **alert giallo + bottone "Open LDAP Groups →"** subito sotto l'alert info standard di setup, che linka a `/admin-panel#ldapGroups` (hash navigation già wired via base.html sidebar). **Bug riclassificato**: severity scesa da 🔴 HIGH a 🟡 WARN (no più "feature business critica monca", solo "discoverability poor"). Per request inline group/role mapping fields **dentro** il config form (UX scelta diversa), aprire `[03.11.2.2.b]` separato.
 
 #### [03.11.2.3] 🔴 HIGH — Sidebar "Users & Access" NON espone voci LDAP/Group dopo config — ✅ FIX APPLICATO 2026-04-26 (da riverificare — ora super_admin su Community vede LDAP Users/Groups)
 
@@ -2111,6 +2112,7 @@ Obiettivo di questo mini-test: determinare se la policy SSRF (`ALLOW_PRIVATE_URL
   - In-app help / modal "What's included in Community?" con elenco features attive/gated
   - Evitare messaggi come "Invalid API key" quando il motivo reale è "feature gated" → riunire in response consistente "Feature X requires Professional license"
 - **Discovered**: 2026-04-23 (domanda dell'utente che ha smascherato un problema di product messaging coerente)
+- **🔧 Fix parziale 2026-05-01** (commit pending): scelto **"Community"** come nome canonico (industry-standard FOSS: GitLab CE, MySQL Community, ecc.; coerente con UI License page + Health Check + EDITION_MAP interno già usano `community`). "Demo" è inconsistenza legacy che deprechiamo. Refactor user-facing strings core repo: `app/licensing.py` `LICENSE_TIERS['community']['name']` `'Demo'` → `'Community'`, `display_name` `'Demo Version'` → `'Community Edition'`, error messages `'Demo version limit'` → `'Community Edition limit'`, `get_status_message()` defaults `'Demo Version'` → `'Community Edition'`, `to_dict()` defaults Demo→Community, `remove_license()` return string `"Reverted to Demo version"` → `"Reverted to Community Edition"`, docstring on-premise revert. `app/templates/base.html` banner top page: `<strong>DEMO VERSION</strong>` → `<strong>COMMUNITY EDITION</strong>`. `app/templates/admin_panel.html` feature comparison table: header colonna `Demo` → `Community`. Cluster `[03.14.20]` (error message terzo nome) chiuso con questo. Bonus: `app/templates/setup.html` Multi-Tenancy welcome card aggiunto badge `PRO` per chiarire gating (cluster `[03.6.2]`). **NON toccato in core**: `is_demo` boolean flag (internal API) — rinominarlo richiederebbe coordinamento con consumer JS frontend + `sentrikat-web` portal. **Handoff a sentrikat-web/sentrikat-web-docs**: aggiornare README, handbook, marketing site copy (`/pricing`, contact-sales, signup) per dire "Community Edition" invece di "DEMO" — è change cross-repo.
 
 #### [03.14.10] 🔵 Info — Terminology mismatch: "DEMO Edition" (handbook/README) vs "COMMUNITY EDITION" (UI)
 
@@ -2290,6 +2292,7 @@ Obiettivo di questo mini-test: determinare se la policy SSRF (`ALLOW_PRIVATE_URL
 - **Impatto aggravato su [03.14.10.expand]**: un customer legge docs "DEMO", UI dice "COMMUNITY", errore dice "Demo version", email marketing forse "Free tier". Confusione totale
 - **Fix candidato**: grep audit su tutto il repo per stringhe `Demo`, `DEMO`, `Community`, `COMMUNITY`, `Free tier`, `Personal use` e uniformare a UN termine ufficiale prima del prossimo release
 - **Discovered**: 2026-04-23
+- **🔧 Fix 2026-05-01** (commit pending): chiuso da rebranding cluster `[03.14.10.expand]` — error messages ora dicono "Community Edition limit: X users" (non più "Demo version limit"). Vedi sezione fix di `[03.14.10.expand]` per dettaglio del rename a tappeto.
 
 #### [03.14.21] 🔴 HIGH — License limit applicato a **invite manuale** ma **bypassato** da SAML auto-provision
 

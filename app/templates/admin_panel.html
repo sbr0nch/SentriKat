@@ -1337,6 +1337,20 @@
                                 with read permissions to search for users in your directory.
                             </div>
 
+                            {# [03.11.2.2] Group/role mappings live on a dedicated page (the form
+                               here is just connection + user search). Without this callout the
+                               LDAP config screen looks feature-incomplete because the mapping
+                               UX is invisible from here. #}
+                            <div class="alert alert-warning d-flex align-items-center justify-content-between flex-wrap">
+                                <div class="me-3">
+                                    <i class="bi bi-diagram-2 me-2"></i>
+                                    <strong>Group &amp; role mappings:</strong> assign LDAP/AD groups to SentriKat roles and organizations on the dedicated <em>LDAP Groups</em> page (auto-provision, default role, sync dashboard).
+                                </div>
+                                <a href="/admin-panel#ldapGroups" class="btn btn-sm btn-warning">
+                                    Open LDAP Groups <i class="bi bi-arrow-right ms-1"></i>
+                                </a>
+                            </div>
+
                             <form id="ldapSettingsForm">
                                 <div class="row g-3">
                                     <div class="col-md-12">
@@ -3576,7 +3590,7 @@
                                         <thead>
                                             <tr>
                                                 <th>Feature</th>
-                                                <th class="text-center">Demo</th>
+                                                <th class="text-center">Community</th>
                                                 <th class="text-center">Professional</th>
                                             </tr>
                                         </thead>

@@ -2898,11 +2898,11 @@
     </style>
     {% endif %}
     {% else %}
-    {# On-premise mode: show DEMO banner when no PRO license #}
+    {# On-premise mode: show Community Edition banner when no PRO license #}
     {% if license and not license.is_professional() %}
     <div class="demo-banner bg-warning text-dark text-center py-2 px-3" style="position: fixed; top: 0; left: 0; right: 0; z-index: 9999; font-size: 0.85rem;">
         <i class="bi bi-exclamation-triangle-fill me-2"></i>
-        <strong>DEMO VERSION</strong> - Limited to {{ license.get_effective_limits().max_users }} user, {{ license.get_effective_limits().max_products }} products.
+        <strong>COMMUNITY EDITION</strong> - Limited to {{ license.get_effective_limits().max_users }} user, {{ license.get_effective_limits().max_products }} products.
         <a href="https://sentrikat.com/contact-sales" target="_blank" class="ms-2 text-dark fw-semibold text-decoration-underline">Get a License</a>
         <button type="button" class="btn-close btn-close-sm ms-3" style="font-size: 0.7rem; vertical-align: middle;" onclick="this.parentElement.style.display='none'" aria-label="Close"></button>
     </div>
