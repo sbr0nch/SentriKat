@@ -501,9 +501,14 @@ def send_usage_to_license_server():
             metrics_key = fallback
 
     if not metrics_key:
-        logger.error(
+        # On-prem Community installs intentionally don't ship telemetry to
+        # the license server — missing SENTRIKAT_METRICS_KEY is the expected
+        # operating state, not an error condition. Downgrade ERROR → WARNING
+        # so it doesn't trigger spurious 'errors detected' alerts in
+        # operator dashboards/SIEM ([03.5.5]).
+        logger.warning(
             "send_usage_to_license_server: no SENTRIKAT_METRICS_KEY configured, "
-            "aborting usage upload"
+            "skipping usage upload (expected for on-prem Community installs)"
         )
         return []
 
