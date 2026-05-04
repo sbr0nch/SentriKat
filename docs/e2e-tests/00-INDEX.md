@@ -361,6 +361,13 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 | `[03.11.2.2]` | 🔴→🟡 | (con cluster) | LDAP config form: callout giallo + bottone "Open LDAP Groups →" alla pagina dedicata Group Mappings (esisteva già). Severity downgrade |
 | `[06.4.1]` | 🔴→🔍 | (audit only) | Riclassificato come **feature mancante**, non bug delivery. `POST /api/users` richiede password obbligatoria; nessun invite path. Out of scope autonomous, da pianificare come `[06.4.1.feature]` BUILD |
 
+### 2026-05-04 — Round 5 fix autonomous (2 core, branch `claude/review-commits-testing-aCvsG`)
+
+| Bug | Sev | Commit | Fix sintetico |
+|---|---|---|---|
+| `[06.3.12.b]` | 🔵 | `18b48e2` (rebased `7b6bb33`) | Username truly immutable: backend `routes.py:6975-6982` rimuove bypass super_admin (403 per chiunque); frontend `admin_panel.js:1049+` marca campo readonly+bg-light+tooltip in edit mode, reset editable in create mode |
+| `[03.5.6a]` | 🔵 | `5b3a4b8` | APScheduler `BackgroundScheduler(job_defaults=...)`: `misfire_grace_time=300s`, `coalesce=True`, `max_instances=1` applicato globalmente. Risolve silent-skip su master delay > 1s, evita storm post-outage, previene job overlap |
+
 ### 2026-05-01 — batch fix `claude/fix-round4-core-480fca` (2 core HIGH + handoff doc, unverified)
 
 | Bug | Sev | Commit | Fix sintetico |
