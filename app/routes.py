@@ -6971,15 +6971,14 @@ def update_user(user_id):
     old_org_id = user.organization_id
     warnings = []
 
-    # Username update (only for super admins and must be unique)
+    # Username is permanent, no exceptions ([06.3.12.b]).
+    # Industry-standard immutable identifier (GitHub/Slack/Notion pattern).
+    # Changing it breaks SSO subject mappings, audit log joins, and any
+    # external system that uses username as the natural key. The previous
+    # super_admin override contradicted the user-facing message and is
+    # removed; if a username truly needs to change, delete + recreate.
     if 'username' in data and data['username'] != user.username:
-        if not current_user.is_super_admin():
-            return jsonify({'error': 'Username is permanent and cannot be changed.'}), 403
-        # Check if new username is already taken
-        existing = User.query.filter_by(username=data['username']).first()
-        if existing and existing.id != user_id:
-            return jsonify({'error': 'Username already exists'}), 400
-        user.username = data['username']
+        return jsonify({'error': 'Username is permanent and cannot be changed.'}), 403
 
     if 'email' in data and data['email'] != user.email:
         # Validate email format

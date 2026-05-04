@@ -1005,6 +1005,16 @@ function showCreateUserModal() {
         const userForm = SK.DOM.get('userForm');
         if (userForm) userForm.reset();
 
+        // Re-enable username for create flow (editUser() locks it for [06.3.12.b]).
+        const usernameField = document.getElementById('username');
+        if (usernameField) {
+            usernameField.readOnly = false;
+            usernameField.classList.remove('bg-light');
+            usernameField.title = '';
+            const help = document.getElementById('usernameHelp');
+            if (help) help.textContent = 'For LDAP: Use AD sAMAccountName';
+        }
+
         // Reset to local auth and completely hide LDAP option for creation
         SK.DOM.setChecked('authLocal', true);
         SK.DOM.setDisplay('authLdap', 'none');
@@ -1047,6 +1057,17 @@ async function editUser(userId) {
         const user = await response.json();
 
         SK.DOM.setValue('username', user.username);
+        // Username is permanent post-creation ([06.3.12.b]) — readonly +
+        // visual cue so the user knows the field is locked, instead of
+        // typing a change and getting a 403 toast on save.
+        const usernameField = document.getElementById('username');
+        if (usernameField) {
+            usernameField.readOnly = true;
+            usernameField.classList.add('bg-light');
+            usernameField.title = 'Username is permanent and cannot be changed';
+            const help = document.getElementById('usernameHelp');
+            if (help) help.textContent = 'Permanent identifier — cannot be changed after creation.';
+        }
         SK.DOM.setValue('email', user.email);
         SK.DOM.setValue('fullName', user.full_name || '');
         SK.DOM.setValue('organization', user.organization_id || '');

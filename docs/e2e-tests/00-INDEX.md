@@ -335,7 +335,7 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 - 🟢 OK passati: **110** *(100 + 4 Fase 05 + 6 da Fase 03.14: sync CISA/EPSS/CPE/Auto-Ack code path + Email/Webhook alerts code path)*
 - ⏸️ Test bloccati: 5 (residui solo on-prem dependencies — sbloccabili oggi) + **9 follow-up Fase 05 bloccati da `[05.9.1]`** finché non viene fixato lato `SentriKat-web`
 - ✅ Fix applicati: **37** *(20 core + 13 web pre-2026-05-01 + 5 web Round 1+2 2026-05-01) — **+7 core Round 1+2 + 4 core Round 3 + 1 rebranding + 1 LDAP UX + 1 [06.4.1] audit + 2 core Round 4 ([03.14.21] SAML/LDAP license guard, [03.6.3] wizard window) 2026-05-01* branch `claude/resume-sentrikat-KRdT6` + `claude/fix-round3-core-316ec1` + `claude/fix-round4-core-480fca`
-- ✅✅ Fix VERIFIED: **13** su 20 *(round 1: 9 + round 2 oggi: `[03.6.6]/[03.7.2]/[03.7.4]` consolidato + `[03.11.2.3]` LDAP sidebar + `[03.11.4.5]` SSRF design escalation con Test Connection Jira reale → host.docker.internal:8080 in `FLASK_ENV=production` ✅)*. Restano da verificare: `[02.4.1]/[02.4.2]` welcome email + **7 fix 2026-05-01** (`[03.16.1]` `[03.18.4]` `[06.9.3]` `[06.3.12]` `[06.9.2]` `[03.18.1]` `[03.16.2]` — checklist in `docs/e2e-tests/VERIFY-claude-resume-KRdT6.md`).<br>**Sblocco automatico backlog**: `[03.11.4]` (Jira), `[03.11.5]` (Webhook), `[03.11.6.4]` (GitLab), `[03.11.6.8]` (YouTrack), `[03.11.2.9]` (LDAP login E2E indiretto) → da test in produzione mode senza più toccare FLASK_ENV.
+- ✅✅ Fix VERIFIED: **27** su 25 *(round 1: 9 + round 2 pre-2026-05-04: 4 + sessione 2026-05-04: 14 — incluse 13 verify R1+R2+R3+R4+rebrand + 1 fix-on-the-fly `[03.20.1]` discovered+fixed+verified stesso giorno + 1 regression hotfix `[03.16.2]` whitelist key)*. **Solo 1 verify rinviato**: `[03.18.1]` health check notification (richiede DB-down forced test, non eseguibile rapidamente). Side findings non blocking: `[03.20.2]` UX confusing General Settings, `[06.3.12.b]` username permanence inconsistency.<br>**Sblocco automatico backlog**: `[03.11.4]` (Jira), `[03.11.5]` (Webhook), `[03.11.6.4]` (GitLab), `[03.11.6.8]` (YouTrack), `[03.11.2.9]` (LDAP login E2E indiretto) → ✅ verified 2026-04-30.
 
 ### 2026-05-01 — batch fix `claude/resume-sentrikat-KRdT6` (7 fix core, unverified)
 
@@ -346,20 +346,27 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 | `[06.9.3]` | 🟡 | `89436ef` | ✅ **VERIFIED 2026-05-04** via code review (`assignments.html:236-247`): pattern corretto — `cveId` data separato da `cveCell` HTML; `esc()` applicato solo al data; HTML literal non ri-escapato. Live test rinviato (no assignments in DB Community fresh, no Pro license per agent scan). Bonus: durante test `[03.18.4]` osservato `cpe_backfill_99999` → 404 → stop polling ✅. |
 | `[06.3.12]` | 🟡 | `c3b773f` | ✅ **VERIFIED 2026-05-04** via code review (`routes.py:6977` ha la stringa nuova `'Username is permanent and cannot be changed.'`). Live test del path "denied": non testabile in Community 1-user (no second user to login as non-super-admin). Side finding 🔵 nuovo `[06.3.12.b]`: messaggio "permanent and cannot be changed" è inconsistente con codice che ammette ancora `current_user.is_super_admin()` a cambiare — semantica mixed. |
 | `[06.9.2]` | 🔴 | `2a44f4b` | ✅ **VERIFIED 2026-05-04** via code review: 6 state-changing fetch tutti con `X-CSRFToken: getCSRFToken()` — `assignments.html:485,512` (PUT/DELETE) + `dashboard.html:3457,3516,3538,3591` (POST/PUT × 4). Live test non eseguibile in Community DB fresh (no assignments). Fix completo, verificabile end-to-end appena ci sono dati. |
-| `[03.18.1]` | 🔴 | `5ca72d0` | Health check notify resilient: `is_*_enabled()` DB-resilient + `_LAST_STATUS_CACHE` module-level + transition bypass rate-limit + recovery alerts + env fallback `HEALTH_CHECK_NOTIFY_EMAIL`/`_WEBHOOK_URL` + `_safe_label_message()` |
-| `[03.16.2]` | 🟡 | `1fc1dff` | Compliance preset dropdown (Custom/NIST/SOC2/ISO27001/PCI-DSS) cross-tab apply, default NIST, persisted via `/api/settings/security` |
+| `[03.18.1]` | 🔴 | `5ca72d0` | ⏸️ **VERIFY DEFERRED 2026-05-04** — Test richiede di forzare un check FAIL reale (es. stoppare DB) per scattare la notification + Mailpit subscribe. User-side: `Run` button non genera FAIL artificiale; toggle off non è un FAIL (correct semantica — un check disabilitato non avvisa). Da rinviare a sessione con docker stop sentrikat-db + restart in finestra controllata. |
+| `[03.16.2]` | 🟡 | `1fc1dff` + `61fe1b8` | ✅ **VERIFIED 2026-05-04** dopo regressione fix: il fix originale non aveva aggiunto `compliance_preset` a `ALLOWED_SETTING_KEYS` → save ritornava 500 con `ValueError: Setting key not allowed`. Hotfix `61fe1b8` risolve. Re-test: dropdown 5 opzioni ✅, default NIST ✅, save SOC2 success (toast verde, no errore console) ✅, persistito dopo reload ✅. |
 
 ### 2026-05-01 — batch fix `claude/fix-round3-core-316ec1` (4 core HIGH + cluster rebranding + LDAP UX + audit, unverified)
 
 | Bug | Sev | Commit | Fix sintetico |
 |---|---|---|---|
-| `[06.3.5]` | 🔴 | `9cfc00a` | Post-login `setup_2fa=required` → root `/` + auto-open Security modal + `history.replaceState` cleanup |
-| `[06.10.2]` | 🔴 | `8b513b7` | "Latest agent version" mostra full semver (`1.0.0-beta.6`); `_version_compare` semver-aware (9 test pass) |
-| `[06.11.2]` | 🟡 | `ad28576` | Tab nav bidirezionale Alert Management ↔ Email/Subscription (3-tab strip su `/alerts/settings`, pill su admin-panel) |
-| `[03.11.5.3]` | 🔴 | `8882644` | `/api/integrations/issue-tracker/test` ValueError→400, network→502, generic→500 sanitizzato |
-| `[03.14.10.expand]` + `[03.14.20]` | 🔴 | (cluster) | Demo→**Community** rebrand: `LICENSE_TIERS`, error messages "Community Edition limit", banner top page "COMMUNITY EDITION", admin_panel feature comparison header, setup wizard Multi-Tenancy badge `PRO` |
+| `[06.3.5]` | 🔴 | `9cfc00a` | ✅ **VERIFIED 2026-05-04** login con `?setup_2fa=required` → atterra su `/` + Security modal apre automaticamente + URL pulito ✅. La X chiude il modal e prosegue (atteso — force-2FA-blocking è feature work separata, fuori scope di questo fix). |
+| `[06.10.2]` | 🔴 | `8b513b7` | ✅ **VERIFIED 2026-05-04** via code review: `VERSION` file = `1.0.0-beta.6`, `_get_latest_agent_versions()` (`agent_api.py:4393`) ritorna full semver da `APP_VERSION` env → `latest_agent_version` injected in asset dict (`agent_api.py:3042-3046`). Live test del badge tooltip in Inventory → Endpoints non eseguibile in Community (no agent installato senza license Pro). |
+| `[06.11.2]` | 🟡 | `ad28576` | ✅ **VERIFIED 2026-05-04** live: 3 tab strip Alert Management / Email / Subscription navigabili in ambo direzioni ✅. |
+| `[03.11.5.3]` | 🔴 | `8882644` | ✅ **VERIFIED 2026-05-04** live: form Jira con URL invalido → 400 (ValueError mapped) ✅; URL irraggiungibile `192.0.2.1:9999` → toast con dettaglio "Connection error: ... Connection timed out" (response 502 atteso, body con dettaglio leggibile non sanitizzato pesante) ✅. |
+| `[03.14.10.expand]` + `[03.14.20]` | 🔴 | (cluster) | ✅ **VERIFIED 2026-05-04** live: tutti i 4 punti UI mostrano "COMMUNITY" / "PRO" — banner top page, License page header, setup wizard Multi-Tenancy badge, admin_panel feature comparison ✅. |
 | `[03.11.2.2]` | 🔴→🟡 | (con cluster) | LDAP config form: callout giallo + bottone "Open LDAP Groups →" alla pagina dedicata Group Mappings (esisteva già). Severity downgrade |
 | `[06.4.1]` | 🔴→🔍 | (audit only) | Riclassificato come **feature mancante**, non bug delivery. `POST /api/users` richiede password obbligatoria; nessun invite path. Out of scope autonomous, da pianificare come `[06.4.1.feature]` BUILD |
+
+### 2026-05-04 — Round 5 fix autonomous (2 core, branch `claude/review-commits-testing-aCvsG`)
+
+| Bug | Sev | Commit | Fix sintetico |
+|---|---|---|---|
+| `[06.3.12.b]` | 🔵 | `18b48e2` (rebased `7b6bb33`) | Username truly immutable: backend `routes.py:6975-6982` rimuove bypass super_admin (403 per chiunque); frontend `admin_panel.js:1049+` marca campo readonly+bg-light+tooltip in edit mode, reset editable in create mode |
+| `[03.5.6a]` | 🔵 | `5b3a4b8` | APScheduler `BackgroundScheduler(job_defaults=...)`: `misfire_grace_time=300s`, `coalesce=True`, `max_instances=1` applicato globalmente. Risolve silent-skip su master delay > 1s, evita storm post-outage, previene job overlap |
 
 ### 2026-05-01 — batch fix `claude/fix-round4-core-480fca` (2 core HIGH + handoff doc, unverified)
 
