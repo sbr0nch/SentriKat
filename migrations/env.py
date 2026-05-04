@@ -12,7 +12,15 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
-fileConfig(config.config_file_name)
+#
+# disable_existing_loggers=False is critical: the default True silently
+# disables every logger created BEFORE this fileConfig call, including
+# all app.* loggers and gunicorn.error. When alembic is invoked from
+# inside the running Flask app (preload_app via gunicorn during boot
+# migrations), that turns the entire app's logging into a no-op until
+# process restart ([03.20.1]). Standalone alembic CLI is unaffected
+# (no pre-existing loggers when env.py runs first).
+fileConfig(config.config_file_name, disable_existing_loggers=False)
 logger = logging.getLogger('alembic.env')
 
 
