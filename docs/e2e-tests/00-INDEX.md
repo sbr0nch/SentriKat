@@ -322,7 +322,7 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 **Post Phase 05 opening + verify round 2 — 2026-04-29** (PC casa, docker rebuild beta.6 fresh):
 
-- 🔴 Bug aperti: **23** *(22 + 1 nuovo 2026-05-04: [03.20.1] HIGH logging silenziato post-boot, scoperto durante verify [03.14.21])*
+- 🔴 Bug aperti: **22** *(23 - 1 fixato e ✅ VERIFIED stesso giorno 2026-05-04: [03.20.1] HIGH logging silenziato post-boot)*
 - 🟡 Warning: **15** *(14 + 1: `[03.14.32]` WARN match 0)*
 - 🔵 Info/UX: **69** *(65 + 4: `[03.14.23]` admin-panel redirect, `[03.14.31]` localhost UI hint, `[03.14.33]` aria-hidden a11y, `[03.14.35]` Sync button cliccabile ✅ VERIFIED 2026-04-30)*
 - ✅✅ Fix VERIFIED: **18** su 22, **+ 5 nuovi fix applicati 2026-04-29 sera** (B + C1 + C2 + C3 + sub-B `[03.14.32]`):
