@@ -377,10 +377,13 @@ def get_or_create_saml_user(user_data: Dict) -> Tuple[Optional[Any], bool, Optio
     from app.licensing import check_user_limit
     allowed, limit, message = check_user_limit()
     if not allowed:
-        logger.warning(
-            f"SAML auto-provision blocked by license: {email} "
-            f"(current users at limit {limit}). {message}"
-        )
+        msg = (f"SAML auto-provision blocked by license: {email} "
+               f"(current users at limit {limit}). {message}")
+        logger.warning(msg)
+        # Also emit on the dedicated 'security' logger so SOC2/SIEM
+        # consumers see the auth-rejection event in security.log without
+        # having to grep all of application.log ([03.20.3]).
+        logging.getLogger('security').warning(msg)
         return None, False, 'license_limit'
 
     # Create new user
