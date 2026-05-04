@@ -675,3 +675,29 @@ System
 - L'utente conferma SBOM Export (JSON/CycloneDX/SPDX) **funziona** in Starter SaaS.
 - **Cluster `[02.7.11]`**: la mismatch è solo nel display "Features Included" matrix (Starter dice SBOM ❌ ma in pratica ✅). Display bug, non gating.
 - **Severity**: 🟢 OK funzionale. `[02.7.11]` resta aperto (display fix).
+
+---
+
+## 06.X — Verify side-findings 2026-05-04
+
+### [06.3.12.b] 🔵 **INFO** — Messaggio "Username is permanent" inconsistente con codice che ammette super_admin a cambiare
+
+**Discovery context**: emerso durante verify `[06.3.12]` 2026-05-04 — utente loggato come super_admin ha **cambiato** username `admin → adminn` con success, mentre il messaggio errore (per non-super-admin) dice "Username is permanent and cannot be changed."
+
+**Steps repro**:
+1. Login come super_admin.
+2. Users & Access → All Users → Edit user esistente.
+3. Cambia campo username → Save → success (DB updated).
+4. Da non-super-admin (in Community non testabile, in Pro/SaaS sì): stesso step → 403 con messaggio "Username is permanent and cannot be changed."
+
+**Issue**: il commit message del fix `c3b773f` cita "Username is industry-standard immutable (GitHub/Slack/Notion/Atlassian pattern) — it breaks SSO/audit/joins." Coerente con quel principio, **dovrebbe essere immutable per chiunque**, super_admin compreso. La gate code (`routes.py:6974` `if not current_user.is_super_admin():`) lascia super_admin con privilegio asimmetrico, contraddicendo il messaggio mostrato all'altro utente.
+
+**Two possible fix paths**:
+
+A. **Allineare codice a messaggio** (preferito, più sicuro): rimuovere il bypass super_admin → `username` campo readonly per chiunque post-creation. Migration path: chi vuole cambiare username deve cancellare/ricreare l'utente.
+
+B. **Allineare messaggio a codice**: cambiare il messaggio in "Only platform administrators (vendor) can change usernames; this typically should not be done." e rendere il path super_admin un "rare ops escalation" non documentato in UI.
+
+**Severity**: 🔵 INFO (semantica e governance, non breakage funzionale). Cluster con `[06.3.12]` originale.
+**Deployment scope**: 🏢☁️ both.
+**Effort**: 1-2h per option A (UI + backend + 1 migration test); 30 min per option B (msg + comment in code).
