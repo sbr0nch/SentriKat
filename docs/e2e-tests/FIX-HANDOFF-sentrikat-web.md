@@ -548,3 +548,67 @@ Implicazioni:
 Trade-off accettato consciamente: la vista "live tenant count per plan" sparisce dal portal admin. Recovery path se serve in futuro: endpoint dedicato `/api/v1/admin/tenants/by-plan` (~1h di lavoro), separato dalla config dei piani.
 
 Round 3 deve implementare le 5 azioni con questa decisione fissa.
+
+---
+
+## 📚 Handoff verso `docs.sentrikat.com` — 2026-05-04
+
+Items da aggiungere nei docs (`docs.sentrikat.com`, repo SentriKat-web area `docs/`) — tutti dovuti a discoveries durante verify pass core. Niente di urgente, ma sono lacune che causano confusione operatori.
+
+### `[docs.ops.logs]` — Documentare path log on-prem + ownership
+
+**Discovery context**: bug `[03.20.1]` (logging silenziato post-boot, fix in core commit `f66747d`).
+
+**Quando aggiungere ai docs**: dopo che il fix core è verificato in produzione (target docs page: "Operations → Troubleshooting" oppure "Deployment → On-prem").
+
+**Contenuto da documentare**:
+
+1. **Path log files** dentro container `sentrikat`:
+   - `/var/log/sentrikat/access.log` — HTTP request access log
+   - `/var/log/sentrikat/application.log` — INFO/WARNING app events
+   - `/var/log/sentrikat/error.log` — ERROR/exception
+   - `/var/log/sentrikat/security.log` — auth events, permission denied
+   - `/var/log/sentrikat/audit.log` — CRUD privilegiato (JSON)
+   - `/var/log/sentrikat/ldap.log` — LDAP operations
+   - `/var/log/sentrikat/performance.log` — slow queries (JSON)
+   - Retention: rotation 10MB × 10 backup (×20 per security, ×50 per audit).
+
+2. **Ownership requirement**: tutti i file devono essere `sentrikat:sentrikat` (UID 999). L'entrypoint del container (`docker-entrypoint.sh`) drop privileges via `gosu sentrikat` PRIMA di partire gunicorn, garantendo che master+workers siano stesso UID e i file vengano creati corretti.
+
+3. **STORAGE_ROOT override** (esistente): se l'operatore ha bisogno di mountare i log su un volume host dedicato, può settare `STORAGE_ROOT=/mnt/sentrikat-data` come env var → entrypoint imposta automaticamente `LOG_DIR=$STORAGE_ROOT/logs`. Avvertenza: se l'operatore mounta da host con ownership diverso (es. `root:root`), entrypoint riprova `chown -R sentrikat:sentrikat` ma se il filesystem host non lo permette (NFS read-only mount, mounted-ro filesystem), i log non si scrivono → controllare permessi prima del bring-up.
+
+4. **Diagnostica rapida log non scrivono** (sezione troubleshooting):
+   ```bash
+   docker exec sentrikat sh -c "ls -la /var/log/sentrikat/"
+   # Atteso: tutti i file 'sentrikat sentrikat'. Se vedi 'root root' →
+   # downgrade gunicorn precedente al fix [03.20.1] o bind-mount
+   # con ownership errato.
+
+   docker exec sentrikat sh -c "wc -l /var/log/sentrikat/*.log"
+   # Atteso: access.log + application.log con line count > 6 dopo
+   # qualche minuto di traffico. Se solo 6 righe (boot-only) →
+   # post_fork hook non sta partendo, controllare gunicorn.conf.py.
+   ```
+
+5. **External log shipping** (opzionale, prossima sezione docs): syslog forwarding via `RSYSLOG_REMOTE` env var (testlab `localhost:514`), Elasticsearch via `ELASTIC_HOST`, ecc. — già menzionato nel testlab ma non nei customer-facing docs.
+
+**Effort**: 1 nuova page docs ("Logging & Observability") + cross-link da Troubleshooting + Deployment On-prem. ~30 min lavoro per il team docs.
+
+---
+
+### `[docs.ops.permissions]` — Sezione "Container user / privilege model"
+
+**Discovery context**: stesso bug `[03.20.1]`. Spesso l'operatore non sa che il container droppa da root → sentrikat e gestisce male i mount volumi.
+
+**Contenuto**:
+
+- Container start as `root` (entrypoint needs root for `update-ca-certificates` con custom CA).
+- After CA certs install, drops to `sentrikat` (UID 999) via `gosu` per girare gunicorn.
+- Tutti i bind-mount volumi devono o essere sentrikat-writable (`chown 999:999 host-path/`) o `chmod 777` (sconsigliato).
+- L'entrypoint defensively chown `/var/log/sentrikat` ad ogni boot ma NON è in grado di farlo su filesystem read-only.
+
+**Effort**: ~20 min lavoro team docs.
+
+---
+
+Aggiungere questi 2 item al backlog di `sentrikat-web` (docs section) come issues separate, low priority. Non bloccano deploy del fix `[03.20.1]` core.

@@ -100,28 +100,33 @@ proxy_protocol = False
 # =============================================================================
 
 def post_fork(server, worker):
-    """Dispose inherited DB connections after fork.
+    """Re-initialize fork-unsafe resources in each worker.
 
-    With preload_app=True, the master process creates the app (and its
-    SQLAlchemy engine/pool) before forking workers. Forked children inherit
-    the master's open DB connections via file descriptors, but PostgreSQL
-    connections are not fork-safe — sharing them across processes corrupts
-    the wire protocol (symptoms: 'lost synchronization with server',
-    'got message type "a"', PGRES_TUPLES_OK errors).
+    Two resources need per-worker re-init with preload_app=True:
 
-    Calling engine.dispose() closes all inherited connections so each worker
-    creates its own fresh pool on first use.
+    1. SQLAlchemy engine/pool — workers inherit the master's open
+       PostgreSQL connections via FDs, but pg wire connections corrupt
+       when shared across processes.
 
-    Logging handlers do NOT need per-worker re-init: master and workers now
-    share the same UID (`sentrikat`, set by docker-entrypoint.sh via gosu),
-    so the file descriptors opened by setup_logging in the master at preload
-    time are usable by workers via O_APPEND atomic writes ([03.20.1]).
+    2. Python logging handlers — even with master+workers sharing the
+       sentrikat UID (so file ownership is fine, see [03.20.1] gosu fix),
+       workers can still inherit a `threading.Lock` in *held* state from
+       the master if a background thread (APScheduler, DB pool keepalive)
+       happened to be mid-emit at fork time. The held lock has no owning
+       thread in the child → every subsequent emit silently deadlocks
+       on lock.acquire(), which is why /var/log/sentrikat/*.log stay at
+       boot-only content even though workers are servicing requests.
+
+    Re-running setup_logging in each worker clears inherited handlers
+    and reopens fresh file descriptors with brand-new locks.
     """
     try:
         from run import app
         from app import db
+        from app.logging_config import setup_logging
         with app.app_context():
             db.engine.dispose()
-        server.log.info("Worker %s: disposed inherited DB connections", worker.pid)
+            setup_logging(app)
+        server.log.info("Worker %s: re-initialized DB pool + logging handlers", worker.pid)
     except Exception as e:
-        server.log.warning("Worker %s: failed to dispose DB pool: %s", worker.pid, e)
+        server.log.warning("Worker %s: failed post_fork init: %s", worker.pid, e)
