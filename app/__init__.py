@@ -965,6 +965,15 @@ def create_app(config_class=Config):
             # Stamp Alembic if not yet stamped (one-time transition)
             _stamp_alembic_head(app, logger)
 
+            # alembic's env.py calls logging.config.fileConfig() which honors
+            # [logger_root] in alembic.ini (level=WARN, handlers=console),
+            # wiping the RotatingFileHandlers we added in setup_logging.
+            # Re-run setup_logging to restore them so workers (forked after
+            # this point) inherit a root logger that still writes to
+            # /var/log/sentrikat/*.log instead of only stderr ([03.20.1]).
+            from app.logging_config import setup_logging as _restore_logging
+            _restore_logging(app)
+
             # Sync subscription plan features/limits with code defaults
             # This ensures DB plans stay aligned when DEFAULT_PLANS changes
             try:
