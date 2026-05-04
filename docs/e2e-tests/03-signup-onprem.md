@@ -2921,7 +2921,23 @@ In on-prem demo senza agent: praticamente impossibile vedere match per prodotti 
 
 ## 03.20 — Logging / Observability — 2026-05-04
 
-### [03.20.1] 🔴 **HIGH** — Logging silenziato post-boot: tutti i file `/var/log/sentrikat/*.log` restano vuoti durante runtime
+### [03.20.1] ✅ **VERIFIED 2026-05-04** — Logging silenziato post-boot: tutti i file `/var/log/sentrikat/*.log` restano vuoti durante runtime
+
+**Status**: ✅ **FIXED + VERIFIED** 2026-05-04. Commit chain: `f4cbb68` (gosu) + `702f1bc` (setup_logging restore post-stamp) + `fc3f760` (alembic disable_existing_loggers=False).
+
+**Verify result**: dopo rebuild e 2 GET request (login, /), `wc -l`:
+- `access.log` = 18 righe (workers HTTP request log) ✅
+- `application.log` = 120 righe (master+workers app events) ✅
+- post_fork hook firing correttamente, "Booting worker pid: NN" + "Worker NN: re-initialized DB pool + logging handlers" visibili in docker logs
+
+audit/error/ldap/performance/security restano 0 ma è atteso (filtrati per livello/evento, popolano solo on demand).
+
+**Root cause (sintesi)**: tre fattori annidati:
+1. Master gunicorn girava come root → file log creati 644 root → workers (sentrikat) non potevano scrivere.
+2. Anche con master+workers stesso UID, `apscheduler` background thread teneva lock su handler durante fork → workers ereditavano lock in stato held → emit() in deadlock silenzioso.
+3. **Più grave**: `migrations/env.py` chiamava `logging.config.fileConfig()` con default `disable_existing_loggers=True` → flip `logger.disabled=True` su tutti i logger creati prima (gunicorn.error + tutti gli `app.*`) → emit() no-op fino a process restart.
+
+**Fix originale documentato a 2026-05-04 ore 13:30 (testo storico)**:
 
 **Discovery context**: emerso durante verify di `[03.14.21]` (SAML license guard). La `logger.warning("SAML auto-provision blocked by license: ...")` in `app/saml_manager.py:380` non comparirebbe in nessun file di log dopo un blocked auto-provision SAML reale.
 
