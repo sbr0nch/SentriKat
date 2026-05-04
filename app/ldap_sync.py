@@ -503,10 +503,11 @@ class LDAPSyncEngine:
             from app.licensing import check_user_limit
             allowed, limit, message = check_user_limit()
             if not allowed:
-                logger.warning(
-                    f"LDAP auto-provision blocked by license: {username} "
-                    f"(current users at limit {limit}). {message}"
-                )
+                msg = (f"LDAP auto-provision blocked by license: {username} "
+                       f"(current users at limit {limit}). {message}")
+                logger.warning(msg)
+                # Mirror to 'security' logger for SOC2/SIEM ([03.20.3]).
+                logging.getLogger('security').warning(msg)
                 return {
                     'success': False,
                     'user': None,
