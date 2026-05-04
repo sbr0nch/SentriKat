@@ -333,7 +333,7 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
   - `[03.14.37]` `5ad37e5` — save NVD key con opt-out validation ✅ VERIFIED 2026-04-30 (save <30s anche con backfill in corso)
   - `[03.14.36]` rate limit polling ✅ VERIFIED 2026-04-30 (Network tab F12 durante backfill round-2: ≤15 req/30s).
 - 🟢 OK passati: **110** *(100 + 4 Fase 05 + 6 da Fase 03.14: sync CISA/EPSS/CPE/Auto-Ack code path + Email/Webhook alerts code path)*
-- ⏸️ Test bloccati: 5 (residui solo on-prem dependencies — sbloccabili oggi) + **9 follow-up Fase 05 bloccati da `[05.9.1]`** finché non viene fixato lato `SentriKat-web`
+- ⏸️ Test bloccati: 0 (residui sbloccati 2026-04-30) + **0 follow-up Fase 05 bloccati** (era 9, ora `[05.9.1]` ✅ FIXED su `SentriKat-web` PR #246/247/248 commit `bccad9e`+`23ce9da`, sblocca tutti i test admin portal)
 - ✅ Fix applicati: **37** *(20 core + 13 web pre-2026-05-01 + 5 web Round 1+2 2026-05-01) — **+7 core Round 1+2 + 4 core Round 3 + 1 rebranding + 1 LDAP UX + 1 [06.4.1] audit + 2 core Round 4 ([03.14.21] SAML/LDAP license guard, [03.6.3] wizard window) 2026-05-01* branch `claude/resume-sentrikat-KRdT6` + `claude/fix-round3-core-316ec1` + `claude/fix-round4-core-480fca`
 - ✅✅ Fix VERIFIED: **27** su 25 *(round 1: 9 + round 2 pre-2026-05-04: 4 + sessione 2026-05-04: 14 — incluse 13 verify R1+R2+R3+R4+rebrand + 1 fix-on-the-fly `[03.20.1]` discovered+fixed+verified stesso giorno + 1 regression hotfix `[03.16.2]` whitelist key)*. **Solo 1 verify rinviato**: `[03.18.1]` health check notification (richiede DB-down forced test, non eseguibile rapidamente). Side findings non blocking: `[03.20.2]` UX confusing General Settings, `[06.3.12.b]` username permanence inconsistency.<br>**Sblocco automatico backlog**: `[03.11.4]` (Jira), `[03.11.5]` (Webhook), `[03.11.6.4]` (GitLab), `[03.11.6.8]` (YouTrack), `[03.11.2.9]` (LDAP login E2E indiretto) → ✅ verified 2026-04-30.
 
@@ -346,7 +346,7 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 | `[06.9.3]` | 🟡 | `89436ef` | ✅ **VERIFIED 2026-05-04** via code review (`assignments.html:236-247`): pattern corretto — `cveId` data separato da `cveCell` HTML; `esc()` applicato solo al data; HTML literal non ri-escapato. Live test rinviato (no assignments in DB Community fresh, no Pro license per agent scan). Bonus: durante test `[03.18.4]` osservato `cpe_backfill_99999` → 404 → stop polling ✅. |
 | `[06.3.12]` | 🟡 | `c3b773f` | ✅ **VERIFIED 2026-05-04** via code review (`routes.py:6977` ha la stringa nuova `'Username is permanent and cannot be changed.'`). Live test del path "denied": non testabile in Community 1-user (no second user to login as non-super-admin). Side finding 🔵 nuovo `[06.3.12.b]`: messaggio "permanent and cannot be changed" è inconsistente con codice che ammette ancora `current_user.is_super_admin()` a cambiare — semantica mixed. |
 | `[06.9.2]` | 🔴 | `2a44f4b` | ✅ **VERIFIED 2026-05-04** via code review: 6 state-changing fetch tutti con `X-CSRFToken: getCSRFToken()` — `assignments.html:485,512` (PUT/DELETE) + `dashboard.html:3457,3516,3538,3591` (POST/PUT × 4). Live test non eseguibile in Community DB fresh (no assignments). Fix completo, verificabile end-to-end appena ci sono dati. |
-| `[03.18.1]` | 🔴 | `5ca72d0` | ⏸️ **VERIFY DEFERRED 2026-05-04** — Test richiede di forzare un check FAIL reale (es. stoppare DB) per scattare la notification + Mailpit subscribe. User-side: `Run` button non genera FAIL artificiale; toggle off non è un FAIL (correct semantica — un check disabilitato non avvisa). Da rinviare a sessione con docker stop sentrikat-db + restart in finestra controllata. |
+| `[03.18.1]` | 🔴 | `5ca72d0` | ✅ **VERIFIED 2026-05-04** resilience path: dopo `docker stop sentrikat-db` il job "Background Health Checks" è scattato regolarmente (interval 30 min), ha rilevato FAIL e ha invocato `send_generic_alert()` due volte. Logs in `application.log`: `WARNING ... Cannot send generic alert: SMTP not configured` — exactly the resilient warn-but-don't-crash path the fix introduced (era il bug: silent swallow). Email end-to-end delivery non testata perché SMTP non era configurata sul DB fresh; il fix scope (resilience) è confermato OK. |
 | `[03.16.2]` | 🟡 | `1fc1dff` + `61fe1b8` | ✅ **VERIFIED 2026-05-04** dopo regressione fix: il fix originale non aveva aggiunto `compliance_preset` a `ALLOWED_SETTING_KEYS` → save ritornava 500 con `ValueError: Setting key not allowed`. Hotfix `61fe1b8` risolve. Re-test: dropdown 5 opzioni ✅, default NIST ✅, save SOC2 success (toast verde, no errore console) ✅, persistito dopo reload ✅. |
 
 ### 2026-05-01 — batch fix `claude/fix-round3-core-316ec1` (4 core HIGH + cluster rebranding + LDAP UX + audit, unverified)
@@ -375,6 +375,29 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 | `[03.14.21]` | 🔴 | `8158a17` | ✅ **VERIFIED 2026-05-04 (functionally)** SAML side: incognito login con utente Keycloak nuovo (realm `sentrikat-test`) → redirect `/login?error=saml_license_limit` con messaggio corretto ✅; DB `SELECT COUNT(*) FROM users` = 1 (no auto-provision) ✅. License guard funziona end-to-end. **Caveat audit**: la `logger.warning("SAML auto-provision blocked by license: ...")` non appare in nessun log file → in realtà è sintomo di **bug trasversale logging-broken-post-boot** (vedi nuovo `[03.20.1]` 🔴). LDAP side test rinviato (path codice gemello, fix proattivo). |
 | `[03.6.3]` | 🔴 | `d6b1f66` | ✅ **VERIFIED 2026-05-04** happy path 1-8 (wipe DB → wizard fresh → step 4 Seed ✅ 200 + auto-advance, step 5 Proxy ✅, step 6 Initial Sync ✅, Complete Setup ✅, login + Service Catalog popolato ✅). Edge "lock after 2nd user" non testabile in Community edition (license cap = 1 user, no invite path — vedi `[06.4.1]`); la gate `User.query.count() <= 1` è comunque verificata via codice in `app/setup.py:77`. |
 | `[05.21.1]` audit | 📋 | `ea96b07` | Handoff doc `FIX-HANDOFF-sentrikat-web.md` aggiornato con audit precise dalla sessione web: 3 fonti (non 4), `plans_config.py` è già SoT, fix reduce a public endpoint + landing build-time fetch + admin/plans proxy decision |
+
+### 2026-05-04 — Cross-repo SentriKat-web confirmation (web team report)
+
+Risposta team web 2026-05-04: status mappato sui commit/PR di `sbr0nch/sentrikat-web`:
+
+| Bug | Sev | Commit/PR web | Stato |
+|---|---|---|---|
+| `[05.9.1]` admin portal CSP | 🔴🔴 CRITICAL | PR #246/247/248 (`bccad9e`+`23ce9da`) | ✅ **FIXED + VERIFIED** post-deploy. Migrazione totale a `data-action="..."` con dispatcher unico in `AdminLayout.astro` |
+| `[05.1.1]` Releases vuoto | 🔴 | `b5bcce0` releases auto-sync | ✅ FIXED (web team confirm) |
+| `[05.3.1]` Data source Unknown DOWN | 🔴 | `0679375` datasource unwrap | ✅ FIXED (web team confirm) |
+| `[05.4.1]` Public status disonesto | 🔴 | `6fd0041` public status banner | ✅ FIXED (web team confirm) |
+| `[05.5.1]` Audit log vuoto | 🔴 | `31805d6` AuditLog rows | ✅ FIXED (già verificato 2026-04-29) |
+| `[05.6.1]` last_login non scritto | 🔴 | `7997f37`+`31805d6` last_login_at | ✅ FIXED (già verificato 2026-04-29) |
+| `[05.8.1]` RSA_PRIVATE_KEY NOT SET | 🔴 | `0679375` RSA key state | ✅ FIXED (web team confirm) |
+| `[05.13.1]` Subscribers 403 | 🔴 | `a1e2169` admin auth consolidation | ✅ FIXED (web team confirm) |
+| `[05.22.1]` (cluster auth) | 🔴 | `a1e2169` (idem) | ✅ FIXED (web team confirm) |
+| `[05.21.1]` Pricing source-of-truth | 🔴 | — | ❌ **APERTO** — branch da aprire ex-novo, decisione "Option B remove proxy" registrata ma non implementata |
+| `[02.4.5-4.8]` welcome email deliverability | 🟡 | — | ❌ **APERTO** — code-side mancante (Reply-To/List-Unsubscribe/tracking). DNS-side out of repo |
+| `[docs.ops.logs]` + `[docs.ops.permissions]` | 🔵 | — | ❌ aperto — web team aspetta nostre bozze MDX |
+| `[docs.deploy.external-postgres]` + `[docs.deploy.db-resilience]` | 🔵/🟡 | — | ❌ aperto — nuovi item handoff 2026-05-04 |
+
+**Cluster Phase 05 INFO/WARN ancora da chiarire** (da inoltrare al web team in follow-up):
+`[05.1.2]`, `[05.2.1]`, `[05.5.2]`, `[05.6.2]`, `[05.7.1]`, `[05.8.2]`, `[05.9.2]`, `[05.14.1]`, `[05.16.1]`, `[05.17.1]`, `[05.19.1]`, `[05.20.1]`, `[05.20.2]`, `[05.21.2]`, `[05.24.1]` — tutti INFO/WARN, non blocker.
 
 *(aggiornati a mano ad ogni commit)*
 
