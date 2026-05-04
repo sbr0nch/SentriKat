@@ -97,4 +97,30 @@ if [ -z "$ENCRYPTION_KEY" ]; then
 fi
 
 # Execute the main command (gunicorn)
-exec "$@"
+# Drop privileges to `sentrikat` before exec'ing gunicorn.
+#
+# Why: with preload_app=True, the gunicorn master loads the WSGI app (and
+# runs setup_logging, opening RotatingFileHandlers under /var/log/sentrikat)
+# BEFORE forking workers. If master is root at that point, the log files
+# are created mode 0644 root:root — and workers, which gunicorn drops to
+# the `sentrikat` UID via its own `user`/`group` config, then can't write
+# to them, so every runtime log line is silently lost ([03.20.1]).
+#
+# Running gunicorn as `sentrikat` from the start makes both the master
+# and the workers the same UID, files are created sentrikat-owned, and
+# every log file (access/security/audit/error/application/ldap/perf)
+# fills correctly. The CA-cert install above still runs as root because
+# update-ca-certificates needs it; we only drop privileges right before
+# the long-lived process.
+#
+# Ensure log dir is sentrikat-owned (defensive — Dockerfile already chowns
+# it, but a host-side bind-mount could shadow it).
+LOG_DIR_RUNTIME="${LOG_DIR:-/var/log/sentrikat}"
+mkdir -p "$LOG_DIR_RUNTIME"
+chown -R sentrikat:sentrikat "$LOG_DIR_RUNTIME" 2>/dev/null || true
+
+if [ "$(id -u)" = "0" ]; then
+    exec gosu sentrikat "$@"
+else
+    exec "$@"
+fi

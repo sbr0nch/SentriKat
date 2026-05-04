@@ -12,7 +12,11 @@ ENV http_proxy=${HTTP_PROXY}
 ENV https_proxy=${HTTPS_PROXY}
 ENV no_proxy=${NO_PROXY}
 
-# Install system dependencies for PostgreSQL, SAML, and other requirements
+# Install system dependencies for PostgreSQL, SAML, and other requirements.
+# gosu is used by docker-entrypoint.sh to drop privileges to `sentrikat`
+# before exec'ing gunicorn ([03.20.1]) — without it the master gunicorn
+# would create /var/log/sentrikat/*.log as root, leaving the (sentrikat)
+# workers unable to write to them.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
@@ -22,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxml2-dev \
     libxmlsec1-dev \
     libxmlsec1-openssl \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
@@ -54,9 +59,13 @@ RUN mkdir -p /app/data /app/custom-certs
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN sed -i 's/\r$//' /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh
 
-# Create non-root user for running the application
+# Create non-root user for running the application + writable runtime dirs.
+# /var/log/sentrikat must be owned by sentrikat ahead of time so the master
+# gunicorn (which we exec via gosu sentrikat from the entrypoint) can open
+# the RotatingFileHandlers without falling back to /app/logs ([03.20.1]).
 RUN groupadd -r sentrikat && useradd -r -g sentrikat -d /app -s /sbin/nologin sentrikat \
-    && chown -R sentrikat:sentrikat /app/data
+    && mkdir -p /var/log/sentrikat \
+    && chown -R sentrikat:sentrikat /app/data /var/log/sentrikat
 
 # Expose port
 EXPOSE 5000
