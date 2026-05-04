@@ -2917,3 +2917,65 @@ In on-prem demo senza agent: praticamente impossibile vedere match per prodotti 
 - [ ] **License limit org**: Users limite testato OK ✓; verifica anche **Organizations** limit (Community = 1/1) → atteso stesso message pattern.
 - [ ] **Cluster terminology fix `[03.14.10.expand]`**: standardizzare a 1 nome unico (es. "Community") in tutti i 4+ punti dell'UI/email/handbook.
 
+---
+
+## 03.20 — Logging / Observability — 2026-05-04
+
+### [03.20.1] 🔴 **HIGH** — Logging silenziato post-boot: tutti i file `/var/log/sentrikat/*.log` restano vuoti durante runtime
+
+**Discovery context**: emerso durante verify di `[03.14.21]` (SAML license guard). La `logger.warning("SAML auto-provision blocked by license: ...")` in `app/saml_manager.py:380` non comparirebbe in nessun file di log dopo un blocked auto-provision SAML reale.
+
+**Steps repro** (deterministico):
+
+1. `docker compose down -v && docker compose up -d --build` (wipe completo, build fresh).
+2. Attendi healthy (`docker compose ps`), entra in app: setup wizard end-to-end (org+admin+seed+sync), login admin.
+3. Esegui un'azione che dovrebbe loggare: SAML login con utente nuovo (license-blocked), failed login attempt, audit-rilevante (CRUD user/setting), CVE sync trigger, ecc. Almeno 5+ minuti di interazione UI.
+4. `docker exec sentrikat sh -c "wc -l /var/log/sentrikat/*.log"`
+
+**Actual** (2026-05-04 reproduce):
+
+```
+0 /var/log/sentrikat/access.log
+6 /var/log/sentrikat/application.log    ← solo righe di boot (11:54)
+0 /var/log/sentrikat/audit.log
+0 /var/log/sentrikat/error.log
+0 /var/log/sentrikat/ldap.log
+0 /var/log/sentrikat/performance.log
+0 /var/log/sentrikat/security.log
+```
+
+`application.log` ha solo 6 righe del boot iniziale (`setup_logging`, performance middleware enabled, schema migration). Tutto ciò che è successo dopo (request HTTP, login, SAML ACS, license-block warning, CVE sync, ecc.) NON è scritto in nessun file.
+
+**Expected**: `access.log` con righe per ogni request, `security.log` con auth events, `audit.log` con CRUD su user/role/setting, `application.log` con info+warning runtime, `error.log` con eccezioni.
+
+**Impact**:
+
+- 🔴 **Compliance fail**: SOC2/ISO27001 richiedono audit trail di auth + CRUD privilegiate. Audit log vuoto = audit fallito.
+- 🔴 **Forensics impossibile**: incidente di sicurezza non investigabile (no source IP, no failed-auth pattern, no privilege change history).
+- 🔴 **Debugging incidenti reali rotto**: customer report bug → admin guarda `error.log` → vuoto, non sa nulla.
+- 🔴 **Audit trail dei fix di security ora-irrilevanti**: `[03.14.21]` SAML license guard logga `warning` quando blocca un login → log assente → impossibile rispondere a "quanti SSO bloccati nel mese?".
+- 🔴 **Cross-cuts ALTRI fix**: `[03.18.1]` health check notification logs, `[03.11.4.5]` SSRF blocked, `[03.14.36]` rate limit hit, qualsiasi audit hook → tutti silenti se questo bug non è risolto.
+
+**Severity**: 🔴 **HIGH** (potenzialmente CRITICAL per scope compliance, downgrado a HIGH solo perché la app continua a funzionare).
+
+**Probable root cause** (da investigare):
+
+1. **Gunicorn worker fork** non re-inizializza `setup_logging(app)` → logger root dei worker ha solo handler default stdout (che gunicorn redirige altrove o silenzia).
+2. **Permission /var/log/sentrikat** dentro container: `setup_logging` cade in `PermissionError` per i worker post-fork (l'utente runtime potrebbe essere diverso da quello al boot) → fallback a `logs/` directory locale che non scrutiniamo? Verificare con `docker exec sentrikat ls -la /var/log/sentrikat /app/logs 2>/dev/null`.
+3. **RotatingFileHandler buffering**: improbabile (default flush a livello record), ma da escludere con `lsof | grep sentrikat` per file descriptor aperto.
+4. **uWSGI/gunicorn `--preload` flag**: setup avviene nel master, fork copia ma file handler non thread/fork-safe, primo write fallisce silenziosamente.
+
+**Diagnostica priority** (next session):
+
+```bash
+docker exec sentrikat ls -la /var/log/sentrikat /app/logs 2>/dev/null
+docker exec sentrikat ps auxf | head -20    # vedere user dei worker
+docker exec sentrikat cat /proc/1/cmdline | tr '\0' ' ' ; echo  # gunicorn cmd
+docker exec sentrikat python3 -c "import logging; l=logging.getLogger('app.saml_manager'); l.warning('test diagnostic'); print('handlers:', logging.getLogger().handlers)"
+docker exec sentrikat sh -c "wc -l /var/log/sentrikat/*.log"   # se 'test diagnostic' è apparso → fork issue
+```
+
+**Severity**: 🔴 **HIGH**
+**Deployment scope**: 🏢 on-prem (presumibile anche ☁️ SaaS, da verificare separatamente)
+**Cluster**: blocca audit completo di tutti i fix che dipendono da log entry per dimostrarsi "verified".
+

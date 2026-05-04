@@ -322,7 +322,7 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 **Post Phase 05 opening + verify round 2 — 2026-04-29** (PC casa, docker rebuild beta.6 fresh):
 
-- 🔴 Bug aperti: **22** *(20 + 2 fixati subito: [03.14.34] HIGH progress multi-worker ✅ VERIFIED, [03.14.36] HIGH rate limit polling ✅ VERIFIED 2026-04-30)*
+- 🔴 Bug aperti: **23** *(22 + 1 nuovo 2026-05-04: [03.20.1] HIGH logging silenziato post-boot, scoperto durante verify [03.14.21])*
 - 🟡 Warning: **15** *(14 + 1: `[03.14.32]` WARN match 0)*
 - 🔵 Info/UX: **69** *(65 + 4: `[03.14.23]` admin-panel redirect, `[03.14.31]` localhost UI hint, `[03.14.33]` aria-hidden a11y, `[03.14.35]` Sync button cliccabile ✅ VERIFIED 2026-04-30)*
 - ✅✅ Fix VERIFIED: **18** su 22, **+ 5 nuovi fix applicati 2026-04-29 sera** (B + C1 + C2 + C3 + sub-B `[03.14.32]`):
@@ -365,7 +365,7 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 | Bug | Sev | Commit | Fix sintetico |
 |---|---|---|---|
-| `[03.14.21]` | 🔴 | `8158a17` | SAML/LDAP auto-provision enforce `check_user_limit()` prima di `db.session.add(user)`. Signature `get_or_create_saml_user` ora 3-tupla `(user, created, error_code)`. Login page mostra "saml_license_limit" message |
+| `[03.14.21]` | 🔴 | `8158a17` | ✅ **VERIFIED 2026-05-04 (functionally)** SAML side: incognito login con utente Keycloak nuovo (realm `sentrikat-test`) → redirect `/login?error=saml_license_limit` con messaggio corretto ✅; DB `SELECT COUNT(*) FROM users` = 1 (no auto-provision) ✅. License guard funziona end-to-end. **Caveat audit**: la `logger.warning("SAML auto-provision blocked by license: ...")` non appare in nessun log file → in realtà è sintomo di **bug trasversale logging-broken-post-boot** (vedi nuovo `[03.20.1]` 🔴). LDAP side test rinviato (path codice gemello, fix proattivo). |
 | `[03.6.3]` | 🔴 | `d6b1f66` | ✅ **VERIFIED 2026-05-04** happy path 1-8 (wipe DB → wizard fresh → step 4 Seed ✅ 200 + auto-advance, step 5 Proxy ✅, step 6 Initial Sync ✅, Complete Setup ✅, login + Service Catalog popolato ✅). Edge "lock after 2nd user" non testabile in Community edition (license cap = 1 user, no invite path — vedi `[06.4.1]`); la gate `User.query.count() <= 1` è comunque verificata via codice in `app/setup.py:77`. |
 | `[05.21.1]` audit | 📋 | `ea96b07` | Handoff doc `FIX-HANDOFF-sentrikat-web.md` aggiornato con audit precise dalla sessione web: 3 fonti (non 4), `plans_config.py` è già SoT, fix reduce a public endpoint + landing build-time fetch + admin/plans proxy decision |
 
