@@ -203,6 +203,9 @@ ALLOWED_SETTING_KEYS = {
     'password_min_length', 'password_require_uppercase', 'password_require_lowercase',
     'password_require_numbers', 'password_require_special', 'password_history_count',
     'password_expiry_days',
+    # Compliance preset (NIST/SOC2/ISO27001/PCI-DSS/Custom) — drives the
+    # other security keys above when applied. [03.16.2 follow-up].
+    'compliance_preset',
     # Branding settings
     'app_name', 'login_message', 'support_email', 'show_version', 'logo_url',
     'branding_logo', 'branding_primary_color', 'branding_secondary_color',
