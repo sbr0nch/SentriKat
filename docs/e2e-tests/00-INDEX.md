@@ -341,7 +341,7 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 | Bug | Sev | Commit | Fix sintetico |
 |---|---|---|---|
-| `[03.16.1]` | 🔴 | `8818d9d` | SSL Verify default era già ON in 6 punti; aggiunta `confirm()` guard su disabilitazione |
+| `[03.16.1]` | 🔴 | `8818d9d` | ✅ **VERIFIED 2026-05-04** confirm guard scatta su disable, testo MITM/NVD/CISA/license/webhook completo, OK/Cancel funzionano. Default ON confermato da codice (`admin_panel.html:2197 checked`). UX side-finding 🔵 nuovo `[03.20.2]` (sezione confusionaria + button label generica). |
 | `[03.18.4]` | 🔵 | `708a093` | `pollProgress()` cleanup su 404/503 via `hideProgressBanner()` |
 | `[06.9.3]` | 🟡 | `89436ef` | Assignments CVE cell — separato `cveId` (data) da `cveCell` (HTML placeholder) |
 | `[06.3.12]` | 🟡 | `c3b773f` | Username error → "Username is permanent and cannot be changed." (punto 1 del fix prescriptivo; punti 2-5 follow-up) |
