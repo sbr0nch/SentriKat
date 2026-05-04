@@ -612,3 +612,61 @@ Items da aggiungere nei docs (`docs.sentrikat.com`, repo SentriKat-web area `doc
 ---
 
 Aggiungere questi 2 item al backlog di `sentrikat-web` (docs section) come issues separate, low priority. Non bloccano deploy del fix `[03.20.1]` core.
+
+---
+
+## 📚 Handoff verso `docs.sentrikat.com` — 2026-05-04 (parte 2: Enterprise DB deployment)
+
+Discovery context: durante verify `[03.18.1]` user ha chiesto se SentriKat supporta DB su host separato (managed cloud, VM remota, PgBouncer). Risposta tecnica: **sì, il codice già lo supporta** via `DATABASE_URL` env var + `SQLALCHEMY_ENGINE_OPTIONS` esposti come env. Ma manca la **documentazione operatori**.
+
+### `[docs.deploy.external-postgres]` — Deploy con Postgres esterno
+
+Nuova page docs ("Deployment → Database Topologies" o "Operations → External Postgres"). Contenuto:
+
+1. **Topologie supportate**:
+   - Same-host (default docker compose): `postgresql://sentrikat:pwd@db:5432/sentrikat`
+   - Same-network VM separata: `postgresql://user:pwd@10.0.1.5:5432/sentrikat`
+   - Managed AWS RDS: `postgresql://user:pwd@xx.rds.amazonaws.com:5432/sentrikat?sslmode=require`
+   - Managed GCP Cloud SQL: `postgresql://user:pwd@/sentrikat?host=/cloudsql/PROJECT:REGION:INSTANCE`
+   - Managed Azure Database: `postgresql://user:pwd@xx.postgres.database.azure.com:5432/sentrikat?sslmode=require`
+   - PgBouncer endpoint: stesso URL pattern
+2. **TLS setup**:
+   - `sslmode=verify-full` raccomandato per produzione managed cloud
+   - Custom CA: `?sslmode=verify-full&sslrootcert=/path/to/ca.pem` (montare via volume o `custom-certs/` dir)
+   - Esempio docker-compose volume mount
+3. **Network requirements**:
+   - VPC peering / security group rules per cloud
+   - Firewall: SentriKat container egress su porta 5432 della destination
+4. **Connection pool tuning**:
+   - `DB_POOL_SIZE` default 10. Per fleet 1000 agent + 8 worker × 4 thread = ~32 concurrent → consigliato `DB_POOL_SIZE=15` `DB_POOL_MAX_OVERFLOW=10`
+   - `DB_POOL_RECYCLE=1800` di default — abbassare a 600 se DB managed ha aggressive idle timeout
+   - `pool_pre_ping=True` già attivo (handled by code, no env needed)
+5. **Failover behavior** (RDS Multi-AZ, Cloud SQL HA):
+   - Documentare i 30-60s di errori durante switchover
+   - Workaround: pre_ping handles dropped connections, ma query mid-flight falliscono → utenti vedono 503; raccomandare load balancer/PgBouncer davanti per mascherare il glitch
+
+### `[docs.deploy.db-resilience]` — Connection retry strategy
+
+Nuova sezione "Operations → Connection Resilience". Contenuto:
+
+- Cosa fa SentriKat in caso di DB transitoriamente irraggiungibile (pre_ping retry, raised exception altrimenti)
+- Cosa NON fa: retry automatico su query mid-flight con exponential backoff (utente vede 503 fino a recovery)
+- Health check behavior: il job "Background Health Checks" (intervallo configurabile) detecta DB down e invia notification via SMTP/webhook (vedi `[03.18.1]` fix). Tempi: prossimo tick + intervallo standard ~5 min, quindi alert può arrivare con 5-10 min di delay.
+- Recovery: pre_ping rinegozia connessione; se DB managed fa failover, dopo 30-60s riprende automatico.
+
+**Effort**: 2-3h docs work per item 1, 30 min per item 2. Not blocker per release attuale ma critico per onboarding enterprise customers.
+
+---
+
+### Tutti gli items handoff verso docs.sentrikat.com
+
+Lista ricapitolativa:
+
+| Item | Priorità | Effort | Stato |
+|---|---|---|---|
+| `[docs.ops.logs]` | 🔵 INFO | 30 min | aperto |
+| `[docs.ops.permissions]` | 🔵 INFO | 20 min | aperto |
+| `[docs.deploy.external-postgres]` | 🟡 MEDIUM (enterprise onboarding) | 2-3h | aperto |
+| `[docs.deploy.db-resilience]` | 🔵 INFO | 30 min | aperto |
+
+Se il team SentriKat-web preferisce, posso io scrivere le bozze MDX/Markdown e voi le incorporate nei docs. Fatemi sapere.
