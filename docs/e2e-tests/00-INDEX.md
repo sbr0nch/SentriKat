@@ -361,6 +361,17 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 | `[03.11.2.2]` | 🔴→🟡 | (con cluster) | LDAP config form: callout giallo + bottone "Open LDAP Groups →" alla pagina dedicata Group Mappings (esisteva già). Severity downgrade |
 | `[06.4.1]` | 🔴→🔍 | (audit only) | Riclassificato come **feature mancante**, non bug delivery. `POST /api/users` richiede password obbligatoria; nessun invite path. Out of scope autonomous, da pianificare come `[06.4.1.feature]` BUILD |
 
+### 2026-05-04 — Round 6 WARN sweep autonomous
+
+| Bug | Sev | Commit | Fix sintetico |
+|---|---|---|---|
+| `[03.5.5]` | 🟡 | `a825c27` | `send_usage_to_license_server` log downgrade ERROR → WARNING quando manca `SENTRIKAT_METRICS_KEY` (on-prem Community è expected state, non error) |
+| `[03.5.4]` | 🟡 | `a825c27` | Flask-Limiter `storage_uri` esplicito (`RATELIMIT_STORAGE_URI` env, fallback `memory://`). Sopprime UserWarning boot + abilita Redis-backed rate limit per multi-worker |
+| `[06.12.3]` | 🟡 | `a825c27` | Reply-To placeholder cambiato `support@yourcompany.com` → `e.g. support@example.com` + copy esplicita "placeholder NOT applied automatically" |
+| `[03.18.2]` | 🟡 | `8fef298` | Health check Worker Pool: stato `'ok'/'idle'` quando supervisor non running e zero pending jobs (fresh install / Community) invece di `'warning'/'stopped'` |
+| `[06.3.2]` | 🟡 | (audit) | Closed by-design: Gmail alias rejection è security-correct (impedisce dedup bypass tramite `+tag`). Vedi `routes.py:6860-6869` `normalize_email_for_dedup`. Test era WARN UX, non bug |
+| `[06.3.12]` (cluster) | 🟡 | `[06.3.12.b]` (`18b48e2`) | Closed: design decision documentata — username truly immutable for everyone; org admin pattern Display name/Display email seguirà pattern industria SaaS in feature work futura `[06.4.1.feature]` |
+
 ### 2026-05-04 — Round 5 fix autonomous (2 core, branch `claude/review-commits-testing-aCvsG`)
 
 | Bug | Sev | Commit | Fix sintetico |
