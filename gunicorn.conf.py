@@ -98,23 +98,32 @@ proxy_protocol = False
 # =============================================================================
 
 def post_fork(server, worker):
-    """Dispose inherited DB connections after fork.
+    """Re-initialize fork-unsafe resources in each worker.
 
-    With preload_app=True, the master process creates the app (and its
-    SQLAlchemy engine/pool) before forking workers. Forked children inherit
-    the master's open DB connections via file descriptors, but PostgreSQL
-    connections are not fork-safe — sharing them across processes corrupts
-    the wire protocol (symptoms: 'lost synchronization with server',
-    'got message type "a"', PGRES_TUPLES_OK errors).
+    With preload_app=True, the master loads the app once and forks workers.
+    Two resources need per-worker re-init because they're not fork-safe:
 
-    Calling engine.dispose() closes all inherited connections so each worker
-    creates its own fresh pool on first use.
+    1. SQLAlchemy engine/pool: forked workers inherit open DB connections
+       via file descriptors, but PostgreSQL wire connections corrupt when
+       shared across processes (symptoms: 'lost synchronization with
+       server', 'got message type "a"', PGRES_TUPLES_OK errors).
+
+    2. Python logging RotatingFileHandlers: master opens log files and
+       creates internal locks. Workers inherit the open FDs *and* the
+       lock state at fork time. If a lock was held mid-emit during fork,
+       child workers deadlock silently on every subsequent log call,
+       which is why /var/log/sentrikat/*.log stay empty post-boot
+       ([03.20.1]). Re-running setup_logging() in each worker clears
+       inherited handlers and opens fresh per-worker file descriptors
+       with fresh locks.
     """
     try:
         from run import app
         from app import db
+        from app.logging_config import setup_logging
         with app.app_context():
             db.engine.dispose()
-        server.log.info("Worker %s: disposed inherited DB connections", worker.pid)
+            setup_logging(app)
+        server.log.info("Worker %s: re-initialized DB pool + logging handlers", worker.pid)
     except Exception as e:
-        server.log.warning("Worker %s: failed to dispose DB pool: %s", worker.pid, e)
+        server.log.warning("Worker %s: failed post_fork init: %s", worker.pid, e)
