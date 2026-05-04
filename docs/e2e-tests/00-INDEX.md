@@ -366,7 +366,7 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 | Bug | Sev | Commit | Fix sintetico |
 |---|---|---|---|
 | `[03.14.21]` | 🔴 | `8158a17` | SAML/LDAP auto-provision enforce `check_user_limit()` prima di `db.session.add(user)`. Signature `get_or_create_saml_user` ora 3-tupla `(user, created, error_code)`. Login page mostra "saml_license_limit" message |
-| `[03.6.3]` | 🔴 | `d6b1f66` | Setup wizard step 4-6 (seed/proxy/sync) ora gated da `_is_wizard_window()` data-driven (`User.query.count() <= 1`) invece che session flag persa in produzione. Step 1-3 mantengono `_is_setup_blocked()` security check |
+| `[03.6.3]` | 🔴 | `d6b1f66` | ✅ **VERIFIED 2026-05-04** happy path 1-8 (wipe DB → wizard fresh → step 4 Seed ✅ 200 + auto-advance, step 5 Proxy ✅, step 6 Initial Sync ✅, Complete Setup ✅, login + Service Catalog popolato ✅). Edge "lock after 2nd user" non testabile in Community edition (license cap = 1 user, no invite path — vedi `[06.4.1]`); la gate `User.query.count() <= 1` è comunque verificata via codice in `app/setup.py:77`. |
 | `[05.21.1]` audit | 📋 | `ea96b07` | Handoff doc `FIX-HANDOFF-sentrikat-web.md` aggiornato con audit precise dalla sessione web: 3 fonti (non 4), `plans_config.py` è già SoT, fix reduce a public endpoint + landing build-time fetch + admin/plans proxy decision |
 
 *(aggiornati a mano ad ogni commit)*
