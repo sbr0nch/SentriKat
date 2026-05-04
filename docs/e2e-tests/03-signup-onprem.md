@@ -2921,6 +2921,34 @@ In on-prem demo senza agent: praticamente impossibile vedere match per prodotti 
 
 ## 03.20 — Logging / Observability — 2026-05-04
 
+### [03.20.2] 🔵 **INFO/UX** — Sezione "General Settings" mescola Date/Time + Network/Proxy + SSL toggle confusionariamente
+
+**Discovery context**: emerso durante verify `[03.16.1]` (SSL Verify confirm guard).
+
+**Steps**:
+1. Login admin → Settings → System → General tab.
+2. Sotto unico header "General Settings" ci sono blocchi disomogenei:
+   - "Date & Time Display" (timezone + format)
+   - "Network & Proxy" (HTTP/HTTPS proxy + bypass list + **SSL toggle**)
+
+**Issues observed**:
+- Il toggle "Verify SSL Certificates" sta nel blocco "Network & Proxy" ma controlla TUTTE le chiamate API (NVD, CISA KEV, license server, webhooks, issue trackers) — non solo proxy.
+- La descrizione `Disable if behind corporate proxy with SSL inspection (not recommended for production)` cita solo proxy → fuorviante: l'utente potrebbe pensare che disabilitando si rompe solo proxy, mentre rompe tutte le verifiche TLS.
+- Bottone `Save Proxy Settings` salva ANCHE l'SSL toggle → label fuorviante: chiamarlo `Save Network Settings` sarebbe più preciso.
+- Confirm dialog è browser-native (`confirm()` Chrome grigio): visivamente meno coerente del resto della UI Bootstrap. Sostituire con modal custom darebbe un look più premium e permetterebbe rich-text/icone.
+- Date/Time + Network sotto stesso header "General" senza divisore visivo netto.
+
+**Severity**: 🔵 INFO (UX polish). Non blocca funzionalità.
+**Deployment scope**: 🏢 on-prem (verifica anche ☁️ SaaS — probabilmente identico).
+**Fix proposto** (mezza giornata di lavoro):
+- Spezzare "General Settings" in 2 card visibili: "Date & Time" e "Network Security".
+- Spostare il toggle SSL fuori dal box Proxy o aggiungere divisore + sub-heading "TLS / Certificate Verification".
+- Rinominare bottone in "Save Network Settings".
+- Aggiornare descrizione SSL: "Disabling stops TLS verification for ALL outbound API calls (NVD, CISA, license, webhooks, issue trackers). Only disable if behind a corporate SSL-inspecting proxy. Never on the public internet."
+- Sostituire `confirm()` con modal Bootstrap custom (riusare il pattern già presente in admin panel).
+
+---
+
 ### [03.20.1] ✅ **VERIFIED 2026-05-04** — Logging silenziato post-boot: tutti i file `/var/log/sentrikat/*.log` restano vuoti durante runtime
 
 **Status**: ✅ **FIXED + VERIFIED** 2026-05-04. Commit chain: `f4cbb68` (gosu) + `702f1bc` (setup_logging restore post-stamp) + `fc3f760` (alembic disable_existing_loggers=False).

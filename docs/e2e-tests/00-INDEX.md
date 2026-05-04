@@ -341,11 +341,11 @@ Quando il volume di test diventa grosso, ogni area avrà il suo sub-file (`03.11
 
 | Bug | Sev | Commit | Fix sintetico |
 |---|---|---|---|
-| `[03.16.1]` | 🔴 | `8818d9d` | SSL Verify default era già ON in 6 punti; aggiunta `confirm()` guard su disabilitazione |
-| `[03.18.4]` | 🔵 | `708a093` | `pollProgress()` cleanup su 404/503 via `hideProgressBanner()` |
-| `[06.9.3]` | 🟡 | `89436ef` | Assignments CVE cell — separato `cveId` (data) da `cveCell` (HTML placeholder) |
-| `[06.3.12]` | 🟡 | `c3b773f` | Username error → "Username is permanent and cannot be changed." (punto 1 del fix prescriptivo; punti 2-5 follow-up) |
-| `[06.9.2]` | 🔴 | `2a44f4b` | Root cause: CSRF token mancante (non payload). 6 fetch (assignments + dashboard) ora passano `X-CSRFToken: getCSRFToken()` |
+| `[03.16.1]` | 🔴 | `8818d9d` | ✅ **VERIFIED 2026-05-04** confirm guard scatta su disable, testo MITM/NVD/CISA/license/webhook completo, OK/Cancel funzionano. Default ON confermato da codice (`admin_panel.html:2197 checked`). UX side-finding 🔵 nuovo `[03.20.2]` (sezione confusionaria + button label generica). |
+| `[03.18.4]` | 🔵 | `708a093` | ✅ **VERIFIED 2026-05-04** via code review (`base.html:3849-3851` ha `if (status===404 \|\| status===503) hideProgressBanner();`, `hideProgressBanner` clear sessionStorage + clearInterval). Live test DevTools rinviato per limitazioni Chrome paste-protection — fix code-correct, severity INFO non giustifica setup live |
+| `[06.9.3]` | 🟡 | `89436ef` | ✅ **VERIFIED 2026-05-04** via code review (`assignments.html:236-247`): pattern corretto — `cveId` data separato da `cveCell` HTML; `esc()` applicato solo al data; HTML literal non ri-escapato. Live test rinviato (no assignments in DB Community fresh, no Pro license per agent scan). Bonus: durante test `[03.18.4]` osservato `cpe_backfill_99999` → 404 → stop polling ✅. |
+| `[06.3.12]` | 🟡 | `c3b773f` | ✅ **VERIFIED 2026-05-04** via code review (`routes.py:6977` ha la stringa nuova `'Username is permanent and cannot be changed.'`). Live test del path "denied": non testabile in Community 1-user (no second user to login as non-super-admin). Side finding 🔵 nuovo `[06.3.12.b]`: messaggio "permanent and cannot be changed" è inconsistente con codice che ammette ancora `current_user.is_super_admin()` a cambiare — semantica mixed. |
+| `[06.9.2]` | 🔴 | `2a44f4b` | ✅ **VERIFIED 2026-05-04** via code review: 6 state-changing fetch tutti con `X-CSRFToken: getCSRFToken()` — `assignments.html:485,512` (PUT/DELETE) + `dashboard.html:3457,3516,3538,3591` (POST/PUT × 4). Live test non eseguibile in Community DB fresh (no assignments). Fix completo, verificabile end-to-end appena ci sono dati. |
 | `[03.18.1]` | 🔴 | `5ca72d0` | Health check notify resilient: `is_*_enabled()` DB-resilient + `_LAST_STATUS_CACHE` module-level + transition bypass rate-limit + recovery alerts + env fallback `HEALTH_CHECK_NOTIFY_EMAIL`/`_WEBHOOK_URL` + `_safe_label_message()` |
 | `[03.16.2]` | 🟡 | `1fc1dff` | Compliance preset dropdown (Custom/NIST/SOC2/ISO27001/PCI-DSS) cross-tab apply, default NIST, persisted via `/api/settings/security` |
 
