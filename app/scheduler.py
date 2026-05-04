@@ -350,7 +350,21 @@ def start_scheduler(app):
     if not _acquire_scheduler_leader_lock(app):
         return None
 
-    scheduler = BackgroundScheduler()
+    # Defaults applied to every scheduled job ([03.5.6a]):
+    # - misfire_grace_time=300s: tolerate up to 5 min of master delay (e.g.
+    #   gunicorn worker recycle, container restart, brief load spike) before
+    #   the run is marked missed. Default 1s is too tight in production.
+    # - coalesce=True: if a job missed N runs while the scheduler was down,
+    #   execute the trigger once on resume instead of N times back-to-back
+    #   (which can DDoS NVD/CISA APIs after a long outage).
+    # - max_instances=1: never run two copies of the same job at once
+    #   (e.g. a slow CPE backfill overlapping its next scheduled run).
+    job_defaults = {
+        'misfire_grace_time': 300,
+        'coalesce': True,
+        'max_instances': 1,
+    }
+    scheduler = BackgroundScheduler(job_defaults=job_defaults)
     _scheduler = scheduler
 
     # Get the user-configured display timezone for all cron-based jobs
