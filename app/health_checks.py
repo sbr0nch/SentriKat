@@ -275,9 +275,17 @@ def check_worker_thread():
                         f'Worker pool stopped! {pending} jobs pending, {processing} processing',
                         'stopped', details)
             else:
-                _record('worker_thread', 'warning',
-                        'Worker pool is not running (no pending jobs)',
-                        'stopped', details)
+                # Worker pool starts lazily on the first inventory submit.
+                # In a fresh install (no agents yet), there's nothing to
+                # process, so 'not running' is the *correct* idle state —
+                # not an alert. Report green/idle to avoid scaring
+                # operators with a permanent yellow on the dashboard
+                # ([03.18.2]). It will flip to running on first job
+                # arrival; if pending jobs ever exceed 0 with the pool
+                # still down, the branch above (critical) catches that.
+                _record('worker_thread', 'ok',
+                        'Worker pool idle (no agents — starts lazily on first job)',
+                        'idle', details)
         elif active_count >= WORKER_POOL_SIZE and pending > 10:
             _record('worker_thread', 'warning',
                     f'Worker pool at capacity ({active_count}/{WORKER_POOL_SIZE} busy, '
