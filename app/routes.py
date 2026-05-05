@@ -1987,6 +1987,17 @@ def update_product(product_id):
     if 'description' in data:
         product.description = data['description']
     if 'active' in data:
+        # [01.18.5 deactivated semantics] If reactivating a previously
+        # deactivated product, re-check the cap — otherwise the
+        # 'deactivate one to free a slot, add a new one, then turn the
+        # old one back on' sequence would land at limit+1 active.
+        if data['active'] and not product.active:
+            from app.licensing import check_product_limit
+            allowed, limit, message = check_product_limit(
+                organization_id=product.organization_id
+            )
+            if not allowed:
+                return jsonify({'error': message, 'license_limit': True}), 403
         product.active = data['active']
     # CPE fields for NVD matching
     old_cpe_vendor = product.cpe_vendor
