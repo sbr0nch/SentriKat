@@ -890,7 +890,36 @@ def check_license_can_add_agent(organization_id, is_new_agent=True):
                 'feature_enabled': False,
                 'upgrade_required': True
             }
-        # SaaS: skip global RSA license checks, allow agent
+
+        # [01.18.5 SaaS audit] Enforce SubscriptionPlan.max_agents per
+        # tenant. Without this, an org on the Free plan (max_agents=3)
+        # could enroll thousands of agents because the SaaS branch
+        # used to short-circuit straight to "allow agent". Mirror the
+        # check_product_limit() SaaS pattern: load the plan, count
+        # active assets in this org, deny when at/over the cap.
+        from app.models import Subscription, SubscriptionPlan, Asset as _Asset
+        if is_new_agent:
+            sub = Subscription.query.filter_by(
+                organization_id=organization_id
+            ).first()
+            plan = sub.plan if sub and sub.plan else SubscriptionPlan.query.filter_by(name='free').first()
+            plan_max_agents = getattr(plan, 'max_agents', None) if plan else None
+            if plan_max_agents is not None and plan_max_agents >= 0:
+                current_agents = _Asset.query.filter_by(
+                    organization_id=organization_id
+                ).filter(_Asset.active == True).count() or 0
+                if current_agents >= plan_max_agents:
+                    return False, (
+                        f"Plan limit reached: {plan_max_agents} agents. "
+                        f"Upgrade your subscription to add more."
+                    ), {
+                        'edition': 'saas',
+                        'current_agents': current_agents,
+                        'max_agents': plan_max_agents,
+                        'limit_reached': True,
+                        'plan_limit': True
+                    }
+
         # Update usage tracking
         try:
             license_obj = AgentLicense.query.filter_by(organization_id=organization_id).first()
