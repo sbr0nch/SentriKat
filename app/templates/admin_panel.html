@@ -1637,13 +1637,13 @@
                                             <form id="replyToForm">
                                                 <div class="input-group">
                                                     <input type="email" class="form-control" id="emailReplyTo"
-                                                           placeholder="support@yourcompany.com"
+                                                           placeholder="e.g. support@example.com"
                                                            value="">
                                                     <button class="btn btn-primary" type="button" onclick="saveReplyTo()">
                                                         <i class="bi bi-check-lg"></i>
                                                     </button>
                                                 </div>
-                                                <small class="form-text text-muted">Recipients will reply to this address instead of noreply@</small>
+                                                <small class="form-text text-muted">Recipients will reply to this address instead of <code>noreply@</code>. Leave empty to omit the Reply-To header. The placeholder above is just an example — it is NOT applied automatically.</small>
                                             </form>
                                         </div>
                                     </div>
@@ -2184,21 +2184,29 @@
                                         <small class="form-text text-muted">Format for displaying dates and times</small>
                                     </div>
 
-                                    <!-- Network/Proxy Settings -->
+                                    <!-- TLS / Certificate Verification (separate from proxy: applies
+                                         to ALL outbound API calls regardless of proxy use) [03.20.2] -->
                                     <div class="col-12 mt-4">
-                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-hdd-network me-2"></i>Network & Proxy</h6>
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-shield-lock me-2"></i>TLS / Certificate Verification</h6>
                                     </div>
                                     <div class="col-md-12">
-                                        <div class="alert alert-info mb-3">
-                                            <i class="bi bi-info-circle me-2"></i>
-                                            Configure proxy settings for external API connections (CISA KEV, NVD). Required if SentriKat is behind a corporate proxy.
-                                        </div>
                                         <div class="form-check form-switch">
                                             <input type="checkbox" class="form-check-input" id="verifySSL" checked>
                                             <label class="form-check-label fw-semibold" for="verifySSL">
                                                 Verify SSL Certificates
                                             </label>
-                                            <small class="form-text text-muted d-block">Disable if behind corporate proxy with SSL inspection (not recommended for production)</small>
+                                            <small class="form-text text-muted d-block">Applies to <strong>all outbound API calls</strong> (NVD, CISA KEV, license server, webhooks, issue trackers). Only disable if behind a corporate SSL-inspecting proxy. Never on the public internet.</small>
+                                        </div>
+                                    </div>
+
+                                    <!-- HTTP Proxy (independent of TLS toggle above) -->
+                                    <div class="col-12 mt-4">
+                                        <h6 class="text-muted border-bottom pb-2"><i class="bi bi-hdd-network me-2"></i>HTTP Proxy</h6>
+                                    </div>
+                                    <div class="col-md-12">
+                                        <div class="alert alert-info mb-3">
+                                            <i class="bi bi-info-circle me-2"></i>
+                                            Optional: configure proxy for external API connections (CISA KEV, NVD, etc.) when SentriKat is deployed behind a corporate proxy.
                                         </div>
                                     </div>
 
@@ -2223,7 +2231,7 @@
                                     <div class="col-md-12">
                                         <hr>
                                         <button type="button" class="btn btn-primary" onclick="saveProxySettings()">
-                                            <i class="bi bi-check-circle me-1"></i>Save Proxy Settings
+                                            <i class="bi bi-check-circle me-1"></i>Save Network Settings
                                         </button>
                                         <button type="button" class="btn btn-outline-secondary ms-2" onclick="testProxyConnection()">
                                             <i class="bi bi-plug me-1"></i>Test Connection

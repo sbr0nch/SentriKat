@@ -21,7 +21,17 @@ migrate = Migrate()
 csrf = CSRFProtect()
 # Rate limits: Allow reasonable admin operations while preventing abuse
 # Exempt admin/manager routes from strict limits via decorator overrides
-limiter = Limiter(key_func=get_remote_address, default_limits=["1000 per day", "200 per hour"])
+#
+# Storage: prefer Redis when RATELIMIT_STORAGE_URI is set so multi-worker
+# gunicorn deployments share rate-limit state. Fall back to in-memory
+# only when not configured (single-worker dev), but suppress the noisy
+# Flask-Limiter UserWarning that polluted boot logs ([03.5.4]).
+_ratelimit_storage = os.environ.get('RATELIMIT_STORAGE_URI', '').strip() or 'memory://'
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["1000 per day", "200 per hour"],
+    storage_uri=_ratelimit_storage,
+)
 
 
 def _apply_schema_migrations(logger, db_uri):
