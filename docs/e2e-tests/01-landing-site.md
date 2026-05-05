@@ -508,6 +508,8 @@ Customer scarica e installa on-prem → l'app banner mostra "COMMUNITY EDITION -
 **Deployment scope**: 🏢 on-prem (esclusivo — il SaaS ha tier diversi).
 **Status**: ✅ FIXED core side (`4ea5606`); landing side OK (numeri già corretti). Solo verify post-merge.
 
+**VERIFIED 2026-05-05** post-merge: pull main + rebuild + login admin → banner mostra "Community Edition - Limited to 3 users, 100 products" ✅; Add User (1° aggiuntivo) success ✅; (2° aggiuntivo) success ✅; (3°) error "Community Edition limit: 3 users" ✅.
+
 ### [01.18.2] 🔴 **HIGH** — Terminology cluster on-prem free tier: 4 nomi diversi
 
 **Discovery context**: stesso walkthrough W1.
@@ -554,4 +556,20 @@ Sulla stessa landing pagina e nell'app ci sono **4 nomi diversi** per il tier 0 
 
 **Severity**: 🔴 HIGH — GDPR compliance hard requirement + counter accuracy + dev-test workflow.
 **Deployment scope**: 🌐 landing + 🏛 portal admin + 🔐 license-server (NO core).
-**Status**: ❌ open — handoff cross-repo a sentrikat-web team.
+**Status**: ❌ open — handoff cross-repo a sentrikat-web team. Architectural decisions confirmed 2026-05-05: 90gg audit retention, counter reversibile, new permission `customer.hard_delete` super-admin only, JSON dump in `audit_archive` table pre-delete con retention 24 mesi.
+
+### [01.18.4] 🟡 **MEDIUM** — Welcome email 'DEMO' badge / inconsistent tier name
+
+**Discovery context**: segnalato dal team SentriKat-web durante implementazione `[01.18.2]` (terminology cluster), 2026-05-05.
+
+Welcome email template (in `license-server/app/templates/email/` o `portal/src/emails/`) usa probabilmente 'DEMO' o 'Evaluation' o 'Free Trial' invece di 'Community Edition'. Da grep esaustivo del repo `sentrikat-web`.
+
+**Fix richiesto** (cross-repo, web team):
+- Grep: `grep -rn "DEMO\|Evaluation\|Free Trial" license-server/app/templates/ portal/src/emails/`
+- Sostituire con 'Community Edition' (per on-prem) o nome corretto del tier SaaS (da verificare PRODUCT-TERMINOLOGY.md)
+- Stesso fix per email footer se cita il tier
+- Smoke: signup test → email arriva → testo dice 'Community Edition'
+
+**Severity**: 🟡 MEDIUM — non blocker per launch, ma cluster con `[01.18.2]` già in fix. Se accorpato al branch email deliverability `[02.4.5-4.8]` → effort 30 min - 1h aggiuntivo.
+**Deployment scope**: 🔐 license-server email + 🏛 portal customer email (NO core).
+**Status**: ❌ open — handoff cross-repo, può essere accorpato a `claude/fix-welcome-email-deliverability-02-4-5` branch se in scope.
