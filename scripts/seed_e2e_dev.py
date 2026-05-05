@@ -125,6 +125,17 @@ def seed():
             db.session.add(p)
             products.append(p)
         db.session.flush()
+        # Also populate the many-to-many product_organizations join table.
+        # Dashboard counters (`/api/vulnerabilities/stats`) query only
+        # this table, NOT the legacy Product.organization_id column —
+        # without this join row the dashboard shows 0 even with seeded
+        # matches. Real flows (agent inventory POST / manual UI Add)
+        # populate both fields automatically; the script must do the
+        # same to mirror real state.
+        for p in products:
+            if org not in p.organizations.all():
+                p.organizations.append(org)
+        db.session.flush()
         print(f'  Products: {len(products)}')
 
         # ---------------------------------------------------------------
