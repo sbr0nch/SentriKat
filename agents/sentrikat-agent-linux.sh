@@ -1210,9 +1210,24 @@ send_container_scan_results() {
             return 0
         else
             log_warn "Container scan upload attempt $i failed: HTTP $http_code - $body"
-            # Don't retry on auth errors - key is invalid or revoked
-            if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
-                log_error "API key is invalid or revoked. Check your key in agent.conf"
+            # Don't retry on auth errors — differentiate 401 (auth) vs
+            # 403 (license/feature/limit). Surface server msg if present.
+            if [[ "$http_code" == "401" ]]; then
+                log_error "Authentication failed (HTTP 401). API key missing, invalid, or revoked. Check agent.conf."
+                rm -f "$tmpfile"
+                return 1
+            elif [[ "$http_code" == "403" ]]; then
+                local body_msg
+                body_msg=$(printf '%s' "$body" | python3 -c "import sys,json;
+try:
+ d=json.load(sys.stdin); m=d.get('message') or d.get('error') or ''
+ h=d.get('hint',''); print(m + (' ('+h+')' if h else ''))
+except: pass" 2>/dev/null)
+                if [[ -n "$body_msg" ]]; then
+                    log_error "Server refused inventory upload (HTTP 403): $body_msg"
+                else
+                    log_error "Server refused (HTTP 403). API key valid but access denied — check license limits or feature gate."
+                fi
                 rm -f "$tmpfile"
                 return 1
             fi
@@ -1377,9 +1392,24 @@ collect_and_send_lockfiles() {
             return 0
         else
             log_warn "Dependency scan upload attempt $i failed: HTTP $http_code"
-            # Don't retry on auth errors - key is invalid or revoked
-            if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
-                log_error "API key is invalid or revoked. Check your key in agent.conf"
+            # Don't retry on auth errors — differentiate 401 (auth) vs
+            # 403 (license/feature/limit). Surface server msg if present.
+            if [[ "$http_code" == "401" ]]; then
+                log_error "Authentication failed (HTTP 401). API key missing, invalid, or revoked. Check agent.conf."
+                rm -f "$tmpfile"
+                return 1
+            elif [[ "$http_code" == "403" ]]; then
+                local body_msg
+                body_msg=$(printf '%s' "$body" | python3 -c "import sys,json;
+try:
+ d=json.load(sys.stdin); m=d.get('message') or d.get('error') or ''
+ h=d.get('hint',''); print(m + (' ('+h+')' if h else ''))
+except: pass" 2>/dev/null)
+                if [[ -n "$body_msg" ]]; then
+                    log_error "Server refused inventory upload (HTTP 403): $body_msg"
+                else
+                    log_error "Server refused (HTTP 403). API key valid but access denied — check license limits or feature gate."
+                fi
                 rm -f "$tmpfile"
                 return 1
             fi
@@ -2274,7 +2304,13 @@ heartbeat_mode() {
 
     # Validate HTTPS
     if [[ "$SERVER_URL" == http://* ]] && [[ "${ALLOW_HTTP:-false}" != "true" ]]; then
-        log_error "SERVER_URL must use HTTPS. Use --allow-http to override (NOT recommended for production)."
+        log_error "HTTPS REQUIRED — agent refuses to send inventory data over plain HTTP."
+        log_error "  Reason: API keys and inventory metadata travel cleartext on the wire."
+        log_error "  Recommended: configure your SentriKat server with TLS (the on-prem"
+        log_error "    Docker image ships with nginx-ssl.conf.template ready to use)."
+        log_error "    Docs: https://docs.sentrikat.com/operations/tls-setup/"
+        log_error "  Override (DEV/LAB ONLY): re-run with --allow-http"
+        log_error "  SERVER_URL detected: $SERVER_URL"
         exit 1
     fi
 
@@ -2349,7 +2385,13 @@ main() {
 
     # Validate HTTPS (after config is loaded, before any API calls)
     if [[ "$SERVER_URL" == http://* ]] && [[ "${ALLOW_HTTP:-false}" != "true" ]]; then
-        log_error "SERVER_URL must use HTTPS. Use --allow-http to override (NOT recommended for production)."
+        log_error "HTTPS REQUIRED — agent refuses to send inventory data over plain HTTP."
+        log_error "  Reason: API keys and inventory metadata travel cleartext on the wire."
+        log_error "  Recommended: configure your SentriKat server with TLS (the on-prem"
+        log_error "    Docker image ships with nginx-ssl.conf.template ready to use)."
+        log_error "    Docs: https://docs.sentrikat.com/operations/tls-setup/"
+        log_error "  Override (DEV/LAB ONLY): re-run with --allow-http"
+        log_error "  SERVER_URL detected: $SERVER_URL"
         exit 1
     fi
 

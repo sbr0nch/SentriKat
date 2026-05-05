@@ -2133,8 +2133,36 @@ def report_inventory():
             p_ecosystem = product_data.get('ecosystem')
 
             if not product:
+                # License product cap: if creating this product would
+                # cross max_products, force the new product to the import
+                # queue regardless of auto_approve setting. The admin can
+                # then manually pick which products to import once the
+                # cap is reached, instead of the agent silently dropping
+                # the data ([01.18.5] product overflow → queue).
+                from app.licensing import check_product_limit
+                cap_allowed, cap_limit, cap_msg = check_product_limit()
+                if not cap_allowed:
+                    result = _queue_to_import_queue(
+                        organization.id, vendor, product_name, version, hostname,
+                        source_type=p_source_type, ecosystem=p_ecosystem
+                    )
+                    if result == 'queued':
+                        products_queued += 1
+                        continue
+                    elif result == 'auto_linked':
+                        # Existing global product → linked to org. The
+                        # link doesn't increment max_products (already
+                        # in the global pool), so accept it.
+                        product = Product.query.filter_by(
+                            vendor=vendor, product_name=product_name
+                        ).first()
+                        if not product:
+                            continue
+                    else:
+                        continue
+
                 # Check auto_approve: if False, queue or auto-link instead of creating
-                if not auto_approve:
+                if not product and not auto_approve:
                     result = _queue_to_import_queue(organization.id, vendor, product_name, version, hostname,
                                                     source_type=p_source_type, ecosystem=p_ecosystem)
                     if result == 'queued':

@@ -1160,9 +1160,42 @@ function Send-Inventory {
 
             Write-Log "Attempt $i failed: $errorMsg" -Level "WARN"
 
-            # Don't retry on auth errors - key is invalid
+            # Don't retry on auth errors — but differentiate cleanly:
+            # 401 = API key invalid/missing. 403 = forbidden, server has
+            # multiple reasons (license tier, feature gated, agent limit
+            # reached). We try to parse the JSON body to surface the
+            # actual server message instead of misleading the customer
+            # with 'API key invalid' when their key is fine.
             if ($_.Exception.Response -and $_.Exception.Response.StatusCode -in @(401, 403)) {
-                Write-Log "API key is invalid or revoked. Check your key in config.json" -Level "ERROR"
+                $statusCode = [int]$_.Exception.Response.StatusCode
+                $serverMsg = $null
+                try {
+                    $stream = $_.Exception.Response.GetResponseStream()
+                    $reader = New-Object System.IO.StreamReader($stream)
+                    $bodyText = $reader.ReadToEnd()
+                    if ($bodyText) {
+                        $bodyJson = $bodyText | ConvertFrom-Json -ErrorAction SilentlyContinue
+                        if ($bodyJson) {
+                            $serverMsg = if ($bodyJson.message) { $bodyJson.message } `
+                                         elseif ($bodyJson.error) { $bodyJson.error } `
+                                         else { $null }
+                            if ($bodyJson.hint) { $serverMsg = "$serverMsg ($($bodyJson.hint))" }
+                        }
+                    }
+                } catch { }
+
+                if ($statusCode -eq 401) {
+                    Write-Log "Authentication failed (HTTP 401). The API key in config.json is missing, invalid, or revoked." -Level "ERROR"
+                    Write-Log "Check the key on the server (Integrations > Agent Keys) and re-install if needed." -Level "ERROR"
+                } elseif ($statusCode -eq 403) {
+                    if ($serverMsg) {
+                        Write-Log "Server refused inventory upload (HTTP 403): $serverMsg" -Level "ERROR"
+                    } else {
+                        Write-Log "Server refused inventory upload (HTTP 403). The API key is valid but the server denied access." -Level "ERROR"
+                    }
+                    Write-Log "Common causes: license tier limits (agents/products cap), feature gated to Pro, or organization has been deactivated." -Level "ERROR"
+                    Write-Log "Open the SentriKat UI as admin and check Integrations > Agent Keys for current status." -Level "ERROR"
+                }
                 break
             }
 
@@ -2474,7 +2507,29 @@ function Main {
 
     # Validate HTTPS (after config is loaded, before any API calls)
     if ($config.ServerUrl -match '^http://' -and -not $AllowHttp) {
-        Write-Host "ERROR: ServerUrl must use HTTPS. Use -AllowHttp to override (NOT recommended)." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "===========================================================" -ForegroundColor Red
+        Write-Host "  HTTPS REQUIRED" -ForegroundColor Red
+        Write-Host "===========================================================" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "The agent refuses to send inventory data over plain HTTP." -ForegroundColor Yellow
+        Write-Host "Reason: API keys and inventory metadata travel in cleartext" -ForegroundColor Yellow
+        Write-Host "        and could be sniffed on the network." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "How to fix (recommended)" -ForegroundColor Cyan
+        Write-Host "  Configure your SentriKat server with TLS. The on-prem" -ForegroundColor Gray
+        Write-Host "  Docker image ships with nginx-ssl.conf.template ready" -ForegroundColor Gray
+        Write-Host "  to use. Steps:" -ForegroundColor Gray
+        Write-Host "    https://docs.sentrikat.com/operations/tls-setup/" -ForegroundColor White
+        Write-Host ""
+        Write-Host "Override (DEV/LAB ONLY — never in production)" -ForegroundColor Cyan
+        Write-Host "  Re-run with: -AllowHttp" -ForegroundColor Gray
+        Write-Host "  Example:" -ForegroundColor Gray
+        Write-Host "    .\sentrikat-agent.ps1 -Install -AllowHttp" -ForegroundColor White
+        Write-Host ""
+        Write-Host "Server URL detected: $($config.ServerUrl)" -ForegroundColor DarkGray
+        Write-Host "===========================================================" -ForegroundColor Red
+        Write-Host ""
         exit 1
     }
 

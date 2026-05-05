@@ -2085,7 +2085,13 @@ heartbeat_mode() {
 
     # Validate HTTPS
     if [[ "$SERVER_URL" == http://* ]] && [[ "${ALLOW_HTTP:-false}" != "true" ]]; then
-        log_error "SERVER_URL must use HTTPS. Use --allow-http to override (NOT recommended for production)."
+        log_error "HTTPS REQUIRED — agent refuses to send inventory data over plain HTTP."
+        log_error "  Reason: API keys and inventory metadata travel cleartext on the wire."
+        log_error "  Recommended: configure your SentriKat server with TLS (the on-prem"
+        log_error "    Docker image ships with nginx-ssl.conf.template ready to use)."
+        log_error "    Docs: https://docs.sentrikat.com/operations/tls-setup/"
+        log_error "  Override (DEV/LAB ONLY): re-run with --allow-http"
+        log_error "  SERVER_URL detected: $SERVER_URL"
         exit 1
     fi
 
@@ -2154,7 +2160,13 @@ main() {
 
     # Validate HTTPS (after config is loaded, before any API calls)
     if [[ "$SERVER_URL" == http://* ]] && [[ "${ALLOW_HTTP:-false}" != "true" ]]; then
-        log_error "SERVER_URL must use HTTPS. Use --allow-http to override (NOT recommended for production)."
+        log_error "HTTPS REQUIRED — agent refuses to send inventory data over plain HTTP."
+        log_error "  Reason: API keys and inventory metadata travel cleartext on the wire."
+        log_error "  Recommended: configure your SentriKat server with TLS (the on-prem"
+        log_error "    Docker image ships with nginx-ssl.conf.template ready to use)."
+        log_error "    Docs: https://docs.sentrikat.com/operations/tls-setup/"
+        log_error "  Override (DEV/LAB ONLY): re-run with --allow-http"
+        log_error "  SERVER_URL detected: $SERVER_URL"
         exit 1
     fi
 
