@@ -441,13 +441,21 @@ class LicenseInfo:
         self.license_id = None
         self.issued_at = None
         self.expires_at = None
-        self.max_users = 1
-        self.max_organizations = 1
-        self.max_products = 50
-        # Agent limits (from signed license - tamper-proof)
-        self.max_agents = 5  # Demo includes 5 agents (PRO has 10+ with agent packs)
+        # Defaults pulled from LICENSE_TIERS['community'] so a single
+        # source of truth governs the values. Hardcoding them here was
+        # the silent bug behind [01.18.5]: bumping LICENSE_TIERS to 3
+        # users / 100 products / 10 agents / push_agents-enabled didn't
+        # actually take effect, because get_license() returns a fresh
+        # LicenseInfo with these constructor defaults whenever no signed
+        # license payload is present (= the entire Community customer
+        # base).
+        _community = LICENSE_TIERS['community']
+        self.max_users = _community['max_users']
+        self.max_organizations = _community['max_organizations']
+        self.max_products = _community['max_products']
+        self.max_agents = _community['max_agents']
         self.max_agent_api_keys = 0
-        self.features = []
+        self.features = list(_community['features'])
         # Underlying signature/parse validity. ``is_valid`` is exposed as a
         # property that folds in expiry + revocation so every caller gets the
         # full enforcement story without having to remember each flag.
