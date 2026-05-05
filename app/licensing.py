@@ -1195,14 +1195,58 @@ def check_org_limit():
     return license_info.check_limit('organizations', current_orgs)
 
 
-def check_product_limit():
+def check_product_limit(organization_id=None):
     """Check if product limit is reached.
-    SaaS: limits are managed per-org by subscription plan, not globally.
+
+    On-prem: global cap from license_info.max_products.
+    SaaS: per-tenant cap from the org's SubscriptionPlan.max_products
+          ([01.18.5] — same enforcement story as on-prem, just sourced
+          from the plan instead of the signed license).
+
+    Args:
+        organization_id: optional, only used in SaaS mode. If omitted in
+            SaaS mode the call returns 'no limit' (used by call sites
+            that genuinely have no org context, e.g. some background
+            jobs). For agent inventory + import queue approval,
+            ALWAYS pass the org_id.
+
+    Returns: (allowed: bool, limit: int, message: Optional[str])
     """
     from app.saas import is_saas_mode
-    if is_saas_mode():
-        return True, -1, None  # SaaS: no global limit
     from app.models import Product
+
+    if is_saas_mode():
+        if organization_id is None:
+            return True, -1, None
+        from app.models import Subscription, SubscriptionPlan
+        sub = Subscription.query.filter_by(
+            organization_id=organization_id
+        ).first()
+        if not sub or not sub.plan:
+            # No subscription = use free plan defaults
+            plan = SubscriptionPlan.query.filter_by(name='free').first()
+            if not plan:
+                return True, -1, None
+        else:
+            plan = sub.plan
+        limit = plan.max_products
+        if limit is None or limit < 0:
+            return True, -1, None
+        # Count products linked to this org via the m2m join
+        from app.models import product_organizations
+        from sqlalchemy import select, func
+        current = db.session.execute(
+            select(func.count()).select_from(product_organizations).where(
+                product_organizations.c.organization_id == organization_id
+            )
+        ).scalar() or 0
+        if current >= limit:
+            return False, limit, (
+                f'Plan limit reached: {limit} products. '
+                f'Upgrade your subscription to add more.'
+            )
+        return True, limit, None
+
     license_info = get_license()
     current_products = Product.query.count() or 0
     return license_info.check_limit('products', current_products)
