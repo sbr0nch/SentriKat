@@ -166,7 +166,15 @@ LICENSE_TIERS = {
         'max_organizations': 1,
         'max_products': 100,
         'max_agents': 10,
-        'features': [],
+        # Community gets the basic agent push capability so the
+        # advertised "10 Agents (Windows/Linux/macOS)" actually works.
+        # Limits are still enforced numerically (max_agents=10,
+        # max_products=100). Agents over the cap get rejected with a
+        # specific 'agent limit reached' message; products over the
+        # cap go to the import queue instead of being silently dropped.
+        # Pro adds the enterprise-grade features (SSO, multi-org,
+        # white-label, alerts).
+        'features': ['push_agents'],
         'powered_by_required': True,
         'is_demo': True
     },
@@ -200,7 +208,12 @@ PROFESSIONAL_FEATURES = [
     'backup_restore',
     'audit_export',
     'multi_org',
-    'push_agents',  # Agent deployment feature
+    # 'push_agents' moved to BASE_FEATURES — Community is advertised as
+    # supporting 10 endpoints (Windows, Linux, macOS) on the public
+    # pricing card, so the agent push capability has to work within
+    # those numerical limits. Pro distinguishes itself via the
+    # enterprise-grade items above (SSO, multi-org, alerts, etc.),
+    # not by gating the basic 'agent reports inventory' flow.
     'jira_integration',  # Jira ticket creation
     'compliance_reports',  # CISA BOD 22-01 compliance reports
     'sbom_export',  # Sprint 4 #32 - CycloneDX/SPDX export

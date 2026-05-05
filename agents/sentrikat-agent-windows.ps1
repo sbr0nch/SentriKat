@@ -1160,9 +1160,42 @@ function Send-Inventory {
 
             Write-Log "Attempt $i failed: $errorMsg" -Level "WARN"
 
-            # Don't retry on auth errors - key is invalid
+            # Don't retry on auth errors — but differentiate cleanly:
+            # 401 = API key invalid/missing. 403 = forbidden, server has
+            # multiple reasons (license tier, feature gated, agent limit
+            # reached). We try to parse the JSON body to surface the
+            # actual server message instead of misleading the customer
+            # with 'API key invalid' when their key is fine.
             if ($_.Exception.Response -and $_.Exception.Response.StatusCode -in @(401, 403)) {
-                Write-Log "API key is invalid or revoked. Check your key in config.json" -Level "ERROR"
+                $statusCode = [int]$_.Exception.Response.StatusCode
+                $serverMsg = $null
+                try {
+                    $stream = $_.Exception.Response.GetResponseStream()
+                    $reader = New-Object System.IO.StreamReader($stream)
+                    $bodyText = $reader.ReadToEnd()
+                    if ($bodyText) {
+                        $bodyJson = $bodyText | ConvertFrom-Json -ErrorAction SilentlyContinue
+                        if ($bodyJson) {
+                            $serverMsg = if ($bodyJson.message) { $bodyJson.message } `
+                                         elseif ($bodyJson.error) { $bodyJson.error } `
+                                         else { $null }
+                            if ($bodyJson.hint) { $serverMsg = "$serverMsg ($($bodyJson.hint))" }
+                        }
+                    }
+                } catch { }
+
+                if ($statusCode -eq 401) {
+                    Write-Log "Authentication failed (HTTP 401). The API key in config.json is missing, invalid, or revoked." -Level "ERROR"
+                    Write-Log "Check the key on the server (Integrations > Agent Keys) and re-install if needed." -Level "ERROR"
+                } elseif ($statusCode -eq 403) {
+                    if ($serverMsg) {
+                        Write-Log "Server refused inventory upload (HTTP 403): $serverMsg" -Level "ERROR"
+                    } else {
+                        Write-Log "Server refused inventory upload (HTTP 403). The API key is valid but the server denied access." -Level "ERROR"
+                    }
+                    Write-Log "Common causes: license tier limits (agents/products cap), feature gated to Pro, or organization has been deactivated." -Level "ERROR"
+                    Write-Log "Open the SentriKat UI as admin and check Integrations > Agent Keys for current status." -Level "ERROR"
+                }
                 break
             }
 
