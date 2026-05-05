@@ -1510,6 +1510,40 @@ def process_inventory_job(job):
                         items_processed += 1
                         continue
 
+                    # License product cap ([01.18.5]): mirror the sync
+                    # report_inventory path. If creating this product would
+                    # exceed max_products, force it to the import queue
+                    # regardless of auto_approve. Without this, a large
+                    # agent push that gets accepted as a background job
+                    # (process_inventory_job) silently ignores the cap
+                    # while a small one going through the sync handler
+                    # respects it.
+                    from app.licensing import check_product_limit
+                    cap_allowed, cap_limit, cap_msg = check_product_limit(
+                        organization_id=organization.id
+                    )
+                    if not cap_allowed:
+                        result = _queue_to_import_queue(
+                            organization.id, vendor, product_name, version,
+                            hostname=asset.hostname,
+                            source_type=p_source_type,
+                            ecosystem=p_ecosystem,
+                            agent_name=api_key.name if api_key else None,
+                            key_type=job_key_type,
+                        )
+                        if result == 'auto_linked':
+                            existing = Product.query.filter_by(
+                                vendor=vendor,
+                                product_name=product_name
+                            ).first()
+                            if existing:
+                                touched_product_ids.add(existing.id)
+                                products_updated += 1
+                        elif result == 'queued':
+                            products_queued += 1
+                        items_processed += 1
+                        continue
+
                     # Check auto_approve: if False, queue or auto-link instead of creating
                     if not auto_approve:
                         # Queue to import queue for the primary org

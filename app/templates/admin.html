@@ -5071,6 +5071,8 @@
 
     async function bulkApproveQueue() {
         if (selectedQueueItems.size === 0) return;
+        const btn = document.getElementById('bulkApproveBtn');
+        if (btn && btn.dataset.busy === '1') return;
         const selectedItems = importQueueData.filter(i => selectedQueueItems.has(i.id));
         const withoutCpe = selectedItems.filter(i => !i.cpe_vendor || !i.cpe_product).length;
         const msg = withoutCpe > 0
@@ -5078,6 +5080,13 @@
             : `Approve ${selectedQueueItems.size} item(s) and add to product inventory?`;
         const confirmed = await showConfirm(msg, 'Bulk Approve', 'Approve All', withoutCpe > 0 ? 'btn-warning' : 'btn-success');
         if (!confirmed) return;
+        let originalLabel = null;
+        if (btn) {
+            btn.dataset.busy = '1';
+            btn.disabled = true;
+            originalLabel = btn.innerHTML;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Approving…';
+        }
         try {
             const response = await fetch('/api/import/queue/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'approve', item_ids: Array.from(selectedQueueItems) }) });
             const result = await response.json();
@@ -5095,7 +5104,15 @@
             selectedQueueItems.clear();
             loadImportQueue();
             if (typeof loadSystemNotifications === 'function') loadSystemNotifications();
-        } catch (e) { showToast('Error: ' + e.message, 'danger'); }
+        } catch (e) {
+            showToast('Error: ' + e.message, 'danger');
+        } finally {
+            if (btn) {
+                btn.dataset.busy = '';
+                btn.disabled = false;
+                if (originalLabel !== null) btn.innerHTML = originalLabel;
+            }
+        }
     }
 
     async function bulkRejectQueue() {
@@ -5113,6 +5130,15 @@
     }
 
     async function approveAllPending() {
+        const btn = document.getElementById('approveAllBtn');
+        // [01.18.5 follow-up] Reentrancy guard: a slow approve-all (e.g.
+        // 193 items going through CPE mapping + vuln matching) used to
+        // give zero feedback, so impatient admins clicked again. The
+        // second click started a parallel batch that finished AFTER the
+        // first had already filled the cap, producing the misleading
+        // 'Approved 0 — 93 skipped' toast right before the real
+        // 'Approved 97 — 93 skipped' arrived.
+        if (btn && btn.dataset.busy === '1') return;
         const vendorFilter = document.getElementById('queueFilterVendor')?.value || '';
         const sourceTypeFilter = document.getElementById('queueFilterSourceType')?.value || '';
         const vendorLabel = vendorFilter ? ` from "${vendorFilter}"` : '';
@@ -5124,6 +5150,13 @@
             'Approve All Pending', 'Approve All', 'btn-success'
         );
         if (!confirmed) return;
+        let originalLabel = null;
+        if (btn) {
+            btn.dataset.busy = '1';
+            btn.disabled = true;
+            originalLabel = btn.innerHTML;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Approving…';
+        }
         try {
             const body = {};
             if (vendorFilter) body.vendor = vendorFilter;
@@ -5159,7 +5192,15 @@
 
             loadImportQueue();
             if (typeof loadSystemNotifications === 'function') loadSystemNotifications();
-        } catch (e) { showToast('Error: ' + e.message, 'danger'); }
+        } catch (e) {
+            showToast('Error: ' + e.message, 'danger');
+        } finally {
+            if (btn) {
+                btn.dataset.busy = '';
+                btn.disabled = false;
+                if (originalLabel !== null) btn.innerHTML = originalLabel;
+            }
+        }
     }
 
     async function rejectAllPending() {
