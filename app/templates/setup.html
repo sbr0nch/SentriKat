@@ -765,32 +765,90 @@
             btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Syncing...';
             document.getElementById('syncProgress').style.display = 'block';
 
+            // Async sync flow ([03.6.7]): start job, poll progress.
+            // Avoids the nginx upstream timeout + 'Unexpected token <'
+            // crash that hit synchronous wizard sync on slow networks.
             try {
-                const response = await fetch('/api/setup/initial-sync', {
-                    method: 'POST'
-                });
+                const startResp = await fetch('/api/setup/initial-sync', { method: 'POST' });
+                const startData = await startResp.json();
 
-                const data = await response.json();
-
-                if (response.ok && data.success) {
+                if (!startResp.ok || !startData.job_id) {
                     document.getElementById('syncProgress').style.display = 'none';
+                    showAlert(startData.error || 'Could not start sync.');
                     btn.disabled = false;
                     btn.innerHTML = 'Start Sync <i class="bi bi-cloud-download"></i>';
-                    showAlert(
-                        `Sync complete! Downloaded ${data.stored} new vulnerabilities ` +
-                        `and updated ${data.updated}. Found ${data.matches} matches.`,
-                        'success'
-                    );
-                    setTimeout(() => {
-                        clearAlert();
-                        nextStep();
-                    }, 2000);
-                } else {
-                    document.getElementById('syncProgress').style.display = 'none';
-                    showAlert(data.error || 'Sync failed. You can run it later from the dashboard.');
-                    btn.disabled = false;
-                    btn.innerHTML = 'Start Sync <i class="bi bi-cloud-download"></i>';
+                    return;
                 }
+
+                const jobId = startData.job_id;
+                let lastDetail = '';
+                const pollUrl = `/api/setup/sync-progress/${encodeURIComponent(jobId)}`;
+                // Poll every 2s, max 5 minutes (150 attempts) — safety
+                // cap; CISA download is normally 10-30s.
+                const maxAttempts = 150;
+                let attempt = 0;
+
+                const tick = async () => {
+                    attempt += 1;
+                    let p;
+                    try {
+                        const r = await fetch(pollUrl);
+                        if (!r.ok) {
+                            // 404 right at the start can happen because the
+                            // background thread hasn't written progress yet;
+                            // be lenient for the first 3 ticks.
+                            if (r.status === 404 && attempt <= 3) {
+                                return setTimeout(tick, 2000);
+                            }
+                            throw new Error(`Progress check ${r.status}`);
+                        }
+                        p = await r.json();
+                    } catch (e) {
+                        document.getElementById('syncProgress').style.display = 'none';
+                        showAlert('Lost connection to sync progress: ' + e.message);
+                        btn.disabled = false;
+                        btn.innerHTML = 'Start Sync <i class="bi bi-cloud-download"></i>';
+                        return;
+                    }
+
+                    // Update on-screen progress bar / detail text if present.
+                    const detail = p.detail || p.message || '';
+                    if (detail !== lastDetail) {
+                        lastDetail = detail;
+                        const detailEl = document.getElementById('syncProgressDetail');
+                        if (detailEl) detailEl.textContent = detail;
+                    }
+
+                    if (p.status === 'finished' || p.status === 'completed') {
+                        document.getElementById('syncProgress').style.display = 'none';
+                        btn.disabled = false;
+                        btn.innerHTML = 'Start Sync <i class="bi bi-cloud-download"></i>';
+                        const r = p.result || {};
+                        showAlert(
+                            `Sync complete! Downloaded ${r.stored || 0} new vulnerabilities ` +
+                            `and updated ${r.updated || 0}. Found ${r.matches || 0} matches.`,
+                            'success'
+                        );
+                        setTimeout(() => { clearAlert(); nextStep(); }, 2000);
+                        return;
+                    }
+                    if (p.status === 'failed' || p.status === 'error') {
+                        document.getElementById('syncProgress').style.display = 'none';
+                        showAlert((p.error || 'Sync failed') + '. You can run it later from the dashboard.');
+                        btn.disabled = false;
+                        btn.innerHTML = 'Start Sync <i class="bi bi-cloud-download"></i>';
+                        return;
+                    }
+                    if (attempt >= maxAttempts) {
+                        document.getElementById('syncProgress').style.display = 'none';
+                        showAlert('Sync is still running in the background. You can skip and continue — it will finish on its own.');
+                        btn.disabled = false;
+                        btn.innerHTML = 'Start Sync <i class="bi bi-cloud-download"></i>';
+                        return;
+                    }
+                    setTimeout(tick, 2000);
+                };
+                setTimeout(tick, 1000);
             } catch (error) {
                 document.getElementById('syncProgress').style.display = 'none';
                 showAlert('Error: ' + error.message);

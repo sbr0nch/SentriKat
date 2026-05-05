@@ -441,52 +441,89 @@ def seed_service_catalog():
 
 @setup_bp.route('/api/setup/initial-sync', methods=['POST'])
 def run_initial_sync():
-    """Run initial CISA KEV sync"""
+    """Start initial CISA KEV sync as a background job.
+
+    Returns immediately with a job_id so the wizard frontend can poll
+    /api/setup/sync-progress/<job_id> without hitting nginx/gunicorn
+    upstream timeouts. The CISA download itself can be 10-30s, but on
+    slow corporate networks behind a proxy it has been observed to
+    exceed 120s — that used to surface as a 504 gateway timeout +
+    frontend 'Unexpected token <' crash ([03.6.7]).
+    """
+    import threading
+    import time
+    from app import progress as prog
+
     try:
-        # [03.6.3] Wizard window only — admin panel exposes Sync afterwards.
         if not _is_wizard_window():
             return jsonify({'error': 'Setup already completed. Use admin panel to trigger sync.'}), 403
 
-        # Check if proxy is configured
         has_proxy = os.environ.get('HTTP_PROXY') or os.environ.get('HTTPS_PROXY')
 
-        # Wizard sync intentionally skips CVSS enrichment to stay under the
-        # nginx/gunicorn upstream timeout (typically 60-120s). Pulling 1000+
-        # CISA KEV entries is fast (~10-20s); enriching each via the NVD API
-        # adds 1-2s per CVE and can push the response past the timeout
-        # window — customer sees nginx 504 + 'Unexpected token <' frontend
-        # error and the wizard stalls ([03.6.7]). The scheduled
-        # 'CVSS Re-enrichment' job (apscheduler) catches up enrichment in
-        # the background once the app is running, so the user-visible CVE
-        # data fills in within minutes of completing setup.
-        result = sync_cisa_kev(enrich_cvss=False)
+        # If a wizard sync is already running, return that job_id so the
+        # frontend can resume polling on it (idempotent retry-friendly).
+        active = prog.get_active()
+        for j in active:
+            if j['job_id'].startswith('setup_sync_'):
+                return jsonify({
+                    'job_id': j['job_id'],
+                    'status': 'already_running',
+                    'has_proxy': has_proxy is not None
+                })
 
-        if result['status'] == 'success':
-            return jsonify({
-                'success': True,
-                'stored': result.get('stored', 0),
-                'updated': result.get('updated', 0),
-                'matches': result.get('matches', 0),
-                'duration': result.get('duration', 0),
-                'has_proxy': has_proxy is not None
-            })
-        else:
-            error_msg = result.get('error', 'Sync failed')
-            # Add helpful message for network errors
-            if 'connection' in error_msg.lower() or 'network' in error_msg.lower():
-                if not has_proxy:
-                    error_msg += '. If you are behind a proxy, configure HTTP_PROXY and HTTPS_PROXY in .env'
-            return jsonify({
-                'success': False,
-                'error': error_msg
-            }), 500
+        job_id = f'setup_sync_{int(time.time())}'
+
+        def _run_setup_sync(app):
+            with app.app_context():
+                try:
+                    # CVSS enrichment off — apscheduler 'CVSS Re-enrichment'
+                    # catches up after wizard completes, so the customer
+                    # gets to dashboard fast.
+                    result = sync_cisa_kev(enrich_cvss=False, job_id=job_id)
+                    prog.finish(job_id, result)
+                except Exception as e:
+                    logger.error(f"Wizard initial sync failed: {e}")
+                    prog.fail(job_id, str(e))
+
+        from flask import current_app
+        app = current_app._get_current_object()
+        t = threading.Thread(target=_run_setup_sync, args=(app,), daemon=True)
+        t.start()
+
+        return jsonify({
+            'job_id': job_id,
+            'status': 'started',
+            'has_proxy': has_proxy is not None
+        })
 
     except Exception as e:
         error_msg = str(e)
-        # Provide helpful context for common errors
         if 'connection' in error_msg.lower():
             error_msg += '. Check your internet connection and proxy settings.'
         return jsonify({'error': error_msg}), 500
+
+
+@setup_bp.route('/api/setup/sync-progress/<job_id>', methods=['GET'])
+def get_setup_sync_progress(job_id):
+    """Read progress of a wizard background sync.
+
+    Public (no auth) but gated by _is_wizard_window() — only callable
+    while the wizard is open. Validates the job_id prefix to avoid
+    leaking progress of unrelated jobs ([03.6.7]).
+    """
+    from app import progress as prog
+
+    if not _is_wizard_window():
+        return jsonify({'error': 'Setup already completed.'}), 403
+
+    if not job_id.startswith('setup_sync_'):
+        return jsonify({'error': 'Invalid wizard job id'}), 400
+
+    p = prog.get(job_id)
+    if not p:
+        return jsonify({'error': 'Job not found'}), 404
+
+    return jsonify(p)
 
 @setup_bp.route('/api/setup/complete', methods=['POST'])
 def complete_setup():
