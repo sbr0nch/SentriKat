@@ -450,8 +450,16 @@ def run_initial_sync():
         # Check if proxy is configured
         has_proxy = os.environ.get('HTTP_PROXY') or os.environ.get('HTTPS_PROXY')
 
-        # Run sync with CVSS enrichment
-        result = sync_cisa_kev(enrich_cvss=True, cvss_limit=50)
+        # Wizard sync intentionally skips CVSS enrichment to stay under the
+        # nginx/gunicorn upstream timeout (typically 60-120s). Pulling 1000+
+        # CISA KEV entries is fast (~10-20s); enriching each via the NVD API
+        # adds 1-2s per CVE and can push the response past the timeout
+        # window — customer sees nginx 504 + 'Unexpected token <' frontend
+        # error and the wizard stalls ([03.6.7]). The scheduled
+        # 'CVSS Re-enrichment' job (apscheduler) catches up enrichment in
+        # the background once the app is running, so the user-visible CVE
+        # data fills in within minutes of completing setup.
+        result = sync_cisa_kev(enrich_cvss=False)
 
         if result['status'] == 'success':
             return jsonify({

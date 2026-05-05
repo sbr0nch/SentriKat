@@ -882,6 +882,16 @@ def create_app(config_class=Config):
         # Skip for auth/logout endpoints to avoid redirect loops
         if request.path.startswith('/api/auth/') or request.path == '/login' or request.path == '/logout':
             return None
+        # Skip for setup wizard endpoints. The wizard intentionally creates
+        # the first admin user in step 3, which bumps password_changed_at;
+        # the wizard's own session is then "stale" by this check's logic
+        # and steps 4-6 (seed-services, save-proxy, initial-sync) get a
+        # spurious 401 + 'Session expired (password changed)' banner. The
+        # _is_wizard_window() gate inside each setup endpoint already
+        # bounds access (data-driven via User.query.count() <= 1), so
+        # bypassing this middleware here is safe ([03.6.3.b]).
+        if request.path.startswith('/api/setup/') or request.path == '/setup':
+            return None
         try:
             from app.models import User
             user = User.query.get(session['user_id'])
