@@ -1714,11 +1714,6 @@ def create_product():
     - Org Admin: Can create products for their org only
     - Manager: Can create products for their org only
     """
-    # Check license limit for products
-    allowed, limit, message = check_product_limit()
-    if not allowed:
-        return jsonify({'error': message, 'license_limit': True}), 403
-
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
 
@@ -1733,6 +1728,14 @@ def create_product():
         # Use default organization if not set
         default_org = Organization.query.filter_by(name='default').first()
         org_id = default_org.id if default_org else None
+
+    # Check license limit for products. In SaaS the cap lives on the
+    # tenant's SubscriptionPlan, so org context matters; passing org_id
+    # makes the check actually fire in SaaS instead of returning
+    # 'no limit' ([01.18.5 SaaS audit]).
+    allowed, limit, message = check_product_limit(organization_id=org_id)
+    if not allowed:
+        return jsonify({'error': message, 'license_limit': True}), 403
 
     # Check for duplicate product (case-insensitive).
     #
@@ -6833,12 +6836,26 @@ def get_users():
 @org_admin_required
 def create_user():
     """Create a new user (local auth only - LDAP users must be discovered/invited)"""
-    # Check license limit for users
-    allowed, limit, message = check_user_limit()
+    data = request.get_json() or {}
+
+    # Determine target org early so the SaaS plan cap check can scope
+    # to the right tenant. On-prem ignores org_id and uses the global
+    # signed-license cap, so this works for both modes.
+    # ([01.18.5 SaaS audit] previously check_user_limit() was called
+    # without org context and returned 'no limit' in SaaS, so a Free
+    # plan with max_users=1 could grow unbounded.)
+    target_org_id = data.get('organization_id')
+    if target_org_id is None:
+        try:
+            from app.saas import is_saas_mode, get_scoped_org_id
+            if is_saas_mode():
+                target_org_id = get_scoped_org_id()
+        except Exception:
+            target_org_id = None
+
+    allowed, limit, message = check_user_limit(organization_id=target_org_id)
     if not allowed:
         return jsonify({'error': message, 'license_limit': True}), 403
-
-    data = request.get_json()
 
     # Validate required fields
     if not data.get('username') or not data.get('email'):
@@ -6891,7 +6908,9 @@ def create_user():
     # Authorization: org_admins can only create users in their own organization
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
-    target_org_id = data.get('organization_id')
+    # target_org_id was determined at the top of the function (org-scoped
+    # in SaaS so the plan cap check above lands in the right tenant);
+    # reuse it here for the authorization branch.
 
     if not current_user.is_super_admin():
         # Org admins cannot create super_admin or org_admin users

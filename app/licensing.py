@@ -1169,14 +1169,54 @@ def requires_professional(feature=None):
     return decorator
 
 
-def check_user_limit():
+def check_user_limit(organization_id=None):
     """Check if user limit is reached.
-    SaaS: limits are managed per-org by subscription plan, not globally.
+
+    On-prem: global cap from license_info.max_users (counts ALL active
+        users across all orgs).
+    SaaS: per-tenant cap from the org's SubscriptionPlan.max_users.
+        Counts active users WHOSE primary organization_id matches the
+        target org.
+
+    Args:
+        organization_id: required for SaaS to enforce the plan cap.
+            If omitted in SaaS the call returns 'no limit' (used by
+            background jobs / superadmin paths that have no org
+            context). For UI 'create user' and SSO/LDAP provisioning,
+            ALWAYS pass the org_id of the user being added.
+
+    Returns: (allowed: bool, limit: int, message: Optional[str])
     """
     from app.saas import is_saas_mode
-    if is_saas_mode():
-        return True, -1, None  # SaaS: no global limit, managed by subscription
     from app.models import User
+
+    if is_saas_mode():
+        if organization_id is None:
+            return True, -1, None
+        from app.models import Subscription, SubscriptionPlan
+        sub = Subscription.query.filter_by(
+            organization_id=organization_id
+        ).first()
+        if not sub or not sub.plan:
+            plan = SubscriptionPlan.query.filter_by(name='free').first()
+            if not plan:
+                return True, -1, None
+        else:
+            plan = sub.plan
+        limit = getattr(plan, 'max_users', None)
+        if limit is None or limit < 0:
+            return True, -1, None
+        current = User.query.filter(
+            User.organization_id == organization_id,
+            User.is_active == True
+        ).count() or 0
+        if current >= limit:
+            return False, limit, (
+                f'Plan limit reached: {limit} users. '
+                f'Upgrade your subscription to add more.'
+            )
+        return True, limit, None
+
     license_info = get_license()
     current_users = User.query.filter(User.is_active == True).count() or 0
     return license_info.check_limit('users', current_users)

@@ -1044,7 +1044,23 @@ def bulk_process_queue():
             if err:
                 return err
 
-    results = {'processed': 0, 'errors': 0, 'products': []}
+    results = {
+        'processed': 0,
+        'errors': 0,
+        'over_limit': 0,
+        'over_limit_message': None,
+        'products': []
+    }
+
+    # License cap enforcement ([01.18.5]): the checkbox-driven "Approve
+    # selected" flow lands here. Without this guard, an admin in
+    # Community at the 100-product cap could still slip past by
+    # ticking one box and clicking Approve, since the per-item and
+    # approve-all paths each had their own cap check but this one did
+    # not. Mirror approve_all_queue: stop creating products once the
+    # cap is hit, leave the rest in 'pending' state, and surface the
+    # message so the UI can warn.
+    from app.licensing import check_product_limit
 
     # Progress tracking for bulk operations
     from app import progress as prog
@@ -1064,6 +1080,15 @@ def bulk_process_queue():
         if action == 'approve':
             if organization_id:
                 item.organization_id = organization_id
+
+            cap_allowed, cap_limit, cap_msg = check_product_limit(
+                organization_id=item.organization_id
+            )
+            if not cap_allowed:
+                if results['over_limit_message'] is None:
+                    results['over_limit_message'] = cap_msg
+                results['over_limit'] += 1
+                continue
 
             product = create_product_from_queue(item)
             if product:
