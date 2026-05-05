@@ -476,3 +476,82 @@
 | 🔵 01.12.3 | Low-Med | Post IT senza badge lingua nella lista blog |
 
 **Totale: 3 bug (2 High + 1 Med), 1 warning, 3 info, 18 OK**
+
+---
+
+## 01.18 — Phase 2 walkthrough discoveries — 2026-05-05
+
+### [01.18.1] 🔴 **HIGH** — On-prem pricing card mostra limiti diversi da quelli enforced dall'app
+
+**Discovery context**: sessione W1 walkthrough customer SaaS, 2026-05-05.
+
+Customer apre `https://sentrikat.com` → toggle "On-Premises" → vede card "Evaluation" Free con:
+- 10 Agents (Windows, Linux, macOS)
+- 3 Users
+- 1 Organization
+- 100 Products
+
+Customer scarica e installa on-prem → l'app banner mostra "COMMUNITY EDITION - Limited to 1 user, 50 products" → tenta di creare 3° user → bloccato a 1 → reclama / refund / social complaint.
+
+**Mismatch confermato a codice**:
+
+| Campo | Landing (`sentrikat.com/pricing`) | Core (`app/licensing.py:LICENSE_TIERS`) |
+|---|---|---|
+| Max Agents | 10 | 5 |
+| Max Users | 3 | 1 |
+| Max Products | 100 | 50 |
+| Max Orgs | 1 | 1 ✅ |
+
+**Fix applicato lato core (commit `4ea5606` — branch `claude/round7-walkthrough-bugs`)**: aggiornato `LICENSE_TIERS['community']` con i numeri della landing (10/3/100/1). Decisione product: allineare core a landing (più generoso, meno churn) invece del contrario.
+
+**Severity**: 🔴 HIGH — false advertising risk + early-customer churn / brand damage.
+**Deployment scope**: 🏢 on-prem (esclusivo — il SaaS ha tier diversi).
+**Status**: ✅ FIXED core side (`4ea5606`); landing side OK (numeri già corretti). Solo verify post-merge.
+
+### [01.18.2] 🔴 **HIGH** — Terminology cluster on-prem free tier: 4 nomi diversi
+
+**Discovery context**: stesso walkthrough W1.
+
+Sulla stessa landing pagina e nell'app ci sono **4 nomi diversi** per il tier 0 on-prem:
+
+| Posizione | Nome usato |
+|---|---|
+| Landing card title | **"Evaluation"** |
+| Landing card price label | **"Free"** + **"Early Access — Free"** |
+| App banner top page | **"COMMUNITY EDITION"** |
+| App health check License Status badge | **"COMMUNITY"** |
+| App License page header | **"Free"** |
+| App error messages | **"Community Edition limit"** |
+| Handbook + docs | **"Community"** |
+
+7 punti UI, 4 nomi distinti. Customer pensa: 'Evaluation' = trial 30gg, 'Community' = FOSS forever, 'Free' = generic. Sono 3 prodotti diversi nella sua testa.
+
+**Fix proposto**: uniformare ovunque a **"Community Edition"** (industry standard: GitLab CE, MongoDB Community, MySQL Community). "Evaluation" è confondente perché implica scadenza temporale.
+
+**Severity**: 🔴 HIGH — brand consistency + customer confusion + perceived support quality.
+**Deployment scope**: 🌐 landing + 🏢 on-prem app (cluster).
+**Status**: 🔧 partial — core già corretto a "Community Edition" (ref `[03.14.10.expand]`). Landing card title ancora "Evaluation" — handoff cross-repo a sentrikat-web team.
+
+### [01.18.3] 🔴 **HIGH** — No hard-delete account signup record + EA counter sync
+
+**Discovery context**: walkthrough W2 signup, 2026-05-05. Tester ha già usato tutti i suoi alias email per signup precedenti → bloccato a continuare. Admin console ha solo "deactivate", non "delete".
+
+**Issues separati**:
+
+1. **GDPR compliance gap** — Art. 17 right to erasure: customer chiede cancellazione totale del proprio account → oggi non possiamo soddisfarla. Solo deactivate (logico delete con soft flag), non hard delete.
+
+2. **EA counter staleness** — `sentrikat.com` homepage mostra "15 On-Prem spots available" (Early Access counter). Quando un customer firma, il counter dovrebbe scendere a 14. Quando viene cancellato (oggi non possibile), dovrebbe risalire a 15. Senza hard delete, il counter cresce monotonicamente verso 0 includendo dummy/test signup.
+
+3. **Testing blocker** — durante development testing non possiamo riusare email (già consumed), siamo costretti a inventare alias indefinitamente.
+
+**Architettura fix proposta** (cross-repo):
+
+- `sentrikat-web` admin portal: nuova action "Hard Delete Account" sui customer record. Prompt confirmation 2-step (digita "DELETE accountID" per confermare).
+- `sentrikat-web` license-server: endpoint `DELETE /api/v1/admin/customers/{id}` che cancella user + license + tenant record + email suppression list entry.
+- `sentrikat-web` license-server: trigger automatico su delete → `update_ea_counter()` decrement.
+- `sentrikat-web` landing: Pricing.astro fetch counter live (o build-time refresh ogni N min) — al momento sembra hardcoded "15".
+- `sentrikat` core: niente da fare lato core — il customer signup record vive nel license-server, non nel SentriKat app.
+
+**Severity**: 🔴 HIGH — GDPR compliance hard requirement + counter accuracy + dev-test workflow.
+**Deployment scope**: 🌐 landing + 🏛 portal admin + 🔐 license-server (NO core).
+**Status**: ❌ open — handoff cross-repo a sentrikat-web team.

@@ -156,10 +156,16 @@ LICENSE_TIERS = {
     'community': {
         'name': 'Community',
         'display_name': 'Community Edition',
-        'max_users': 1,
+        # Limits aligned to the public-facing pricing page on
+        # sentrikat.com (10 Agents / 3 Users / 1 Org / 100 Products) so
+        # customers reading the landing get exactly what they are promised
+        # when they install on-prem ([03.14.10.expand] follow-up).
+        # Previous values (1 user / 50 products / 5 agents) were stricter
+        # than what marketing was advertising → false-advertising risk.
+        'max_users': 3,
         'max_organizations': 1,
-        'max_products': 50,
-        'max_agents': 5,
+        'max_products': 100,
+        'max_agents': 10,
         'features': [],
         'powered_by_required': True,
         'is_demo': True
