@@ -933,6 +933,21 @@ def approve_queue_item(item_id):
                 return err
         item.organization_id = data['organization_id']
 
+    # License cap enforcement ([01.18.5]): refuse approval if it would
+    # push the org past max_products. Admin must reject or delete an
+    # existing product first to make room.
+    from app.licensing import check_product_limit
+    cap_allowed, cap_limit, cap_msg = check_product_limit(
+        organization_id=item.organization_id
+    )
+    if not cap_allowed:
+        return jsonify({
+            'error': 'Product limit reached',
+            'message': cap_msg,
+            'limit': cap_limit,
+            'hint': 'Reject or delete an existing product to make room, or upgrade your license.'
+        }), 403
+
     # Create the product
     product = create_product_from_queue(item)
 
@@ -1118,9 +1133,35 @@ def approve_all_queue():
     if not items:
         return jsonify({'processed': 0, 'message': 'No pending items to approve'})
 
-    results = {'processed': 0, 'errors': 0, 'products': []}
+    # License cap enforcement ([01.18.5]): before creating each product
+    # via the queue, check if it would push the org past max_products.
+    # Once the cap is hit, remaining items stay 'pending' so the admin
+    # can decide which to keep (vs reject existing products to make room).
+    from app.licensing import check_product_limit, get_license
+
+    results = {
+        'processed': 0,
+        'errors': 0,
+        'over_limit': 0,
+        'over_limit_message': None,
+        'products': []
+    }
 
     for item in items:
+        # Pass per-item org_id so SaaS mode enforces the per-tenant
+        # plan cap (on-prem mode ignores org_id and uses global license).
+        cap_allowed, cap_limit, cap_msg = check_product_limit(
+            organization_id=item.organization_id
+        )
+        if not cap_allowed:
+            # Stop creating new products; keep remaining items in queue.
+            # The first item to hit the cap reports back the message
+            # exactly once for the UI; subsequent items just count.
+            if results['over_limit_message'] is None:
+                results['over_limit_message'] = cap_msg
+            results['over_limit'] += 1
+            continue
+
         product = create_product_from_queue(item)
         if product:
             item.status = 'approved'

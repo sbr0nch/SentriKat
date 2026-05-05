@@ -5125,7 +5125,28 @@
             });
             if (!response.ok) throw new Error(`Server error (${response.status})`);
             const result = await response.json();
-            showToast(`Approved ${result.processed} items${result.errors ? ` (${result.errors} errors)` : ''}`, 'success');
+
+            // Compose feedback. License-cap overflow ([01.18.5]) returns
+            // an over_limit count + over_limit_message in the response;
+            // surface that to the admin so they understand WHY some items
+            // weren't approved (instead of a silent skip).
+            let toastMsg = `Approved ${result.processed} items`;
+            let toastLevel = 'success';
+            if (result.errors) toastMsg += ` (${result.errors} errors)`;
+            if (result.over_limit && result.over_limit > 0) {
+                toastMsg += ` — ${result.over_limit} skipped (license cap reached)`;
+                toastLevel = 'warning';
+            }
+            showToast(toastMsg, toastLevel);
+
+            // If cap was hit, also pop a non-dismissible alert with the
+            // actionable next step.
+            if (result.over_limit_message) {
+                if (typeof showAlert === 'function') {
+                    showAlert(`${result.over_limit_message} Reject or delete an existing product to make room, or upgrade your license.`, 'warning');
+                }
+            }
+
             loadImportQueue();
             if (typeof loadSystemNotifications === 'function') loadSystemNotifications();
         } catch (e) { showToast('Error: ' + e.message, 'danger'); }

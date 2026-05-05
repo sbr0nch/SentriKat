@@ -2140,7 +2140,9 @@ def report_inventory():
                 # cap is reached, instead of the agent silently dropping
                 # the data ([01.18.5] product overflow → queue).
                 from app.licensing import check_product_limit
-                cap_allowed, cap_limit, cap_msg = check_product_limit()
+                cap_allowed, cap_limit, cap_msg = check_product_limit(
+                    organization_id=organization.id
+                )
                 if not cap_allowed:
                     result = _queue_to_import_queue(
                         organization.id, vendor, product_name, version, hostname,
