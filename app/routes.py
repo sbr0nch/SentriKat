@@ -1714,11 +1714,6 @@ def create_product():
     - Org Admin: Can create products for their org only
     - Manager: Can create products for their org only
     """
-    # Check license limit for products
-    allowed, limit, message = check_product_limit()
-    if not allowed:
-        return jsonify({'error': message, 'license_limit': True}), 403
-
     current_user_id = session.get('user_id')
     current_user = User.query.get(current_user_id)
 
@@ -1733,6 +1728,14 @@ def create_product():
         # Use default organization if not set
         default_org = Organization.query.filter_by(name='default').first()
         org_id = default_org.id if default_org else None
+
+    # Check license limit for products. In SaaS the cap lives on the
+    # tenant's SubscriptionPlan, so org context matters; passing org_id
+    # makes the check actually fire in SaaS instead of returning
+    # 'no limit' ([01.18.5 SaaS audit]).
+    allowed, limit, message = check_product_limit(organization_id=org_id)
+    if not allowed:
+        return jsonify({'error': message, 'license_limit': True}), 403
 
     # Check for duplicate product (case-insensitive).
     #
