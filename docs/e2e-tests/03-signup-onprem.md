@@ -217,6 +217,50 @@
 - **🔧 Root cause + Fix 2026-05-01** (commit pending): la triage iniziale ipotizzava `setup_complete=True` flag su DB. Codereading rivela meccanismo diverso e più subtile: `app/setup.py` usa `session['_setup_in_progress']` flag impostata in `setup_wizard()` GET `/setup` (line 62). Tutti gli endpoint step 4-6 chiamavano `_is_setup_blocked()` che ritornava True se `is_setup_complete()` era True E session flag non c'era. Step 3 (`create-admin`) marca setup come complete (org+user count). Step 4 (seed-services) chiamava in via session flag mancante (nelle reproductions reali la session flag era persa — sospetta cookie rotation, multi-worker session inconsistency, `SESSION_COOKIE_SECURE=True` su `http://localhost`, o memory session backend). **Fix difensivo**: separato gating in due livelli. `_is_setup_blocked()` resta su endpoint security-sensitive (`create-organization` + `create-admin` — possono mintare privilegi). Nuovo `_is_wizard_window()` per endpoint idempotenti (seed/proxy/sync) — ritorna True se `User.query.count() <= 1` (org+1° admin esistono ma nessun secondo user invitato). Bounded window data-driven, sopravvive a perdita session. Dopo l'invite del 2° user, l'admin panel prende il relay (catalog/proxy/sync sono raggiungibili lì). Verifica pending: fresh install → completare wizard fino a step 6 senza 403 → invitare 2° user → ri-call /api/setup/seed-services manualmente → 403 atteso.
 - **Discovered**: 2026-04-23
 
+### [03.6.3.b] 🔴 **HIGH** — Step 4 'Seed Catalog' → 401 'Session expired (password changed)' al primo click
+
+**Discovery context**: Phase 2 walkthrough on-prem fresh install, 2026-05-05.
+
+User esegue setup wizard end-to-end su `docker compose down -v && up`. Step 3 admin user creation success → step 4 carica → click "Seed Catalog →" → vede banner rosso "Session expired (password changed)" + console DevTools mostra `Failed to load resource ... seed-services 401 (UNAUTHORIZED)`. User dismissa il banner X, riclicca → success.
+
+**Root cause** (`app/__init__.py:877` `check_password_changed` middleware):
+1. Step 3 crea admin user → `User.password_changed_at` = now
+2. Wizard session ha `_pw_changed_at = old/null` (anonima pre-creation)
+3. Middleware compara → mismatch → `session.clear()` + 401
+4. Frontend mostra banner "Session expired"
+5. Step 5+6 inaccessibili senza retry
+
+**Fix applicato** (commit `a4c7aa9`, branch `claude/round7-walkthrough-bugs`): skip `check_password_changed` per `/api/setup/*` e `/setup` paths. Il gate `_is_wizard_window()` interno a ogni endpoint setup limita comunque l'accesso (data-driven via `User.query.count() <= 1`).
+
+**Severity**: 🔴 HIGH — blocker UX customer first-impression. Customer pensa "auth rotto" e abbandona.
+**Deployment scope**: 🏢 on-prem.
+**Status**: ✅ FIXED `a4c7aa9`, verify pending live re-run wizard.
+
+### [03.6.7] 🔴 **HIGH** — Step 5 'Run Initial Sync' → 504 Gateway Timeout + frontend crash
+
+**Discovery context**: stesso walkthrough Phase 2.
+
+User clicca "Start Sync →" al step 5 → aspetta ~120s → console mostra:
+```
+POST http://localhost/api/setup/initial-sync 504 (Gateway Time-out)
+Error: Unexpected token '<', "
+```
+
+Banner rosso "Error: Unexpected token '<', "" appare. Setup STALLATO: il customer non può completare lo step 5/6 e il wizard rimane bloccato.
+
+**Root cause** (`app/setup.py:454`):
+```python
+result = sync_cisa_kev(enrich_cvss=True, cvss_limit=50)
+```
+
+Sync CISA download (~10-20s) + enrichment CVSS via NVD API (~1-2s × 50 CVE = 50-100s) → totale 60-120s+. Timeout nginx upstream è 120s → 504 → frontend tenta `JSON.parse()` su body HTML nginx → crash "Unexpected token '<'".
+
+**Fix applicato** (commit `a4c7aa9`): cambiato a `sync_cisa_kev(enrich_cvss=False)`. Sync wizard ora ~10-20s. Enrichment CVSS è handled async dal job apscheduler "CVSS Re-enrichment" che gira in background dopo setup complete — il customer-visible CVE list si popola progressivamente nei minuti successivi senza bloccare la UI.
+
+**Severity**: 🔴 HIGH — blocker complete del setup wizard.
+**Deployment scope**: 🏢 on-prem.
+**Status**: ✅ FIXED `a4c7aa9`, verify pending live re-run wizard.
+
 ### [03.6.4] Step 3 password validation (min 8 char) client-side OK ✅
 
 - **Tipo**: 🟢 OK
