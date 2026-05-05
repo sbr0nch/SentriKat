@@ -506,10 +506,19 @@ class LicenseInfo:
         }
 
     def has_feature(self, feature):
-        """Check if license includes a specific feature."""
-        if not self.is_professional():
+        """Check if license includes a specific feature.
+
+        Pre-2026-05 this method short-circuited to False for any non-Pro
+        license. That made sense when EVERY feature was Pro-gated, but
+        no longer holds: the Community tier explicitly enables a few
+        baseline features (push_agents) that the public pricing card
+        promises. The check now respects the actual `features` list
+        regardless of edition; Pro shortcuts are no longer baked in
+        ([01.18.5]).
+        """
+        if not self.features:
             return False
-        return feature in self.features if self.features else False
+        return feature in self.features
 
     def is_professional(self):
         """Check if this is an active, valid Professional license."""
@@ -585,7 +594,7 @@ class LicenseInfo:
             'days_until_expiry': self.days_until_expiry,
             'status_message': self.get_status_message(),
             'limits': effective_limits,
-            'features': self.features if self.is_professional() and self.features else [],
+            'features': self.features if self.features else [],
             'powered_by_required': not self.is_professional(),
             'error': self.error,
             # Installation info
