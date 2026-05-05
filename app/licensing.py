@@ -1272,23 +1272,39 @@ def check_product_limit(organization_id=None):
         limit = plan.max_products
         if limit is None or limit < 0:
             return True, -1, None
-        # Count products linked to this org via the m2m join
+        # Count ACTIVE products linked to this org via the m2m join.
+        # ([01.18.5 deactivated semantics] Cap is on what the customer
+        # is *currently scanning*, not on lifetime products. Inactive
+        # rows are paused — they shouldn't pin the slot. Same semantics
+        # as check_user_limit (User.is_active) and check_agent_limit
+        # (Asset.active). Reactivation re-checks the cap in
+        # routes.update_product so this isn't a back-door past the
+        # limit.)
         from app.models import product_organizations
         from sqlalchemy import select, func
         current = db.session.execute(
-            select(func.count()).select_from(product_organizations).where(
-                product_organizations.c.organization_id == organization_id
+            select(func.count()).select_from(
+                product_organizations.join(
+                    Product,
+                    Product.id == product_organizations.c.product_id,
+                )
+            ).where(
+                product_organizations.c.organization_id == organization_id,
+                Product.active == True,
             )
         ).scalar() or 0
         if current >= limit:
             return False, limit, (
-                f'Plan limit reached: {limit} products. '
-                f'Upgrade your subscription to add more.'
+                f'Plan limit reached: {limit} active products. '
+                f'Deactivate an existing product or upgrade your '
+                f'subscription to add more.'
             )
         return True, limit, None
 
     license_info = get_license()
-    current_products = Product.query.count() or 0
+    # Active-only count (parity with users/agents and with the
+    # dashboard counter the admin sees).
+    current_products = Product.query.filter(Product.active == True).count() or 0
     return license_info.check_limit('products', current_products)
 
 
