@@ -372,9 +372,21 @@ def check_keyword_match(vulnerability, product):
                 match_reasons.append(f"Keyword match: {keyword}")
 
     if match_reasons:
-        # Determine confidence based on match type
+        # [CVE-MATCHING-PIPELINE F.6] Confidence reflects how much we VERIFIED:
+        # - 'vendor_product' as 'medium' is accurate ONLY when the vulnerability
+        #   carries cpe_data (so the version range / wildcard scope was at least
+        #   knowable upstream — we just chose to fall back here because the
+        #   product had no CPE assigned). When cpe_data is NULL the keyword
+        #   match never had a chance to verify the version, and historically
+        #   (the 'Chrome 147 ↔ CVE-2010' regression on 2026-05-05) it produced
+        #   massive false positives. Demote those to 'low' so default
+        #   dashboards / counters can filter them out without losing them.
+        # - 'keyword' (no vendor+product structural match, just a keyword
+        #   substring) stays 'low' as before.
+        verified_via_cpe_data = bool(getattr(vulnerability, 'cpe_data', None)) and vulnerability.cpe_data != '[]'
         if any('Vendor+Product' in r for r in match_reasons):
-            return match_reasons, 'vendor_product', 'medium'
+            confidence = 'medium' if verified_via_cpe_data else 'low'
+            return match_reasons, 'vendor_product', confidence
         else:
             return match_reasons, 'keyword', 'low'
 

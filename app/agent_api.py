@@ -642,6 +642,20 @@ def _queue_to_import_queue(organization_id, vendor, product_name, version, hostn
             source_info['source_type'] = source_type
         if ecosystem:
             source_info['ecosystem'] = ecosystem
+        # [CVE-MATCHING-PIPELINE F.3] Try to resolve CPE up front so that the
+        # subsequent create_product_from_queue path doesn't land a Product with
+        # cpe_vendor=NULL — that would force the matcher into keyword fallback
+        # and reproduce the Chrome 147 ↔ CVE-2010 false-positive class.
+        cpe_v, cpe_p = None, None
+        try:
+            from app.cpe_mapping import get_cpe_for_product
+            cpe_v, cpe_p = get_cpe_for_product(product_name, vendor)
+            if not cpe_v or not cpe_p:
+                from app.cpe_mappings import get_cpe_for_software
+                cpe_v, cpe_p, _ = get_cpe_for_software(vendor, product_name, use_nvd_fallback=False)
+        except Exception:
+            cpe_v, cpe_p = None, None
+
         queue_item = ImportQueue(
             organization_id=organization_id,
             vendor=vendor,
@@ -651,7 +665,9 @@ def _queue_to_import_queue(organization_id, vendor, product_name, version, hostn
             ecosystem=ecosystem,
             status='pending',
             criticality='medium',
-            source_data=json.dumps(source_info)
+            source_data=json.dumps(source_info),
+            cpe_vendor=cpe_v,
+            cpe_product=cpe_p,
         )
         db.session.add(queue_item)
         logger.info(f"Queued product for review: {vendor} {product_name}")
