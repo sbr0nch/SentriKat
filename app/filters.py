@@ -429,7 +429,15 @@ def has_vendor_fix_override(vulnerability, product):
                 ).first()
 
         return override
-    except Exception:
+    except Exception as e:
+        # A.1 fix (audit 2026-05-06): suppression layer silent failure was
+        # masking VendorFixOverride lookup errors. Now logged so ops sees
+        # transient DB issues. Returning None still errs on side of "show
+        # match" — better a visible false positive than missed suppression.
+        logger.warning(
+            f"VendorFixOverride lookup failed for cve={vulnerability.cve_id} "
+            f"product_id={product.id}: {type(e).__name__}: {e}"
+        )
         return None
 
 
@@ -519,11 +527,17 @@ def _has_active_risk_exception(vulnerability, product):
             )
             return True
         return False
-    except Exception:
+    except Exception as e:
         # Fail-open: never crash match evaluation because of an exception
         # lookup error. Correctness here is best-effort; the worst case is
         # showing a CVE that should have been suppressed, which is strictly
         # safer than silently suppressing a real vuln.
+        # A.1 fix (audit 2026-05-06): added logger so transient DB issues
+        # surface in ops logs instead of being completely silent.
+        logger.warning(
+            f"RiskException lookup failed for cve={vulnerability.cve_id} "
+            f"product_id={product.id}: {type(e).__name__}: {e}"
+        )
         return False
 
 
