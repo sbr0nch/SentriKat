@@ -33,11 +33,12 @@ def _get_api_key():
             if setting.is_encrypted:
                 try:
                     return decrypt_value(setting.value)
-                except Exception:
+                except Exception as e:
+                    logger.warning("NVD API key decrypt failed, using raw value: %s", e)
                     return setting.value
             return setting.value
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("NVD API key DB lookup failed, falling back to env: %s", e)
 
     return os.environ.get('NVD_API_KEY')
 

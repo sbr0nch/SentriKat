@@ -1205,8 +1205,8 @@ def _worker_pool_supervisor(app):
                     finally:
                         try:
                             db.session.remove()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.warning("agent supervisor: db.session.remove() failed: %s", e)
 
             except Exception as e:
                 logger.error(f"Worker supervisor error: {e}", exc_info=True)
@@ -1755,8 +1755,8 @@ def process_inventory_job(job):
                         f"Job {job_id}: kept {len(version_changed_product_ids)} version-change "
                         f"entries across rollback (stale matches will be cleaned on next successful commit)"
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("Job %s: re-fetch after rollback failed: %s", job_id, e)
 
         # Remove installations NOT seen in this scan (software was uninstalled)
         if existing_installations:
@@ -2527,8 +2527,8 @@ def report_inventory():
                             new_version='(uninstalled)',
                             detected_by='agent'
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("Failed to record uninstall version history for installation %s: %s", removed_inst.id, e)
                     removed_inst.removed_at = datetime.utcnow()
                     installations_removed += 1
                 if removed_ids:
@@ -2776,8 +2776,8 @@ def agent_heartbeat():
                     source_ip=request.remote_addr,
                     user_agent=request.headers.get('User-Agent', '')[:500]
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to log heartbeat status_changed event for asset %s: %s", asset.id, e)
 
         # Log agent_updated event when version changes
         if new_version and previous_version and new_version != previous_version:
@@ -2792,8 +2792,8 @@ def agent_heartbeat():
                     source_ip=request.remote_addr,
                     user_agent=request.headers.get('User-Agent', '')[:500]
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to log agent_updated event for asset %s: %s", asset.id, e)
 
         db.session.commit()
     except Exception as e:
@@ -4533,8 +4533,8 @@ def _get_latest_agent_versions():
             ).first()
             if setting and setting.value:
                 versions[platform] = setting.value
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Could not load latest_agent_version_* settings: %s", e)
     return versions
 
 
@@ -4596,8 +4596,8 @@ def get_agent_commands():
                     source_ip=request.remote_addr,
                     user_agent=request.headers.get('User-Agent', '')[:500]
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to log command_poll status_changed event for asset %s: %s", asset.id, e)
 
         # Log agent_updated event when version changes
         if agent_version and previous_version and agent_version != previous_version:
@@ -5674,8 +5674,8 @@ def report_container_scan():
                 user_agent=request.headers.get('User-Agent', '')[:500]
             )
             db.session.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to log container scan AgentEvent: %s", e)
 
         return jsonify({
             'status': 'success',
@@ -5989,8 +5989,8 @@ def report_dependency_scan():
                 user_agent=request.headers.get('User-Agent', '')[:500]
             )
             db.session.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to log lockfile scan AgentEvent: %s", e)
 
         return jsonify({
             'status': 'success',
@@ -6605,8 +6605,8 @@ def get_dependency_detail(product_id):
                 fix_vers = []
                 try:
                     fix_vers = _json.loads(osv_r.fixed_versions) if osv_r.fixed_versions else []
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("Could not parse osv fixed_versions for %s: %s", osv_r.cve_id or osv_r.vuln_id, e)
 
                 vuln_list.append({
                     'match_id': None,

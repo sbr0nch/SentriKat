@@ -96,8 +96,8 @@ def _build_dynamic_product_patterns():
                         patterns[_re.escape(cv.lower()) + r'\s+' + _re.escape(cp.lower())] = (
                             cv.title(), cp.title()
                         )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Skipped product when building dynamic patterns: %s", e)
 
     except Exception as e:
         # During app startup or outside request context, Products table
@@ -927,14 +927,14 @@ def parse_and_store_vulnerabilities(kev_data):
         due_date = None
         try:
             date_added = datetime.strptime(vuln_data.get('dateAdded'), '%Y-%m-%d').date()
-        except (ValueError, TypeError, AttributeError):
-            pass
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.debug("CISA KEV %s: malformed dateAdded=%r: %s", cve_id, vuln_data.get('dateAdded'), e)
 
         try:
             if vuln_data.get('dueDate'):
                 due_date = datetime.strptime(vuln_data.get('dueDate'), '%Y-%m-%d').date()
-        except (ValueError, TypeError, AttributeError):
-            pass
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.debug("CISA KEV %s: malformed dueDate=%r: %s", cve_id, vuln_data.get('dueDate'), e)
 
         # Check if vulnerability already exists
         vuln = Vulnerability.query.filter_by(cve_id=cve_id).first()
@@ -1483,8 +1483,8 @@ def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=10
         # Rollback any failed transaction first
         try:
             db.session.rollback()
-        except Exception:
-            pass
+        except Exception as rb_err:
+            logger.warning("CISA sync rollback after error failed: %s", rb_err)
 
         # Log error
         duration = (datetime.utcnow() - start_time).total_seconds()
@@ -1502,8 +1502,8 @@ def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=10
             logger.error(f"Failed to log sync error: {log_error}")
             try:
                 db.session.rollback()
-            except Exception:
-                pass
+            except Exception as rb_err:
+                logger.warning("CISA sync rollback after log error failed: %s", rb_err)
 
         return {
             'status': 'error',
@@ -1548,7 +1548,8 @@ def reenrich_fallback_cvss(limit=50):
                 vuln.severity = severity
                 vuln.cvss_source = 'nvd'
                 upgraded += 1
-        except Exception:
+        except Exception as e:
+            logger.warning("Re-enrich CVSS skipped for %s: %s", vuln.cve_id, e)
             continue
 
     if upgraded:
@@ -1587,7 +1588,8 @@ def reenrich_fallback_cvss(limit=50):
             elif live_status:
                 # Still pending -- just update the status field
                 vuln.nvd_status = live_status
-        except Exception:
+        except Exception as e:
+            logger.warning("CNA→NVD upgrade skipped for %s: %s", vuln.cve_id, e)
             continue
 
     if cna_upgraded:
