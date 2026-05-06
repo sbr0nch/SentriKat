@@ -52,7 +52,83 @@
 > URL admin trigger: `POST /api/sync` con `{"source": "cisa-kev"}` o equivalente button in `/admin/sync` UI.
 > Function: `sync_cisa_kev` in `app/cisa_sync.py:874+`. Frequency: daily via APScheduler.
 
-_Da iniziare._
+### Path corretto admin sync
+
+❌ `/admin/sync` → 404 (UI old reference)
+✅ `/admin-panel#settings:system` (Settings tab → System sub-tab)
+✅ Header button "Sync" (top-right area) → trigger sync globale CISA+NVD
+
+### Live test 2026-05-06
+
+User trigger: clicked "Sync" in header → spinner "Syncing..." attivo.
+
+#### Synchronization History panel observed
+
+| Date & Time | Status | Vulnerabilities | Matches Found | Duration |
+|---|---|---|---|---|
+| 06/05/2026 02:00:15 | 🔴 **FAILED** | 0 | 0 | **15.11s** |
+| 05/05/2026 10:22:42 | 🟢 SUCCESS | 1587 | 0 | 752.56s |
+
+#### NVD Connection Status panel observed
+
+- NVD: **Connected**
+- Rate limit: 50 req/30s **API Key Active**
+- Last Sync: 2026-05-06 02:00:15 UTC
+- Total Vulnerabilities: 2396
+
+#### CPE Dictionary panel observed
+
+- Total Entries: **65,175**
+- With Aliases: 799
+- **Used for Matching: 0** ← anomalo
+- Product Coverage: 70%
+- Last Bulk Download: 06/05/2026 12:32:16
+
+---
+
+### Bug findings 08.1
+
+#### [08.1.1] 🟡 MEDIUM — Last Sync schedulata 06/05 02:00:15 FAILED in 15s con 0 vuln/0 match
+
+- **Env**: 🏢 on-prem locale (probabile anche ☁️ SaaS, da confermare)
+- **Severity**: 🟡 MEDIUM — sync manuale dal header funziona, ma scheduler rotto = drift data nel tempo
+- **Symptom**: il job APScheduler delle 02:00 fallisce in 15s senza esporre root cause in UI. La sync precedente del 05/05 10:22 era SUCCESS con 1587 vuln in 752s.
+- **Hypothesis A**: NVD test API key esposta in chat history (`04f90ab1-61aa-405f-be91-c42b66e982f6` per `SESSION-HANDOFF` § "License key in chat history") potrebbe essere stata revocata da NIST. Tutte le sync NVD-dipendenti falliscono.
+- **Hypothesis B**: errore di rete schedulato (testlab proxy down? container DNS hiccup alle 02:00?)
+- **Hypothesis C**: APScheduler retry logic ingoia eccezione e marca "FAILED" senza log dettagliato
+- **Action diagnostica**: `docker logs sentrikat --since 24h | grep -iE "sync|cisa|02:00"` per estrarre stack trace
+- **Discovered**: 2026-05-06
+
+#### [08.1.2] 🔴 HIGH — CPE Dictionary "Used for Matching: 0" su 65,175 total entries
+
+- **Env**: 🏢 on-prem (confermato), ☁️ SaaS da verificare
+- **Severity**: 🔴 HIGH per la qualità del matching e diagnostica accuracy
+- **Symptom**: pannello CPE Dictionary stats mostra `Used for Matching: 0` mentre Total Entries=65,175 e Product Coverage=70%. Le due cose sono incompatibili: se 70% dei product hanno CPE assegnato e parte di quelli vengono via Tier 3 (local CPE dictionary), il counter "Used for Matching" deve essere > 0.
+- **Hypothesis A** (più probabile): counter di metrica rotto — il dictionary è caricato e usato, ma `lookup_cpe_dictionary` non incrementa il counter `used_for_matching`. Verifica: F.2 verified live ha mostrato che apply_cpe_to_product ha trovato match Tier 3 per Apache Tomcat → la dictionary VIENE usata. Quindi il counter è bug.
+- **Hypothesis B** (catastrofico se vero): dictionary caricata ma `lookup_cpe_dictionary` mai invocato — improbabile perché contraddirebbe la verifica F.2.
+- **Action diagnostica**: leggere `app/cpe_dictionary.py` → cercare counter incremento in `lookup_cpe_dictionary`. Se assente, aggiungerlo. Se presente, capire perché non gira.
+- **Cross-link**: osservato durante 08.1 ma il bug è in `app/cpe_dictionary.py` (core SentriKat, on-prem + SaaS). Non cross-repo.
+- **Discovered**: 2026-05-06
+
+#### [08.1.3] 🟡 MEDIUM — Dashboard footer "Last Sync FAILED" desincronizzato mentre sync attiva
+
+- **Severity**: 🟡 MEDIUM (UX confusing al demo)
+- **Symptom**: durante una sync attiva (spinner "Syncing..." nell'header funzionante), il dashboard footer continua a mostrare lo stato della sync precedente "06/05 02:00:15 FAILED | 0 matches found in 15.11s" invece di un live indicator tipo "Sync in progress... (X seconds elapsed)".
+- **Hypothesis**: footer fa una query statica al carico pagina invece di websocket / polling per stato live
+- **Action**: il footer dovrebbe leggere stato live (`GET /api/sync/status`) e mostrare badge in-progress quando applicabile. Aggiungere reactive state.
+- **Discovered**: 2026-05-06
+
+#### [08.1.4] 🔵 INFO — `/admin/sync` URL inesistente — path corretto è `/admin-panel#settings:system`
+
+- **Severity**: 🔵 INFO (documentazione interna)
+- **Action**: aggiornato in questo file. Se `CVE-MATCHING-PIPELINE.md` o `13-admin-ops.md` referenziano `/admin/sync`, anche quelli vanno aggiornati.
+
+#### [08.1.5] 🟢 OK — Sync manuale via header button operativa
+
+- ✅ Bottone "Sync" nell'header con spinner animato durante esecuzione
+- ✅ NVD Connection Status: Connected, API Key Active, rate limit 50 req/30s
+- ✅ Total Vulnerabilities counter live (2396)
+- ✅ CPE Dictionary auto-bulk-downloaded oggi 12:32 (65k entries)
 
 ---
 
