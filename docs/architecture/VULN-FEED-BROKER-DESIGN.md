@@ -435,6 +435,54 @@ license-server/
 
 Recommended approach: **port the existing enrichment code** from `sbr0nch/sentrikat/app/cisa_sync.py` and friends (already mature, ~2000 lines well-tested). Don't rewrite from scratch.
 
+### R-PARSER-RESILIENCE — Non-functional requirement (added 2026-05-06)
+
+**Trigger**: 2026-05-06 sentrikat-web admin `/admin/datasources` showed `ENISA EUVD: SCHEMA_CHANGED`, `CISA KEV: AUTH_CHANGED`, `CVE.org Vulnrichment: DEGRADED`. Pattern reveals fragility: any minor upstream schema change blocks ingestion until human intervention. Unacceptable for a vulnerability platform that must keep flowing.
+
+**Requirement**: enrichment parsers (cisa_sync.py, nvd_api.py, euvd_sync.py, epss_sync.py) MUST follow the **defensive parser pattern**:
+
+1. **Required vs optional fields explicit**:
+   - `REQUIRED_FIELDS = ['cve_id', ...]` → if missing → fail loud with `SchemaIncompatibleError`, alert ops
+   - `OPTIONAL_FIELDS = ['cvss_score', 'description', ...]` → if missing → log warning, continue with default
+
+2. **Field aliases / lookup chain**:
+   ```python
+   FIELD_ALIASES = {
+       'cve_id': ['cve_id', 'cveId', 'identifier', 'cve.id'],
+       'cvss_score': ['cvss.baseScore', 'cvssV3.score', 'cvssMetricV3.cvssData.baseScore', 'score'],
+       'severity': ['severity', 'baseSeverity', 'cvss.baseSeverity'],
+   }
+   ```
+   Try each alias in order, first hit wins. Decouples canonical SentriKat naming from upstream churn.
+
+3. **Schema drift telemetry (non-blocking)**:
+   ```python
+   shape_hash = hash_keys_recursively(payload)
+   if shape_hash != last_known_shape_hash:
+       telemetry.emit('feed.schema_drift', {'feed': 'euvd', 'before': old, 'after': new})
+       last_known_shape_hash = shape_hash
+   # Continue ingestion — don't abort
+   ```
+
+4. **Pydantic models with `model_config = ConfigDict(extra='ignore')`**:
+   - Tolerate added fields silently
+   - Use `Optional[X] = None` for fields that may disappear
+
+5. **Health-check distinction**:
+   - **HEALTHY** — fetch + parse OK
+   - **DEGRADED** — fetch OK, parse partial (some optional fields missing or unrecognized)
+   - **SCHEMA_CHANGED** — fetch OK, parse blocked because **required field gone or renamed without alias coverage** → human triage needed
+   - **AUTH_CHANGED** — fetch returned 401/403/unexpected envelope (upstream changed auth) → ops update credential
+   - **DOWN** — fetch failed (5xx, timeout, DNS, etc.)
+
+6. **Type coercion at parse boundary**: if upstream changes `severity` from string `"HIGH"` to int `7`, parser auto-coerces with mapping table; doesn't crash.
+
+7. **Reference implementation**: when porting `cisa_sync.py` to `vuln_feed/enrichment/cisa_sync.py`, refactor inline `data['key']` → `_get_aliased(data, FIELD_ALIASES['key'])`. Effort estimate: +0.5 day per parser file (5 parsers ≈ 2.5 days additional, well-spent investment).
+
+**Acceptance**: a parser implementation passes R-PARSER-RESILIENCE if a sentrikat-web pen-test team can rename, re-nest, or remove an OPTIONAL field in a synthetic upstream response and the parser still ingests records (with telemetry emitted). Renaming a REQUIRED field correctly produces SchemaIncompatibleError + alert.
+
+**Cross-repo applicability**: same pattern SHOULD be retrofitted into `sbr0nch/sentrikat/app/cisa_sync.py` etc. for V1.0 customers running direct-to-NVD before broker is live. Not blocking for EA, but on the post-EA hardening backlog (F.4 NVD enrichment robustness — see `CVE-MATCHING-PIPELINE.md`).
+
 ---
 
 ## Migration path for existing on-prem customers
