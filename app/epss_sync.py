@@ -23,6 +23,14 @@ EPSS_BATCH_SIZE = 100  # Max CVEs per request (API limit is ~500)
 EPSS_CACHE_HOURS = 24  # Re-fetch scores older than this
 
 
+# R-PARSER-RESILIENCE alias map for FIRST EPSS API records.
+_EPSS_ALIASES = {
+    'cve_id':     ['cve', 'cveId', 'cve_id', 'id'],
+    'epss':       ['epss', 'score', 'probability'],
+    'percentile': ['percentile', 'pctl', 'rank'],
+}
+
+
 def fetch_epss_scores(cve_ids: List[str]) -> Dict[str, Dict]:
     """
     Fetch EPSS scores for a list of CVE IDs from FIRST API.
@@ -38,7 +46,16 @@ def fetch_epss_scores(cve_ids: List[str]) -> Dict[str, Dict]:
                 'percentile': 0.912  # Percentile rank (0-1)
             }
         }
+
+    R-PARSER-RESILIENCE: record-level fields read via alias chain +
+    type coercion so a FIRST-side rename (e.g. 'epss' → 'score') no
+    longer silently produces 0.0 scores that disable EPSS-based
+    actively_exploited detection.
     """
+    from app.parser_resilience import (
+        coerce_float, detect_schema_drift, get_aliased,
+    )
+
     if not cve_ids:
         return {}
 
@@ -55,22 +72,27 @@ def fetch_epss_scores(cve_ids: List[str]) -> Dict[str, Dict]:
             response.raise_for_status()
 
             data = response.json()
+            detect_schema_drift('epss', data)
 
             batch_count = 0
-            if data.get('status') == 'OK' and 'data' in data:
-                for item in data['data']:
-                    cve_id = item.get('cve')
-                    if cve_id:
-                        epss_val = float(item.get('epss', 0))
-                        pctl_val = float(item.get('percentile', 0))
-                        # Clamp to valid 0-1 range
-                        epss_val = max(0.0, min(1.0, epss_val))
-                        pctl_val = max(0.0, min(1.0, pctl_val))
-                        results[cve_id] = {
-                            'epss': epss_val,
-                            'percentile': pctl_val
-                        }
-                        batch_count += 1
+            # Status field is informational; some FIRST mirrors return data
+            # without it. Tolerate both shapes.
+            records = data.get('data') or data.get('records') or []
+            if records:
+                for item in records:
+                    cve_id = get_aliased(item, _EPSS_ALIASES['cve_id'])
+                    if not cve_id:
+                        continue
+                    epss_val = coerce_float(get_aliased(item, _EPSS_ALIASES['epss'])) or 0.0
+                    pctl_val = coerce_float(get_aliased(item, _EPSS_ALIASES['percentile'])) or 0.0
+                    # Clamp to valid 0-1 range (defensive against scaled inputs)
+                    epss_val = max(0.0, min(1.0, epss_val))
+                    pctl_val = max(0.0, min(1.0, pctl_val))
+                    results[cve_id] = {
+                        'epss': epss_val,
+                        'percentile': pctl_val,
+                    }
+                    batch_count += 1
 
             logger.debug(f"Fetched EPSS scores for {len(batch)} CVEs, got {batch_count} results")
 

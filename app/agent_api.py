@@ -1493,6 +1493,10 @@ def process_inventory_job(job):
         version_changed_product_ids = set()  # Products whose version changed — need re-matching
         touched_product_ids = set()  # Products whose last_agent_report should be bumped atomically at end
         new_cpe_pairs = set()  # Track unique (cpe_vendor, cpe_product) pairs from new products for NVD lookup
+        # 6-must #5 telemetry: track which signal the Windows agent used per item
+        # so customer-side anomalies (high 'null' or 'Version'/'MajorMinor' rates)
+        # surface in server logs without requiring a schema migration.
+        version_source_counts = {'DisplayVersion': 0, 'Version': 0, 'MajorMinor': 0, 'null': 0, 'absent': 0}
 
         # Resolve the agent_key for license gating (reuse from above if loaded)
         agent_key_for_gating = None
@@ -1504,6 +1508,16 @@ def process_inventory_job(job):
                 vendor = product_data.get('vendor')
                 product_name = product_data.get('product')
                 version = product_data.get('version')
+
+                # 6-must #5 telemetry: tally Windows agent version-source signal
+                vsrc = product_data.get('version_source')
+                if vsrc is None:
+                    if 'version_source' in product_data:
+                        version_source_counts['null'] += 1
+                    else:
+                        version_source_counts['absent'] += 1
+                else:
+                    version_source_counts[vsrc] = version_source_counts.get(vsrc, 0) + 1
 
                 if not vendor or not product_name:
                     items_failed += 1
@@ -1779,6 +1793,19 @@ def process_inventory_job(job):
                     logger.warning(f"Error removing uninstalled product in job {job_id}: {e}")
             if removed_ids:
                 logger.info(f"Job {job_id}: Removed {len(removed_ids)} uninstalled products")
+
+        # 6-must #5: emit version-source breakdown when any signal was reported.
+        # 'absent' = legacy agent without telemetry; 'null' = agent reported the
+        # field but cascade resolved no version (long-tail registry edge case).
+        if any(v > 0 for k, v in version_source_counts.items() if k != 'absent'):
+            logger.info(
+                f"Job {job_id}: agent version-source breakdown: "
+                f"DisplayVersion={version_source_counts['DisplayVersion']} "
+                f"Version={version_source_counts['Version']} "
+                f"MajorMinor={version_source_counts['MajorMinor']} "
+                f"null={version_source_counts['null']} "
+                f"absent={version_source_counts['absent']}"
+            )
 
         # Commit pending changes (version updates, installation removals)
         # before atomic timestamp bump + re-matching.

@@ -1435,8 +1435,17 @@ def enrich_with_euvd_exploited():
         return 0, 0
 
 
-def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=100, job_id=None):
-    """Main sync function to download and process CISA KEV"""
+def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=300, job_id=None):
+    """Main sync function to download and process CISA KEV.
+
+    [08.5.1] (post-EA week1): cpe_limit raised from 100→300 to close
+    the long-tail enrichment gap. With 100, ~24h were needed to
+    backfill the full 2400 KEV CVEs (one batch per scheduler run);
+    300 brings cold-start enrichment down to ~8 cycles, well within
+    a customer's first-day expectation. NVD rate limit (5/30s with
+    API key, 5/30s without) still respected by the downstream
+    fetch_cpe_version_data limiter.
+    """
     from app import progress as prog
     if job_id:
         prog.start(job_id, 7, 'Starting sync...')
