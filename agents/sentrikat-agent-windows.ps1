@@ -507,10 +507,66 @@ function Get-SecurityPosture {
 # Software Inventory Collection
 # ============================================================================
 
+function Get-NormalizedVersion {
+    param($item)
+
+    # 6-must #5 (registry resilience): the canonical version field is
+    # DisplayVersion, but some installers (InstallShield, custom MSI,
+    # vendor scripts) populate only Version DWORD or MajorVersion+
+    # MinorVersion (+optional BuildNumber). Falling back through the
+    # cascade prevents silent "version=null" reports that downstream
+    # match logic (filters.py:check_cpe_match) demotes from cpe/high to
+    # cpe/medium or keyword fallback, hiding real CVEs.
+    #
+    # Returns @{ version = <string|null>; source = <DisplayVersion|Version|MajorMinor|null> }
+
+    # Preferred: DisplayVersion (MSI-standard, most accurate)
+    if ($item.DisplayVersion -and $item.DisplayVersion.ToString().Trim() -ne "") {
+        return @{ version = $item.DisplayVersion.ToString().Trim(); source = 'DisplayVersion' }
+    }
+
+    # Fallback 1: Version DWORD packed as 0xMMmmBBBB (InstallShield pattern)
+    if ($null -ne $item.Version) {
+        try {
+            $v = [int64]$item.Version
+            if ($v -gt 0) {
+                $major = ($v -shr 24) -band 0xFF
+                $minor = ($v -shr 16) -band 0xFF
+                $build = $v -band 0xFFFF
+                if ($major -gt 0 -or $minor -gt 0 -or $build -gt 0) {
+                    return @{ version = "$major.$minor.$build"; source = 'Version' }
+                }
+            }
+        } catch {
+            # Version field may be a string in some installers; try as-is
+            $vs = $item.Version.ToString().Trim()
+            if ($vs -ne "" -and $vs -ne "0") {
+                return @{ version = $vs; source = 'Version' }
+            }
+        }
+    }
+
+    # Fallback 2: MajorVersion + MinorVersion DWORDs separate
+    if ($null -ne $item.MajorVersion) {
+        try {
+            $maj = [int]$item.MajorVersion
+            $min = if ($null -ne $item.MinorVersion) { [int]$item.MinorVersion } else { 0 }
+            if ($maj -gt 0 -or $min -gt 0) {
+                return @{ version = "$maj.$min"; source = 'MajorMinor' }
+            }
+        } catch {
+            # ignore — proceed to null
+        }
+    }
+
+    return @{ version = $null; source = $null }
+}
+
 function Get-InstalledSoftware {
     Write-Log "Collecting software inventory..."
 
     $software = @()
+    $versionSourceCounts = @{ DisplayVersion = 0; Version = 0; MajorMinor = 0; Null = 0 }
 
     # Registry paths for installed software
     $registryPaths = @(
@@ -527,7 +583,14 @@ function Get-InstalledSoftware {
             foreach ($item in $items) {
                 $vendor = $item.Publisher
                 $name = $item.DisplayName
-                $version = $item.DisplayVersion
+                $versionInfo = Get-NormalizedVersion -item $item
+
+                # Telemetry: track which signal we ended up using per record
+                if ($versionInfo.source) {
+                    $versionSourceCounts[$versionInfo.source]++
+                } else {
+                    $versionSourceCounts.Null++
+                }
 
                 # Skip if no vendor - try to extract from name
                 if (!$vendor) {
@@ -540,7 +603,8 @@ function Get-InstalledSoftware {
                 $software += @{
                     vendor = $vendor.Trim()
                     product = $name.Trim()
-                    version = if ($version) { $version.Trim() } else { $null }
+                    version = $versionInfo.version
+                    version_source = $versionInfo.source
                     path = $item.InstallLocation
                 }
             }
@@ -548,6 +612,10 @@ function Get-InstalledSoftware {
             Write-Log "Error reading registry path $path : $_" -Level "WARN"
         }
     }
+
+    # Log version-source distribution for visibility (server reads this in agent log)
+    Write-Log ("Version-source breakdown: DisplayVersion={0} Version={1} MajorMinor={2} null={3}" -f `
+        $versionSourceCounts.DisplayVersion, $versionSourceCounts.Version, $versionSourceCounts.MajorMinor, $versionSourceCounts.Null)
 
     # Also get Windows Features/Roles (Server) - only security-relevant ones
     try {
