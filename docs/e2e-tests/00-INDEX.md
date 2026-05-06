@@ -6,6 +6,21 @@
 
 ---
 
+## 🟢 LATEST SESSION — 2026-05-06 (CVE matching pipeline hardening + audit)
+
+**START HERE for next session bootstrap**: read [`docs/SESSION-HANDOFF-2026-05-06.md`](../SESSION-HANDOFF-2026-05-06.md). It contains:
+- Full state recap (what shipped, what remains)
+- Pointer to `docs/architecture/CVE-MATCHING-PIPELINE.md` (forensic audit)
+- Pointer to `docs/architecture/VULN-FEED-BROKER-DESIGN.md` (cross-repo API contract)
+- Cross-repo coordination protocol with `sbr0nch/SentriKat-web` (see [`FIX-HANDOFF-sentrikat-web.md`](../../FIX-HANDOFF-sentrikat-web.md))
+- The 6 must-haves for week 1 post-EA (scheduled jobs, internal health dashboard, customer data-quality badges, NVD robustness, agent parser hardening, KEV stale flag reset)
+
+**Bug [01.18.5] product cap and CVE matching pipeline are CLEAN as of this session.** Live test confirmed: 100 products, 1 valid match (`CVE-2025-0411` 7-Zip MotW Bypass via `cpe / high`), 0 false positives. Down from 379 matches with 87% noise pre-fix.
+
+**Branch state**: `claude/sentrikat-setup-overview-Vv78M` merged to `main`. Future work goes on a new `claude/*` branch.
+
+---
+
 ## 🔴 HANDOFF — leggi PRIMA di continuare (session continuity)
 
 Se sei un nuovo Claude che apre questa sessione o se ci ritorniamo dopo una pausa, questa è la sintesi operativa.
