@@ -162,6 +162,48 @@ User trigger: clicked "Sync" in header → spinner "Syncing..." attivo.
 
 🟡 **MEDIUM concern** (08.3.1): pre `[05.3.2]` finding reported `ENISA EUVD: SCHEMA_CHANGED` lato sentrikat-web monitor. Il parser EUVD core deve essere audited contro la R-PARSER-RESILIENCE pattern (defensive `.get()`, alias chain, schema drift telemetry). Da fare quando arrivano i 2 curl di Massimiliano per recuperare sample JSON nuovo. Linka a `VULN-FEED-BROKER-DESIGN.md § R-PARSER-RESILIENCE`.
 
+#### Curl recon outputs 2026-05-06 (preliminary)
+
+Massimiliano da `sentrikat-nurnb-1` (Hetzner SaaS VM):
+
+**CISA KEV** `curl -I https://www.cisa.gov/.../known_exploited_vulnerabilities.json`:
+```
+HTTP/2 403
+content-type: text/html
+content-length: 454
+x-reference-error: 18.a3d01702.1778075172.d7c3f3c
+```
+→ **Akamai-fronted block** (header `x-reference-error` è signature Akamai). Tre ipotesi:
+1. User-Agent default `curl/X.Y.Z` blacklisted da Akamai bot-protection
+2. SentriKat custom UA (`SentriKat/1.0 (Vulnerability Management; +https://sentrikat.com)`, vedi `cisa_sync.py:840`) anch'esso blacklisted → **rotto in produzione**
+3. IP range Hetzner cloud blocked → **rotto solo da SaaS deploy**
+
+**Diagnostics follow-up** richieste a Massimiliano:
+```bash
+curl -I -H 'User-Agent: Mozilla/5.0 (Linux x86_64) Gecko/20100101 Firefox/120.0' \
+  'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json'
+curl -I -H 'User-Agent: SentriKat/1.0 (Vulnerability Management; +https://sentrikat.com)' \
+  'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json'
+```
+
+**EUVD** `curl https://euvd.enisa.europa.eu/api/v1/vulnerabilities?size=1`:
+- 897 byte ricevuti (`jq` parse error → non JSON, probabilmente HTML error/redirect)
+- **Hostname sospetto**: SESSION-HANDOFF cita `euvdservices.enisa.europa.eu` (l'endpoint che il core SentriKat usa), la sessione gemella ha testato `euvd.enisa.europa.eu`. **Probabilmente URL sbagliato lato monitor sentrikat-web**.
+
+**Diagnostics follow-up**:
+```bash
+curl -s 'https://euvd.enisa.europa.eu/api/v1/vulnerabilities?size=1' | head -50  # vedi che è
+curl -s 'https://euvdservices.enisa.europa.eu/api/v1/vulnerabilities?size=1' | head -50  # alternative
+```
+
+#### Implicazioni per la sessione gemella sentrikat-web ([05.3.2] fix)
+
+- Se CISA 403 è UA-block: fix S = cambiare UA del monitor a quello del cisa_sync core, oppure rotare UA periodicamente
+- Se EUVD URL è sbagliato: fix S = cambiare hostname del monitor da `euvd` a `euvdservices`
+- In entrambi i casi: **sintomo monitor-side, NON real upstream issue**. Il core SentriKat probabilmente sta ingestendo correttamente entrambe le feed (verifica con sync history del giorno precedente: 05/05/2026 10:22 SUCCESS con 1587 vuln ingerite)
+
+**Cluster bug class**: false positive nel monitoring sentrikat-web (`/admin/datasources` AUTH_CHANGED + SCHEMA_CHANGED) deriva da configurazione monitor sbagliata, NON da rottura reale upstream. Conferma utile dopo i due follow-up curl di Massimiliano.
+
 ---
 
 ## 08.4 — NVD per-CPE search
