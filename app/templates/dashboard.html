@@ -1518,25 +1518,29 @@
         const paginationTop = document.getElementById('paginationControlsTop');
         const paginationBottom = document.getElementById('paginationControlsBottom');
 
-        if (totalPages > 1) {
+        // [13.1.1] fix: always update info text + show panel when total > 0,
+        // even with single page. Pre-fix the panel stayed hidden so the
+        // hardcoded 'Showing 1-50 of 0' placeholder never got refreshed.
+        if (total > 0) {
             const infoText = `Showing ${startIdx + 1}-${endIdx} of ${total}`;
 
-            // Build pagination nav HTML
+            // Build pagination nav HTML only if multiple pages
             let navHtml = '';
-            navHtml += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
-                <a class="page-link" href="#" onclick="${goToFn}(${currentPage - 1}); return false;">&laquo;</a>
-            </li>`;
+            if (totalPages > 1) {
+                navHtml += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+                    <a class="page-link" href="#" onclick="${goToFn}(${currentPage - 1}); return false;">&laquo;</a>
+                </li>`;
 
-            const startPage = Math.max(1, currentPage - 2);
-            const endPage = Math.min(totalPages, currentPage + 2);
+                const startPage = Math.max(1, currentPage - 2);
+                const endPage = Math.min(totalPages, currentPage + 2);
 
-            if (startPage > 1) {
-                navHtml += `<li class="page-item"><a class="page-link" href="#" onclick="${goToFn}(1); return false;">1</a></li>`;
-                if (startPage > 2) navHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
-            }
+                if (startPage > 1) {
+                    navHtml += `<li class="page-item"><a class="page-link" href="#" onclick="${goToFn}(1); return false;">1</a></li>`;
+                    if (startPage > 2) navHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+                }
 
-            for (let i = startPage; i <= endPage; i++) {
-                navHtml += `<li class="page-item ${i === currentPage ? 'active' : ''}">
+                for (let i = startPage; i <= endPage; i++) {
+                    navHtml += `<li class="page-item ${i === currentPage ? 'active' : ''}">
                     <a class="page-link" href="#" onclick="${goToFn}(${i}); return false;">${i}</a>
                 </li>`;
             }
@@ -1549,8 +1553,9 @@
             navHtml += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
                 <a class="page-link" href="#" onclick="${goToFn}(${currentPage + 1}); return false;">&raquo;</a>
             </li>`;
+            }  // close if (totalPages > 1)
 
-            // Update both top and bottom
+            // Update both top and bottom — info text always, navHtml empty when single page
             [paginationTop, paginationBottom].forEach(el => {
                 if (el) {
                     el.style.display = 'flex';
