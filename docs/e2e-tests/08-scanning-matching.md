@@ -99,16 +99,27 @@ User trigger: clicked "Sync" in header → spinner "Syncing..." attivo.
 - **Action diagnostica**: `docker logs sentrikat --since 24h | grep -iE "sync|cisa|02:00"` per estrarre stack trace
 - **Discovered**: 2026-05-06
 
-#### [08.1.2] 🔴 HIGH — CPE Dictionary "Used for Matching: 0" su 65,175 total entries
+#### [08.1.2] 🔵 INFO (era 🔴 HIGH — declassato post code-review) — CPE Dictionary "Used for Matching: 0" è comportamento corretto, non bug
 
-- **Env**: 🏢 on-prem (confermato), ☁️ SaaS da verificare
-- **Severity**: 🔴 HIGH per la qualità del matching e diagnostica accuracy
-- **Symptom**: pannello CPE Dictionary stats mostra `Used for Matching: 0` mentre Total Entries=65,175 e Product Coverage=70%. Le due cose sono incompatibili: se 70% dei product hanno CPE assegnato e parte di quelli vengono via Tier 3 (local CPE dictionary), il counter "Used for Matching" deve essere > 0.
-- **Hypothesis A** (più probabile): counter di metrica rotto — il dictionary è caricato e usato, ma `lookup_cpe_dictionary` non incrementa il counter `used_for_matching`. Verifica: F.2 verified live ha mostrato che apply_cpe_to_product ha trovato match Tier 3 per Apache Tomcat → la dictionary VIENE usata. Quindi il counter è bug.
-- **Hypothesis B** (catastrofico se vero): dictionary caricata ma `lookup_cpe_dictionary` mai invocato — improbabile perché contraddirebbe la verifica F.2.
-- **Action diagnostica**: leggere `app/cpe_dictionary.py` → cercare counter incremento in `lookup_cpe_dictionary`. Se assente, aggiungerlo. Se presente, capire perché non gira.
-- **Cross-link**: osservato durante 08.1 ma il bug è in `app/cpe_dictionary.py` (core SentriKat, on-prem + SaaS). Non cross-repo.
+> **Update 2026-05-06 post code-read di `app/cpe_dictionary.py`**: NON è un bug funzionale.
+
+- **Env**: 🏢 on-prem + ☁️ SaaS (entrambi)
+- **Severity finale**: 🔵 INFO (UI label confondente, non funzionalità rotta)
+- **Symptom osservato**: pannello CPE Dictionary stats mostra `Used for Matching: 0` mentre Total Entries=65,175 e Product Coverage=70%.
+- **Code analysis**:
+  - `apply_cpe_to_product` (`cpe_mapping.py:349`) prova in ordine: Tier 1 (regex CPE_MAPPINGS) → Tier 2 (curated dict `cpe_mappings.py`) → Tier 3 (`lookup_cpe_dictionary`)
+  - `_increment_usage` (raw SQL UPDATE su `usage_count`) viene chiamato **solo dentro Tier 3**, non in T1/T2
+  - `get_dictionary_stats` (`cpe_dictionary.py:344`) computa `used_for_matching = COUNT(entries WHERE usage_count > 0)`
+- **Perché è 0**:
+  - Apache Tomcat 9.0.50 (F.2 verified) → matchato da Tier 1 regex (`apache:tomcat` è builtin) → mai raggiunge T3
+  - 70 product agent-pushed con CPE (Microsoft .NET runtime, Visual C++ Redist, ecc.) → matchati prevalentemente T1+T2
+  - 30 product agent-pushed senza CPE (Windows SDK, Universal CRT Headers) → falliscono anche T3 (non sono nel dict NVD)
+  - Risultato: zero prodotti hanno usato T3 dictionary lookup → counter rimane a 0
+- **Conferma**: il dict è caricato, indicizzato e pronto come fallback. Lo zero è la prova che T1+T2 coprono il workload tipico (Microsoft + comuni stack OSS).
+- **Fix consigliato (cosmetico)**: rinominare label UI "Used for Matching" in "Tier 3 Lookup Hits" o "Dictionary Activations (lifetime)" per disambiguare. Codice di metrica corretto, label confondente.
 - **Discovered**: 2026-05-06
+- **Note**: questa è esattamente la categoria di "preoccupazione che a un check di codice si scopre essere expected behavior". Salva-tempo: prima di marcare HIGH bug su counter sospetti, leggere sempre il codice di metrica.
+
 
 #### [08.1.3] 🟡 MEDIUM — Dashboard footer "Last Sync FAILED" desincronizzato mentre sync attiva
 
