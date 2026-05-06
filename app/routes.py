@@ -1888,6 +1888,20 @@ def create_product():
     db.session.add(product)
     db.session.flush()  # Get the product ID
 
+    # F.2: ensure CPE assignment via local tiers when NVD lookup above
+    # didn't yield a result (rate-limited, network error, missing API key,
+    # or product not in NVD CPE dict). apply_cpe_to_product is a no-op
+    # when cpe_vendor/cpe_product are already set, so this is safe to call
+    # unconditionally.
+    if not (product.cpe_vendor and product.cpe_product):
+        try:
+            from app.cpe_mapping import apply_cpe_to_product
+            if apply_cpe_to_product(product):
+                cpe_vendor = product.cpe_vendor
+                cpe_product = product.cpe_product
+        except Exception as e:
+            current_app.logger.warning(f"apply_cpe_to_product failed for product {product.id}: {e}")
+
     # Also add to product_organizations many-to-many table
     org_to_assign = requested_org_id
     if org_to_assign:
