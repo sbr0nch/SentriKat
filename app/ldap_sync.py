@@ -177,8 +177,8 @@ class LDAPSyncEngine:
                 )
                 db.session.add(audit_log)
                 db.session.commit()
-            except Exception:
-                pass
+            except Exception as audit_err:
+                logger.warning("LDAP audit log write failed (original error preserved): %s", audit_err)
 
             return {
                 'success': False,
@@ -424,8 +424,8 @@ class LDAPSyncEngine:
                 )
                 db.session.add(sync_log)
                 db.session.commit()
-            except Exception:
-                pass
+            except Exception as log_err:
+                logger.warning("LDAP sync log write failed (original error preserved): %s", log_err)
 
             return {
                 'success': False,
