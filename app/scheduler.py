@@ -394,6 +394,22 @@ def start_scheduler(app):
     else:
         logger.warning("EPSS sync NOT scheduled — sync_epss_scores not importable")
 
+    # F.1 fix (CVE-MATCHING-PIPELINE.md §F.1): periodic CPE NVD remap every 4h
+    # to fill long-tail products (Windows generics, niche software) that fail
+    # local Tiers 1+2+3 — the post-KEV auto-remap uses use_nvd=False so this
+    # is the only path that ever populates CPE for those products.
+    if batch_apply_cpe_mappings is not None:
+        scheduler.add_job(
+            func=lambda: _run_with_lock('cpe_nvd_remap', cpe_nvd_remap_job, app),
+            trigger=IntervalTrigger(hours=4),
+            id='cpe_nvd_remap',
+            name='Periodic CPE NVD Remap (Tier 4)',
+            replace_existing=True
+        )
+        logger.info("CPE NVD remap scheduled every 4 hours")
+    else:
+        logger.warning("CPE NVD remap NOT scheduled — batch_apply_cpe_mappings not importable")
+
     # Schedule LDAP sync if enabled
     ldap_sync_enabled = (os.environ.get('LDAP_SYNC_ENABLED', '') or 'false').lower() == 'true'
     if ldap_sync_enabled:
@@ -716,6 +732,42 @@ def reschedule_critical_email():
         logger.info(f"Critical CVE reminder rescheduled to {hour:02d}:{minute:02d} ({tz})")
     else:
         logger.info("Critical CVE reminder disabled")
+
+def cpe_nvd_remap_job(app):
+    """Periodic CPE remap with NVD Tier 4 fallback for products without CPE.
+
+    F.1 fix (CVE-MATCHING-PIPELINE.md §F.1, audit 2026-05-06): the existing
+    post-KEV-sync auto-remap calls batch_apply_cpe_mappings(use_nvd=False)
+    which only does Tiers 1+2+3. Products that fail those (e.g., niche
+    Windows generics like "Windows SDK", "Universal CRT Headers") never
+    get CPE assigned → silent CVE coverage gap.
+
+    This job runs every 4 hours with use_nvd=True + max_nvd_lookups=200
+    to fill the long tail. NVD lookups are cached as user-learned mappings
+    so the same product won't query NVD twice.
+
+    Rate-limit budget: 200 lookups × 6 runs/day = 1200/day. With NVD API
+    key (~144k/day budget) this is <1% of available capacity.
+    """
+    if batch_apply_cpe_mappings is None:
+        logger.warning("CPE NVD remap skipped — batch_apply_cpe_mappings not importable")
+        return
+    with app.app_context():
+        try:
+            logger.info("Starting periodic CPE NVD remap (Tier 4 fallback)...")
+            updated, total_unmapped = batch_apply_cpe_mappings(
+                commit=True, use_nvd=True, max_nvd_lookups=200
+            )
+            if updated > 0:
+                logger.info(
+                    f"CPE NVD remap: {updated} products newly mapped "
+                    f"(of {total_unmapped} unmapped, {total_unmapped - updated} still unmatched)"
+                )
+            else:
+                logger.info(f"CPE NVD remap: no new mappings (unmapped={total_unmapped})")
+        except Exception as e:
+            logger.error(f"CPE NVD remap failed: {e}", exc_info=True)
+
 
 def epss_sync_job(app):
     """Standalone scheduler job for daily EPSS score sync.

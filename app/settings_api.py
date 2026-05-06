@@ -2545,6 +2545,25 @@ def restore_full_backup():
 
         db.session.commit()
 
+        # F.4 fix (CVE-MATCHING-PIPELINE.md §F.4, audit 2026-05-06):
+        # post-restore re-apply CPE to all products without it. Backup may
+        # be old (pre-CPE-fields) or restored data may have stale CPE
+        # references that no longer match. Run T1+T2+T3 (no NVD here, fast).
+        # NVD fallback runs separately via cpe_nvd_remap_job every 4h.
+        try:
+            from app.cpe_mapping import batch_apply_cpe_mappings
+            updated, total_unmapped = batch_apply_cpe_mappings(
+                commit=True, use_nvd=False, max_nvd_lookups=0
+            )
+            stats['cpe_reapplied'] = updated
+            if updated > 0:
+                logger.info(
+                    f"F.4 post-restore CPE re-apply: {updated}/{total_unmapped} "
+                    f"products newly mapped via local tiers"
+                )
+        except Exception as e:
+            logger.warning(f"F.4 post-restore CPE re-apply failed (non-blocking): {e}")
+
         logger.info(f"Full backup restored by {current_user.username}: {stats}")
 
         return jsonify({

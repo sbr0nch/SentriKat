@@ -409,11 +409,30 @@ def apply_cpe_to_product(product):
         # Sanity check: prevent clearly wrong mappings
         if not validate_cpe_assignment(product.vendor, product.product_name,
                                        cpe_vendor, cpe_product):
-            import logging
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 f"CPE sanity check BLOCKED: {product.vendor}/{product.product_name} "
                 f"→ {cpe_vendor}:{cpe_product} (no word overlap)"
             )
+            # F.5 fix (audit 2026-05-06): surface validate rejections to audit
+            # log so admin can review false negatives via /admin/logs filter
+            # action='CPE_REJECTED'. Without this, rejections were invisible
+            # operationally (only WARNING level in app logs).
+            try:
+                from app.logging_config import log_audit_event
+                log_audit_event(
+                    action='CPE_REJECTED',
+                    resource='cpe_mapping',
+                    resource_id=getattr(product, 'id', None),
+                    new_value={
+                        'product_vendor': product.vendor,
+                        'product_name': product.product_name,
+                        'rejected_cpe_vendor': cpe_vendor,
+                        'rejected_cpe_product': cpe_product,
+                        'reason': 'word_overlap_validation_failed',
+                    }
+                )
+            except Exception as audit_err:
+                logger.warning(f"Failed to write CPE_REJECTED audit event: {audit_err}")
             return False
         product.cpe_vendor = cpe_vendor
         product.cpe_product = cpe_product
