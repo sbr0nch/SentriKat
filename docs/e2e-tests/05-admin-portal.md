@@ -661,7 +661,14 @@ Entrambe mostrano 0 entries dopo OTP login fresh. Stesso bug HIGH già tracked c
 - 🔴 **`[05.21.1]`** **HIGH** — prezzi/quote divergono da `/admin/pricing` Calculator e Reference (vedi sotto).
 - 🔵 **`[05.21.2]`** Placeholder `-1` per "Unlimited" leakka in UI come testo letterale.
 
-### `[05.21.1]` 🔴 **HIGH** — Triple source-of-truth divergence: Plans vs Pricing Calculator vs Reference
+### `[05.21.1]` 🟡 **MEDIUM (era 🔴 HIGH)** — Triple source-of-truth divergence: Plans vs Pricing Calculator vs Reference
+
+> **Update 2026-05-06 post PR #252+#255**: PARZIALMENTE FIXED.
+> - ✅ Pricing Calculator (`/admin/pricing`) e landing build-time fetch ora canonical via `plans_config` (PR #252 source-of-truth + PR #255 portal absolute URL hotfix)
+> - ❌ `/admin/plans` ancora **hardcoded in code** ("Plans are defined in code — read-only view"). Mostra prezzi/limits OBSOLETI (es. Professional €199/25-agents/5-users vs canonical Pro EUR 249/100-agents/10-users; Business €499/50/10 vs canonical EUR 649/500/50; Enterprise €999 vs canonical EUR 1499)
+> - **User note 2026-05-06**: "non è aggiornata ma tanto è per gli admin" → admin-only, customer non vede questa pagina
+> - **Severity downgrade HIGH → MEDIUM**: customer-facing canonical, ma admin reference sbagliato può portare un sales agent / Massimiliano stesso a quotare prezzi obsoleti.
+> - **Action backlog post-EA**: rimuovere `/admin/plans` hardcoded oppure farla fetchare da `plans_config` API esattamente come il Calculator. Cross-repo: fix in `SentriKat-web/portal/src/.../admin/plans` o equivalente.
 
 **Sintomo** (Professional plan come esempio canonico):
 
@@ -733,7 +740,16 @@ Stesso pattern presumibile per gli altri plan (Business/Enterprise non confronta
 - 🟢 **Filtri**: All plans, All statuses, Refresh.
 - 🟢 **Export CSV** + link "SaaS Early Access Management" external (probabilmente tenant onboarding).
 
-### `[05.22.1]` 🔴 **HIGH** — EA Tenants stats endpoint risponde 401 "Admin API key required"
+### `[05.22.1]` ✅✅ **FIXED + VERIFIED 2026-05-06** (era 🔴 HIGH) — EA Tenants stats endpoint risponde 401 "Admin API key required"
+
+> **Verified live 2026-05-06 post PR #258 + #261**:
+> - ✅ Stats cards funzionano: Early Access Capacity 2/30 con progress bar (28 spots remaining), Active 2, Suspended 0, Cancelled 0 — **niente più 401**
+> - ✅ Counter coerente con tabella EA Tenants visibile (Sberlerch SPA + Vecchi Enterprise LTD = 2 active)
+> - ✅ Hard-delete cascade verificato: `muscleaddiction49@gmail.com` (Takirtnes) **rimosso da EA Tenants** ma resta in Live SaaS Tenants con status `CANCELLED` (audit-trail intenzionale, comportamento corretto)
+> - ✅ Live SaaS Tenants table mostra 6 tenant: Takirtnes (cancelled), Sberlerch SPA (Enterprise active), Vecchi Enterprise LTD (Business active), testing Inc (Starter active), Acme Italia SRL (Enterprise active), SentriKat (active no plan)
+> - ✅ Action buttons coerenti (Change Plan / Usage / Cancel; Cancel su tenant già cancelled non visibile)
+
+
 
 **Sintomi**:
 - DevTools console: `Stats load failed Error: Admin API key required` + 2 XHR `GET /api/v1/admin/ea-tenants/... → HTTP/2 401`.
