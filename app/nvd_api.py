@@ -70,11 +70,41 @@ def _get_request_kwargs():
 # Source 1: NVD API 2.0 (NIST)
 # ---------------------------------------------------------------------------
 
+# R-PARSER-RESILIENCE alias map for NVD CVSS extraction.
+# Maps each canonical field to a list of dotted lookup paths within an
+# NVD ``metrics.cvssMetricVxx[i]`` entry. Adding a new path is enough
+# to absorb upstream schema renames.
+_NVD_CVSS_ALIASES = {
+    'base_score':    ['cvssData.baseScore', 'baseScore', 'cvss.baseScore'],
+    'base_severity': ['cvssData.baseSeverity', 'baseSeverity', 'cvss.baseSeverity'],
+}
+
+
+def _extract_cvss_entry(entry):
+    """Extract (score, severity) from a single CVSS metric entry.
+
+    Uses field aliases + type coercion so that an upstream renaming
+    ``cvssData.baseScore`` → ``baseScore`` (or vice versa) does not
+    silently break enrichment.
+    """
+    from app.parser_resilience import coerce_float, coerce_severity, get_aliased
+    score = coerce_float(get_aliased(entry, _NVD_CVSS_ALIASES['base_score']))
+    severity = coerce_severity(get_aliased(entry, _NVD_CVSS_ALIASES['base_severity']))
+    if score is not None and severity is None:
+        severity = coerce_severity(score)  # derive from numeric band
+    return score, severity
+
+
 def _fetch_cvss_from_nvd(cve_id):
     """
     Fetch CVSS score and severity from NVD API 2.0.
     Returns: (cvss_score, severity) or (None, None) if not found/error.
+
+    R-PARSER-RESILIENCE (post-EA week1): metric extraction goes through
+    ``_extract_cvss_entry`` which uses field aliases + type coercion,
+    so upstream NVD renames do not silently zero-out enrichment.
     """
+    from app.parser_resilience import detect_schema_drift
     try:
         limiter = get_rate_limiter()
         if not limiter.acquire(timeout=30.0, block=True):
@@ -95,6 +125,7 @@ def _fetch_cvss_from_nvd(cve_id):
 
         if response.status_code == 200:
             data = response.json()
+            detect_schema_drift('nvd_cve', data)
             vulnerabilities = data.get('vulnerabilities', [])
             if not vulnerabilities:
                 return None, None
@@ -108,21 +139,20 @@ def _fetch_cvss_from_nvd(cve_id):
                 # First pass: look for NVD Primary score
                 for entry in entries:
                     if entry.get('type') == 'Primary':
-                        cvss_data = entry.get('cvssData', {})
-                        return cvss_data.get('baseScore'), cvss_data.get('baseSeverity')
+                        return _extract_cvss_entry(entry)
                 # Second pass: accept Secondary (CNA) as fallback
                 for entry in entries:
                     if entry.get('type') == 'Secondary':
-                        cvss_data = entry.get('cvssData', {})
-                        return cvss_data.get('baseScore'), cvss_data.get('baseSeverity')
+                        return _extract_cvss_entry(entry)
                 # Last resort: any entry
                 if entries:
-                    cvss_data = entries[0].get('cvssData', {})
-                    return cvss_data.get('baseScore'), cvss_data.get('baseSeverity')
+                    return _extract_cvss_entry(entries[0])
             if 'cvssMetricV2' in metrics and metrics['cvssMetricV2']:
-                cvss_data = metrics['cvssMetricV2'][0]['cvssData']
-                score = cvss_data.get('baseScore')
-                return score, _score_to_severity(score)
+                score, severity = _extract_cvss_entry(metrics['cvssMetricV2'][0])
+                # CVSS v2 has no baseSeverity field — derive from band
+                if score is not None and severity is None:
+                    severity = _score_to_severity(score)
+                return score, severity
 
             return None, None
 

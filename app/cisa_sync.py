@@ -871,6 +871,34 @@ def download_cisa_kev(max_retries=3, retry_delay=5):
 
     raise Exception(f"Failed to download CISA KEV after {max_retries} attempts: {last_error}")
 
+# R-PARSER-RESILIENCE field-alias map for CISA KEV records.
+# When CISA renames or re-nests a field, add the new path here and the
+# parser keeps working without code changes elsewhere.
+_KEV_ALIASES = {
+    'cve_id':              ['cveID', 'cve_id', 'cve.id'],
+    'vendor_project':      ['vendorProject', 'vendor', 'vendorName'],
+    'product':             ['product', 'productName'],
+    'vulnerability_name':  ['vulnerabilityName', 'name', 'title'],
+    'date_added':          ['dateAdded', 'date_added', 'added'],
+    'short_description':   ['shortDescription', 'description', 'shortDesc'],
+    'required_action':     ['requiredAction', 'required_action', 'action'],
+    'due_date':            ['dueDate', 'due_date'],
+    'known_ransomware':    ['knownRansomwareCampaignUse', 'knownRansomware', 'ransomwareUse'],
+    'notes':               ['notes', 'note'],
+}
+
+
+def _parse_iso_date(raw, cve_id, field_name):
+    """Tolerant ISO-date parser. Returns None + log on malformed input."""
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(raw, '%Y-%m-%d').date()
+    except (ValueError, TypeError, AttributeError) as e:
+        logger.debug("CISA KEV %s: malformed %s=%r: %s", cve_id, field_name, raw, e)
+        return None
+
+
 def parse_and_store_vulnerabilities(kev_data):
     """Parse CISA KEV JSON and store in database.
 
@@ -884,8 +912,23 @@ def parse_and_store_vulnerabilities(kev_data):
     Reset is conservative: only flips to False if the row's source is
     'cisa_kev' alone (not also 'euvd' or another exploited source) and
     EPSS score is NOT >= 0.95 (which independently flags exploited).
+
+    R-PARSER-RESILIENCE (post-EA week1): record-level fields are read
+    via ``parser_resilience.get_aliased`` so a CISA-side rename
+    (e.g. ``vendorProject`` → ``vendor``) no longer silently produces
+    empty strings. Schema drift on the envelope is detected and logged
+    for ops follow-up; ingestion continues.
     """
+    from app.parser_resilience import (
+        SchemaIncompatibleError,
+        coerce_bool,
+        detect_schema_drift,
+        get_aliased,
+        require_aliased,
+    )
+
     vulnerabilities = kev_data.get('vulnerabilities', [])
+    detect_schema_drift('cisa_kev', kev_data)
     current_kev_cves = {v.get('cveID') for v in vulnerabilities if v.get('cveID')}
     stored_count = 0
     updated_count = 0
@@ -917,38 +960,48 @@ def parse_and_store_vulnerabilities(kev_data):
         except Exception as e:
             logger.warning(f"F.7 stale KEV reset failed (non-critical): {e}")
 
+    schema_skipped = 0
     for vuln_data in vulnerabilities:
-        cve_id = vuln_data.get('cveID')
-        if not cve_id:
+        try:
+            cve_id = require_aliased(
+                vuln_data, _KEV_ALIASES['cve_id'], 'cve_id'
+            )
+        except SchemaIncompatibleError as e:
+            schema_skipped += 1
+            logger.warning("CISA KEV record skipped (no cve_id alias resolved): %s", e)
             continue
 
-        # Parse dates
-        date_added = None
-        due_date = None
-        try:
-            date_added = datetime.strptime(vuln_data.get('dateAdded'), '%Y-%m-%d').date()
-        except (ValueError, TypeError, AttributeError) as e:
-            logger.debug("CISA KEV %s: malformed dateAdded=%r: %s", cve_id, vuln_data.get('dateAdded'), e)
+        date_added = _parse_iso_date(
+            get_aliased(vuln_data, _KEV_ALIASES['date_added']), cve_id, 'dateAdded'
+        )
+        due_date = _parse_iso_date(
+            get_aliased(vuln_data, _KEV_ALIASES['due_date']), cve_id, 'dueDate'
+        )
 
-        try:
-            if vuln_data.get('dueDate'):
-                due_date = datetime.strptime(vuln_data.get('dueDate'), '%Y-%m-%d').date()
-        except (ValueError, TypeError, AttributeError) as e:
-            logger.debug("CISA KEV %s: malformed dueDate=%r: %s", cve_id, vuln_data.get('dueDate'), e)
+        vendor_project = get_aliased(vuln_data, _KEV_ALIASES['vendor_project'], '')
+        product = get_aliased(vuln_data, _KEV_ALIASES['product'], '')
+        vulnerability_name = get_aliased(vuln_data, _KEV_ALIASES['vulnerability_name'], '')
+        short_description = get_aliased(vuln_data, _KEV_ALIASES['short_description'], '')
+        required_action = get_aliased(vuln_data, _KEV_ALIASES['required_action'], '')
+        notes = get_aliased(vuln_data, _KEV_ALIASES['notes'], '')
+        known_ransomware = coerce_bool(
+            get_aliased(vuln_data, _KEV_ALIASES['known_ransomware']),
+            truthy=('true', '1', 'yes', 'known'),
+        )
 
         # Check if vulnerability already exists
         vuln = Vulnerability.query.filter_by(cve_id=cve_id).first()
 
         if vuln:
             # Update existing vulnerability (may have been created by EUVD first)
-            vuln.vendor_project = vuln_data.get('vendorProject', '')
-            vuln.product = vuln_data.get('product', '')
-            vuln.vulnerability_name = vuln_data.get('vulnerabilityName', '')
-            vuln.short_description = vuln_data.get('shortDescription', '')
-            vuln.required_action = vuln_data.get('requiredAction', '')
+            vuln.vendor_project = vendor_project
+            vuln.product = product
+            vuln.vulnerability_name = vulnerability_name
+            vuln.short_description = short_description
+            vuln.required_action = required_action
             vuln.due_date = due_date
-            vuln.known_ransomware = vuln_data.get('knownRansomwareCampaignUse', 'Unknown').lower() == 'known'
-            vuln.notes = vuln_data.get('notes', '')
+            vuln.known_ransomware = known_ransomware
+            vuln.notes = notes
             # CISA KEV = confirmed actively exploited
             vuln.is_actively_exploited = True
             # Reconcile source: if EUVD created it, now CISA confirms it
@@ -960,20 +1013,27 @@ def parse_and_store_vulnerabilities(kev_data):
             # Create new vulnerability from CISA KEV
             vuln = Vulnerability(
                 cve_id=cve_id,
-                vendor_project=vuln_data.get('vendorProject', ''),
-                product=vuln_data.get('product', ''),
-                vulnerability_name=vuln_data.get('vulnerabilityName', ''),
+                vendor_project=vendor_project,
+                product=product,
+                vulnerability_name=vulnerability_name,
                 date_added=date_added,
-                short_description=vuln_data.get('shortDescription', ''),
-                required_action=vuln_data.get('requiredAction', ''),
+                short_description=short_description,
+                required_action=required_action,
                 due_date=due_date,
-                known_ransomware=vuln_data.get('knownRansomwareCampaignUse', 'Unknown').lower() == 'known',
-                notes=vuln_data.get('notes', ''),
+                known_ransomware=known_ransomware,
+                notes=notes,
                 source='cisa_kev',
                 is_actively_exploited=True,  # CISA KEV = confirmed actively exploited
             )
             db.session.add(vuln)
             stored_count += 1
+
+    if schema_skipped:
+        logger.warning(
+            "CISA KEV: %d record(s) skipped due to schema-incompatibility — "
+            "verify _KEV_ALIASES coverage if persistent",
+            schema_skipped,
+        )
 
     db.session.commit()
     return stored_count, updated_count
