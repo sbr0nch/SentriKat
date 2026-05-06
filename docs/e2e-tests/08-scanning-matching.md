@@ -241,7 +241,7 @@ curl -s 'https://euvdservices.enisa.europa.eu/api/v1/vulnerabilities?size=1' | h
 **Function**: `sync_epss_scores(force=False)` (`epss_sync.py:85`)
 **Trigger**: ⚠️ NON è un job scheduler indipendente. È chiamato **dentro `cisa_sync_job`** (`scheduler.py:721`) dopo che CISA KEV sync ha successo.
 
-🔴 **08.7.1 HIGH** — EPSS depends on CISA KEV sync success. Se `sync_cisa_kev` fallisce (network, NVD rate-limit), EPSS scores NON si aggiornano per il giorno. Inoltre il try/except attorno a `sync_epss_scores` lo isola ma rimane accoppiato. **Fix raccomandato**: estrarre EPSS in scheduler job separato `daily_epss_sync` con own trigger, indipendente da KEV. Effort S (~30 min, scheduler.py change).
+🟢 **08.7.1 ✅ FIXED 2026-05-06** (era 🔴 HIGH) — EPSS estratto a scheduler job standalone `daily_epss_sync` con `CronTrigger(hour=4, minute=30, timezone=tz)` indipendente da CISA KEV. La vecchia inline call dentro `cisa_sync_job` rimossa. Ora se CISA KEV fallisce (Akamai 403, NVD rate-limit, network), EPSS continua a girare. EPSS feed FIRST.org si aggiorna ~04:00 UTC; run schedulato a 04:30 (display tz) copre la finestra. Function `epss_sync_job(app)` aggiunta in `scheduler.py:720`.
 
 ---
 

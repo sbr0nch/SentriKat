@@ -379,6 +379,21 @@ def start_scheduler(app):
         replace_existing=True
     )
 
+    # [08.7.1] fix (audit 2026-05-06): EPSS sync as standalone job, no longer
+    # coupled to CISA KEV success. FIRST.org EPSS feed updates ~04:00 UTC daily;
+    # we run at 04:30 (display tz) to allow the feed to land.
+    if sync_epss_scores is not None:
+        scheduler.add_job(
+            func=lambda: _run_with_lock('epss_sync', epss_sync_job, app),
+            trigger=CronTrigger(hour=4, minute=30, timezone=tz),
+            id='daily_epss_sync',
+            name='Daily EPSS Score Sync',
+            replace_existing=True
+        )
+        logger.info("EPSS sync scheduled at 04:30 (display timezone)")
+    else:
+        logger.warning("EPSS sync NOT scheduled — sync_epss_scores not importable")
+
     # Schedule LDAP sync if enabled
     ldap_sync_enabled = (os.environ.get('LDAP_SYNC_ENABLED', '') or 'false').lower() == 'true'
     if ldap_sync_enabled:
@@ -702,26 +717,49 @@ def reschedule_critical_email():
     else:
         logger.info("Critical CVE reminder disabled")
 
+def epss_sync_job(app):
+    """Standalone scheduler job for daily EPSS score sync.
+
+    [08.7.1] fix (audit 2026-05-06): originally invoked inline within
+    cisa_sync_job, which coupled EPSS updates to CISA KEV sync success.
+    If CISA KEV failed (network, NVD rate-limit, Akamai 403) EPSS scores
+    would not update. Now runs independently at 04:30 (display timezone)
+    so EPSS keeps flowing even when KEV path has issues.
+
+    EPSS feed (FIRST.org) updates daily ~04:00 UTC; running at 04:30 in
+    user display timezone covers most cases (worst case slight delay
+    for tz west of UTC, fine since EPSS feed is published well in advance).
+    """
+    if sync_epss_scores is None:
+        logger.warning("EPSS sync skipped — sync_epss_scores not importable")
+        return
+    with app.app_context():
+        try:
+            logger.info("Starting scheduled EPSS sync...")
+            updated, errors, message = sync_epss_scores(force=False)
+            logger.info(
+                f"EPSS sync completed: {message} (updated={updated}, errors={errors})"
+            )
+        except Exception as e:
+            logger.error(f"EPSS sync failed: {e}", exc_info=True)
+
+
 def cisa_sync_job(app):
-    """Job wrapper to run CISA KEV sync with app context, then update EPSS scores.
+    """Job wrapper to run CISA KEV sync with app context.
 
     On failure, schedules automatic retries with exponential backoff
     (15min → 30min → 1h → 2h, max 4 retries). On success, clears
     retry state and cancels any pending retry jobs.
+
+    Note ([08.7.1] fix 2026-05-06): EPSS sync was previously invoked here
+    inline. It is now an independent scheduler job (epss_sync_job) so
+    EPSS doesn't break when CISA KEV sync fails.
     """
     with app.app_context():
         try:
             logger.info("Starting scheduled CISA KEV sync...")
             result = sync_cisa_kev()
             logger.info(f"CISA KEV sync completed: {result}")
-
-            # Also sync EPSS scores after CISA KEV sync
-            try:
-                logger.info("Syncing EPSS scores...")
-                updated, errors, message = sync_epss_scores(force=False)
-                logger.info(f"EPSS sync completed: {message}")
-            except Exception as epss_error:
-                logger.warning(f"EPSS sync failed (non-critical): {epss_error}")
 
             # Rebuild local CPE dictionary from updated vulnerability data
             try:
