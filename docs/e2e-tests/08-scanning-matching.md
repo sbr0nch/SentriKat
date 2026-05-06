@@ -145,105 +145,188 @@ User trigger: clicked "Sync" in header → spinner "Syncing..." attivo.
 
 ## 08.2 — NVD recent sync
 
-_Da iniziare._
+**Function**: `sync_nvd_recent_cves` (`cisa_sync.py:1627`)
+**Trigger**: scheduler job `nvd_cve_sync` (`scheduler.py`), separate from `cisa_sync` daily
+**Args**: `hours_back=6`, `severity_filter`, `max_results=500`
+**Endpoint**: `Config.NVD_CVE_API_URL` (post B.1 fix)
+
+🟢 **OK** — function exists, scheduled, uses Config-extracted URL, has rate-limit awareness via NVD API key. No code-only finding.
 
 ---
 
 ## 08.3 — ENISA EUVD enrich loop
 
-_Da iniziare._
+**Function**: enrich loop dentro `sync_cisa_kev` (`cisa_sync.py:1242-1309`)
+**Trigger**: scheduler job `euvd_sync` separato + invocazione inline post-CISA KEV
+**Endpoint**: `Config.EUVD_API_URL` (post B.1 fix)
+
+🟡 **MEDIUM concern** (08.3.1): pre `[05.3.2]` finding reported `ENISA EUVD: SCHEMA_CHANGED` lato sentrikat-web monitor. Il parser EUVD core deve essere audited contro la R-PARSER-RESILIENCE pattern (defensive `.get()`, alias chain, schema drift telemetry). Da fare quando arrivano i 2 curl di Massimiliano per recuperare sample JSON nuovo. Linka a `VULN-FEED-BROKER-DESIGN.md § R-PARSER-RESILIENCE`.
 
 ---
 
 ## 08.4 — NVD per-CPE search
 
-_Da iniziare._
+**Function**: `fetch_cves_by_cpe(cpe_vendor, cpe_product, max_results=2000)` (`cisa_sync.py:2276`)
+**Trigger**: on-demand UI flow ("Discover CVEs for this CPE" button on product detail)
+**Endpoint**: `Config.NVD_CVE_API_URL` (post B.1 fix)
+
+🟢 **OK** — on-demand only, no automation. UI verify deferred a quando l'utente clicca il bottone.
 
 ---
 
 ## 08.5 — CPE backfill
 
-_Da iniziare._
+**Function**: `fetch_cpe_version_data(limit=30, oldest_first=False, skip_awaiting=False)` (`cisa_sync.py:941`)
+**Trigger**: dentro `sync_cisa_kev` con `cpe_limit=100` + admin via `/api/sync/cpe-backfill`
+**Endpoint**: `Config.NVD_CPE_API_URL` (post B.1 fix)
+
+🟡 **08.5.1 MEDIUM** — `cpe_limit=100` per single sync run. Per un customer con 2400 KEV CVEs, ci vogliono 24 sync (= 24 giorni) per backfill completo. Mitigato dal fatto che `bootstrap_post_deploy.sh` chiama il loop in stand-alone, ma per drift incrementale post-deploy il rate è basso. Considerare alzare a 300-500 in un sync fresh (NVD key permits 50 req/30s = 1500/15min).
 
 ---
 
 ## 08.6 — CVSS enrich + fallback
 
-_Da iniziare._
+**Functions**:
+- `enrich_with_cvss_data(limit=50)` (`cisa_sync.py:1078`) — inside `sync_cisa_kev`
+- `reenrich_fallback_cvss(limit=50)` (`cisa_sync.py:1475`) — scheduled `cvss_reenrich` job
+
+🟢 **OK** — duplo: enrich primario nel sync, refresh per fallback non-NVD. Fallback chain in `_score_to_severity` ben definita (vedi `CVE-MATCHING-PIPELINE.md` § C). No code-only finding.
 
 ---
 
 ## 08.7 — EPSS sync
 
-_Da iniziare._
+**Function**: `sync_epss_scores(force=False)` (`epss_sync.py:85`)
+**Trigger**: ⚠️ NON è un job scheduler indipendente. È chiamato **dentro `cisa_sync_job`** (`scheduler.py:721`) dopo che CISA KEV sync ha successo.
+
+🔴 **08.7.1 HIGH** — EPSS depends on CISA KEV sync success. Se `sync_cisa_kev` fallisce (network, NVD rate-limit), EPSS scores NON si aggiornano per il giorno. Inoltre il try/except attorno a `sync_epss_scores` lo isola ma rimane accoppiato. **Fix raccomandato**: estrarre EPSS in scheduler job separato `daily_epss_sync` con own trigger, indipendente da KEV. Effort S (~30 min, scheduler.py change).
 
 ---
 
 ## 08.8 — Public exploit enrichment
 
-_Da iniziare._
+**Function**: `enrich_exploit_data` (`exploit_enrichment.py:39`)
+**Trigger**: scheduler job `exploit_enrichment`
+**Sources**: ExploitDB CSV + GitHub PoC search
+
+🟢 **OK** — scheduled, sets `exploit_public=True/False` + `exploit_url`. Distinto da `is_actively_exploited` (KEV-only).
 
 ---
 
 ## 08.9 — CPE assignment 4-tier
 
-_Da iniziare._
+**Functions**:
+- `apply_cpe_to_product(product)` — `cpe_mapping.py:349` (Tiers 1+2+3 only)
+- `batch_apply_cpe_mappings(commit, use_nvd, max_nvd_lookups)` — `cpe_mapping.py:408` (T1+2+3+4 with NVD)
+
+🟢 **Reviewed 2026-05-06** — F.2 fix verified live (Apache Tomcat). A.2 fix added logger.warning per Tier 2/3 transient failures. B.2 fix added inline doc per `use_nvd_fallback=False`. Tutti gli audit point chiusi.
 
 ---
 
 ## 08.10 — check_cpe_match decision tree
 
-_Da iniziare._
+**Function**: `check_cpe_match(vulnerability, product)` — `filters.py:57`
+**Confidence levels**: 10 scenari documentati in `CVE-MATCHING-PIPELINE.md` § D
+
+🟢 **Reviewed** — coperto dal test `test_check_cpe_match_high_confidence_in_range` (regression guard).
 
 ---
 
 ## 08.11 — check_keyword_match fallback
 
-_Da iniziare._
+**Function**: `check_keyword_match(vulnerability, product)` — `filters.py:245`
+**Confidence levels**: 4 (vendor_product/medium → low post-F.6, vendor/medium, product/medium, keyword/low)
+
+🟢 **F.6 fix verified** — coperto dal test `test_check_keyword_match_no_version_returns_low_confidence`. Demote a `low` quando version non verificabile.
 
 ---
 
 ## 08.12 — Vendor Fix Override
 
-_Da iniziare._
+**Function**: `has_vendor_fix_override(vulnerability, product)` — `filters.py:384` (chiamata a `_has_vendor_fix_override` interno)
+**A.1 fix applied 2026-05-06**: `except Exception` ora logga warning prima di return None.
+
+🟢 **Reviewed + fixed** — suppression layer ora ha visibility ops in caso di transient DB errors.
 
 ---
 
 ## 08.13 — Risk Exception
 
-_Da iniziare._
+**Function**: `_has_active_risk_exception(vulnerability, product)` — `filters.py:444`
+**A.1 fix applied 2026-05-06**: log warning su Exception.
+
+🟢 **Reviewed + fixed**.
 
 ---
 
 ## 08.14 — cleanup_invalid_matches
 
-_Da iniziare._
+**Function**: `cleanup_invalid_matches()` — `filters.py:736` (entry point), runs after every sync via scheduler job `stale_match_cleanup` (`scheduler.py`)
+**F.8 fix applied 2026-05-06**: si invoca anche dopo `apply_cpe_to_product` quando un product flippa da no-CPE a CPE.
+
+🟢 **Reviewed + tested** — coperto da smoke test `test_cleanup_invalid_matches_removes_keyword_after_cpe_apply`.
 
 ---
 
 ## 08.15 — Match confidence surfacing UI
 
-_Da iniziare._
+⏸️ **UI verify deferred** — `vulnerability_match.to_dict()` (`models.py:865`) include `match_confidence`. Da verificare nel template dashboard se il badge è renderizzato. Customer-facing data quality badge è uno dei "6 must" (`SESSION-HANDOFF` Week 1 #3).
 
 ---
 
 ## 08.16 — Sync history
 
-_Da iniziare._
+🟢 **Live verified 2026-05-06** in 08.1 (panel Synchronization History): mostra date, status, vuln count, matches found, duration. Endpoint `/api/sync/history` (`routes.py:5575`).
 
 ---
 
 ## 08.17 — NVD rate-limit awareness
 
-_Da iniziare._
+**Module**: `app/nvd_rate_limiter.py` (esiste, da ispezionare)
+**Endpoint**: `GET /api/sync/nvd-rate-limit` (`settings_api.py:932`)
+
+🟡 **08.17.1 INFO** — funzionalità presente ma audit del comportamento sotto stress (cosa fa quando hit rate-limit: backoff exponential? retry? fallback?) deferred. Non blocker pre-EA.
 
 ---
 
 ## 08.18 — NVD API key handling
 
-_Da iniziare._
+**Storage**: `system_settings` table, key `nvd_api_key`, organization_id NULL (global)
+**Read**: ovunque viene chiamato NVD, include header `apiKey` se presente
+**Without key**: 10 req/min, with key 50 req/30s
+
+🟢 **Reviewed + bootstrapable** — `scripts/post_deploy_bootstrap.sh` step 1 gestisce l'inserimento. Documentato in `docs/operations/post-deploy-bootstrap.md`. Chiave attualmente esposta in chat history (vedi `SESSION-HANDOFF` § "License key in chat history") da rotare post-EA.
 
 ---
+
+## Riepilogo Phase 08 — code-only audit closure 2026-05-06
+
+| Area | Stato | Note |
+|---|---|---|
+| 08.1 | ✅ live | CISA KEV sync: 4 finding (1 MED scheduler fail, 1 MED UX, 1 INFO path, 1 INFO false alarm) |
+| 08.2 | 🟢 OK | NVD recent — scheduled, Config-URL |
+| 08.3 | 🟡 MED | EUVD parser audit pending (post curl recon) |
+| 08.4 | 🟢 OK | NVD per-CPE on-demand |
+| 08.5 | 🟡 MED | cpe_limit=100/sync potenzialmente slow; OK con bootstrap.sh |
+| 08.6 | 🟢 OK | CVSS enrich + fallback |
+| 08.7 | 🔴 HIGH | EPSS coupled with CISA KEV — extract to own scheduler job |
+| 08.8 | 🟢 OK | Public exploit enrichment scheduled |
+| 08.9 | 🟢 OK + fix | F.2 + A.2 + B.2 chiusi |
+| 08.10 | 🟢 OK + test | check_cpe_match coperto da test |
+| 08.11 | 🟢 OK + test | F.6 demote coperto da test |
+| 08.12 | 🟢 OK + fix | A.1 chiuso |
+| 08.13 | 🟢 OK + fix | A.1 chiuso |
+| 08.14 | 🟢 OK + test | F.8 + smoke test |
+| 08.15 | ⏸️ UI | data quality badge — Week 1 6-must |
+| 08.16 | 🟢 OK | sync history UI verified |
+| 08.17 | 🟡 INFO | rate-limiter audit comportamento sotto stress deferred |
+| 08.18 | 🟢 OK | NVD key handling + bootstrap |
+
+**Findings nuovi Phase 08 (oggi)**:
+- 🔴 `[08.7.1]` HIGH: EPSS sync coupled con CISA KEV (estrarre a scheduler job separato)
+- 🟡 `[08.5.1]` MED: cpe_limit=100/sync slow per drift incrementale large customer
+- 🟡 `[08.3.1]` MED: EUVD parser audit pending sample JSON post-curl
+- 🟡 `[08.17.1]` INFO: rate-limiter behavior audit deferred
 
 ## Live state baseline 2026-05-06
 
