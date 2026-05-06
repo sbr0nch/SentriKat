@@ -743,6 +743,20 @@ def create_product_from_queue(queue_item):
                 source_key_type=key_type,
                 active=True
             )
+
+            # [CVE-MATCHING-PIPELINE F.3 fallback] If the queue item didn't
+            # carry CPE (legacy rows queued before the upstream fix, or
+            # local-mapping miss), try one more time at approval. Without a
+            # CPE on the Product, the matcher cannot do version-range
+            # checks and falls back to keyword — which is the failure mode
+            # behind the 'Chrome 147 ↔ CVE-2010' class of false positives.
+            if not product.cpe_vendor or not product.cpe_product:
+                try:
+                    from app.cpe_mapping import apply_cpe_to_product
+                    apply_cpe_to_product(product)
+                except Exception:
+                    pass
+
             db.session.add(product)
             db.session.flush()  # Get the ID
 

@@ -461,10 +461,17 @@ def batch_apply_cpe_mappings(commit=True, use_nvd=True, max_nvd_lookups=200):
     # Phase 1: Apply local matches (regex + curated dict + local dictionary)
     # Use no_autoflush to prevent mid-query flushes that can cause statement timeouts
     still_unmatched = []
+    # [CVE-MATCHING-PIPELINE F.8] Track which products got CPE for the first
+    # time in this run, so after commit we can purge their stale keyword
+    # matches and re-run the matcher with CPE awareness — otherwise the
+    # false-positives created during the no-CPE era stay in the dashboard
+    # forever.
+    newly_cpe_product_ids = []
     with db.session.no_autoflush:
         for product in real_products:
             if apply_cpe_to_product(product):
                 updated_count += 1
+                newly_cpe_product_ids.append(product.id)
             else:
                 still_unmatched.append(product)
 
@@ -526,6 +533,7 @@ def batch_apply_cpe_mappings(commit=True, use_nvd=True, max_nvd_lookups=200):
                     product.cpe_vendor = cpe_vendor
                     product.cpe_product = cpe_product
                     updated_count += 1
+                    newly_cpe_product_ids.append(product.id)
 
                     # Auto-save as user-learned mapping for future use
                     try:
@@ -549,6 +557,7 @@ def batch_apply_cpe_mappings(commit=True, use_nvd=True, max_nvd_lookups=200):
                             other.cpe_vendor = cpe_vendor
                             other.cpe_product = cpe_product
                             updated_count += 1
+                            newly_cpe_product_ids.append(other.id)
 
                 # Rate limit: brief pause between NVD API calls
                 if nvd_lookups % 5 == 0:
@@ -562,6 +571,34 @@ def batch_apply_cpe_mappings(commit=True, use_nvd=True, max_nvd_lookups=200):
     if commit and updated_count > 0:
         db.session.commit()
         logger.info(f"CPE batch apply committed: {updated_count} products updated")
+
+    # [CVE-MATCHING-PIPELINE F.8] Re-match the products that just got their
+    # first CPE assignment. Stale keyword/vendor_product matches are purged
+    # so the matcher re-runs against the new CPE and either confirms the
+    # match (with version verification) or drops it. This is what flips the
+    # dashboard from 'Chrome 147 ↔ CVE-2010 critical' to a clean state
+    # right after a batch_apply_cpe_mappings run, instead of waiting for
+    # the next scheduled match cycle.
+    rematched_count = 0
+    if commit and newly_cpe_product_ids:
+        try:
+            from app.models import Product, VulnerabilityMatch
+            unique_ids = list(set(newly_cpe_product_ids))
+            VulnerabilityMatch.query.filter(
+                VulnerabilityMatch.product_id.in_(unique_ids)
+            ).delete(synchronize_session=False)
+            db.session.commit()
+            from app.filters import match_vulnerabilities_to_products
+            targets = Product.query.filter(Product.id.in_(unique_ids)).all()
+            match_vulnerabilities_to_products(target_products=targets)
+            rematched_count = len(unique_ids)
+            logger.info(
+                f"CPE batch apply: rematched {rematched_count} products "
+                f"after CPE assignment"
+            )
+        except Exception as e:
+            logger.warning(f"Post-CPE rematch failed (non-fatal): {e}")
+            db.session.rollback()
 
     return updated_count, total_without_cpe
 
