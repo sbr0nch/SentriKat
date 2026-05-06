@@ -1263,6 +1263,20 @@ def admin():
     """Admin panel for managing products"""
     return render_template('admin.html')
 
+
+@bp.route('/admin/health')
+@login_required
+@admin_required
+def admin_health_dashboard():
+    """6-must #2 (SESSION-HANDOFF Week 1): internal admin health dashboard.
+
+    Renders client-side fetch from /api/admin/health-summary endpoint
+    (added in PR #414). Read-only view of derived KPIs that signal
+    product trust: CPE coverage, CVE enrichment, match distribution,
+    last sync status.
+    """
+    return render_template('admin_health.html')
+
 @bp.route('/agent-activity')
 @org_admin_required
 def agent_activity():

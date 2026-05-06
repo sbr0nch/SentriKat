@@ -2,9 +2,24 @@
 
 > **Read this FIRST if you are a new Claude session opening on this repo.** Then dive into the linked docs.
 >
-> **Owner**: Massimiliano (CEO) — building toward EA event ~2026-05-08.
-> **Last working session**: 2026-05-06 (this file written at end of it).
-> **Active branch**: `claude/sentrikat-setup-overview-Vv78M` — has been merged to `main` already (8 commits). Future work on a new `claude/*` branch.
+> **Owner**: Massimiliano (CEO) — building toward EA event ~2026-05-08 (può essere posticipato).
+> **Last working session**: 2026-05-06 (lunga, ~8h, 4 PR mergiate).
+> **Stato pre-EA**: 🟢 **SHIP-READY** — 0 bug HIGH aperti, 4/9 audit gap chiusi, 4/6 must Week 1 chiusi, 3 audit doc, 12 critical-path test pytest in CI.
+
+## Aggiornamento end-of-day 2026-05-06
+
+| PR mergiata oggi | Cosa | Branch |
+|---|---|---|
+| #410 | F.2 + Phase 05 re-verify + R-PARSER-RESILIENCE + 5 critical-path test | claude/cve-validation-PeN1z (mergiato in #411) |
+| #411 | Sopra | merge to main |
+| #412 | Phase 08 scaffold + 08.1 audit | claude/phase08-scanning-matching (parziale merge) |
+| #413 | Audit fixes A.1+A.2+B.1+B.2 + bootstrap script + Phase 09-12 scaffold + OWASP audit + [08.7.1] EPSS extract | claude/phase08-scanning-matching (resto) |
+| #414 | Post-EA Week 1 Batch A: F.1 cron + F.4 restore + F.5 audit + F.7 stale KEV + 6-must #2 health-summary + 6-must #3 data quality badge + audit extension | claude/post-ea-week1-batch-A |
+| Open | Batch B: 7 regression tests + Phase 06+07+14+15 scaffold + SESSION-HANDOFF update + health-summary template | claude/post-ea-week1-batch-B |
+
+Lato sentrikat-web mergiato oggi: PR #252-#268 (Bundle 1 + Bundle 2 + bug fixes).
+
+**Active branch (nuovo Claude session)**: lavorare su `main` aggiornato e creare branch `claude/<task-name>`.
 
 ---
 

@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+
+{% block title %}Health Summary - SentriKat Admin{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin">Admin</a></li>
+<li class="breadcrumb-item active" aria-current="page">Health Summary</li>
+{% endblock %}
+
+{% block content %}
+<div class="fade-in" id="healthDashboard">
+    <div class="row mb-3 align-items-center">
+        <div class="col">
+            <h1 class="display-6 fw-bold text-dark mb-2">
+                <i class="bi bi-activity me-2"></i>Data Quality &amp; Sync Health
+            </h1>
+            <p class="text-muted mb-0">Internal admin overview — derived KPIs for product trust monitoring</p>
+        </div>
+        <div class="col-auto">
+            <button class="btn btn-outline-secondary" onclick="refreshHealthSummary()">
+                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Overall status banner -->
+    <div id="overallStatusBanner" class="alert d-none" role="alert">
+        <h4 class="alert-heading mb-1"><span id="overallStatusIcon"></span> <span id="overallStatusLabel"></span></h4>
+        <div id="overallStatusSignals" class="small mt-2"></div>
+    </div>
+
+    <!-- KPI cards row -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h6 class="text-muted mb-1">Product CPE Coverage</h6>
+                    <div class="display-5 fw-bold" id="productCoveragePct">—</div>
+                    <small class="text-muted"><span id="productsWithCpe">—</span> of <span id="productsTotal">—</span> active</small>
+                    <div class="progress mt-2" style="height: 6px;">
+                        <div class="progress-bar" role="progressbar" id="productCoverageBar" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h6 class="text-muted mb-1">CVE Enrichment</h6>
+                    <div class="display-5 fw-bold" id="cveCpeDataPct">—</div>
+                    <small class="text-muted"><span id="cvesWithCpeData">—</span> of <span id="cvesTotal">—</span> with cpe_data</small>
+                    <div class="progress mt-2" style="height: 6px;">
+                        <div class="progress-bar bg-info" role="progressbar" id="cveCpeDataBar" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h6 class="text-muted mb-1">CPE/High Match %</h6>
+                    <div class="display-5 fw-bold" id="cpeHighPct">—</div>
+                    <small class="text-muted"><span id="cpeHighMatches">—</span> of <span id="totalMatches">—</span> matches</small>
+                    <div class="progress mt-2" style="height: 6px;">
+                        <div class="progress-bar bg-success" role="progressbar" id="cpeHighBar" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h6 class="text-muted mb-1">Last Sync</h6>
+                    <div class="h5 fw-bold" id="lastSyncTimestamp">—</div>
+                    <span class="badge" id="lastSyncStatus">—</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Match distribution detail -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-pie-chart me-2"></i>Match Method Distribution</h5>
+        </div>
+        <div class="card-body">
+            <div class="row text-center">
+                <div class="col-md-3">
+                    <div class="text-muted small">Total Matches</div>
+                    <div class="h3 fw-bold" id="distrTotal">—</div>
+                </div>
+                <div class="col-md-3">
+                    <div class="text-muted small">CPE / High <span class="badge bg-success ms-1">verified</span></div>
+                    <div class="h3 fw-bold text-success" id="distrCpeHigh">—</div>
+                </div>
+                <div class="col-md-3">
+                    <div class="text-muted small">CPE / Medium <span class="badge bg-warning text-dark ms-1">partial</span></div>
+                    <div class="h3 fw-bold text-warning" id="distrCpeMedium">—</div>
+                </div>
+                <div class="col-md-3">
+                    <div class="text-muted small">Keyword fallback <span class="badge bg-secondary ms-1">probable</span></div>
+                    <div class="h3 fw-bold text-secondary" id="distrKeyword">—</div>
+                </div>
+            </div>
+            <p class="text-muted small mt-3 mb-0">
+                <strong>Healthy state</strong>: ≥95% CPE/High. Keyword fallback &lt; 5% means the data quality cascade
+                is properly closed (cpe_data on CVE side + cpe_vendor on product side both populated).
+            </p>
+        </div>
+    </div>
+
+    <!-- Severity coverage -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-shield-check me-2"></i>CVE Severity Coverage</h5>
+        </div>
+        <div class="card-body">
+            <p class="mb-1"><strong>CVE with severity assigned:</strong>
+                <span id="severityPct">—</span>
+                (<span id="cvesWithSeverity">—</span> of <span id="cvesTotal2">—</span>)
+            </p>
+            <p class="text-muted small mb-0">
+                Severity is derived from CVSS v3.1 → v3.0 → v2 → score-only. Low coverage suggests
+                NVD enrichment is lagging or hasn't started for newly-imported CVEs.
+            </p>
+        </div>
+    </div>
+
+    <p class="text-muted small text-end">
+        Generated at <span id="generatedAt">—</span> ·
+        <a href="/api/admin/health-summary" target="_blank">raw JSON</a>
+    </p>
+</div>
+
+<script>
+function refreshHealthSummary() {
+    fetch('/api/admin/health-summary', {credentials: 'same-origin'})
+        .then(r => r.json())
+        .then(data => {
+            // Overall status banner
+            const banner = document.getElementById('overallStatusBanner');
+            banner.classList.remove('d-none', 'alert-success', 'alert-warning', 'alert-danger');
+            const iconEl = document.getElementById('overallStatusIcon');
+            const labelEl = document.getElementById('overallStatusLabel');
+            const signalsEl = document.getElementById('overallStatusSignals');
+
+            if (data.overall_status === 'healthy') {
+                banner.classList.add('alert-success');
+                iconEl.innerHTML = '<i class="bi bi-check-circle-fill"></i>';
+                labelEl.textContent = 'System Healthy';
+            } else if (data.overall_status === 'degraded') {
+                banner.classList.add('alert-warning');
+                iconEl.innerHTML = '<i class="bi bi-exclamation-triangle-fill"></i>';
+                labelEl.textContent = 'Degraded';
+            } else {
+                banner.classList.add('alert-danger');
+                iconEl.innerHTML = '<i class="bi bi-x-circle-fill"></i>';
+                labelEl.textContent = 'Critical';
+            }
+
+            if (data.signals && data.signals.length) {
+                signalsEl.innerHTML = '<strong>Signals:</strong> ' + data.signals.map(s =>
+                    `<span class="badge bg-light text-dark me-1">${s}</span>`).join('');
+            } else {
+                signalsEl.innerHTML = '<em>No signals — all KPIs in healthy range.</em>';
+            }
+
+            // Product coverage
+            const pc = data.product_coverage || {};
+            document.getElementById('productCoveragePct').textContent = (pc.pct ?? 0) + '%';
+            document.getElementById('productsWithCpe').textContent = pc.with_cpe ?? 0;
+            document.getElementById('productsTotal').textContent = pc.total ?? 0;
+            const pcBar = document.getElementById('productCoverageBar');
+            pcBar.style.width = (pc.pct ?? 0) + '%';
+            pcBar.className = 'progress-bar ' + (pc.pct >= 60 ? 'bg-success' : pc.pct >= 40 ? 'bg-warning' : 'bg-danger');
+
+            // CVE enrichment
+            const ce = data.cve_enrichment || {};
+            document.getElementById('cveCpeDataPct').textContent = (ce.cpe_data_pct ?? 0) + '%';
+            document.getElementById('cvesWithCpeData').textContent = ce.with_cpe_data ?? 0;
+            document.getElementById('cvesTotal').textContent = ce.total ?? 0;
+            document.getElementById('cveCpeDataBar').style.width = (ce.cpe_data_pct ?? 0) + '%';
+            document.getElementById('severityPct').textContent = (ce.severity_pct ?? 0) + '%';
+            document.getElementById('cvesWithSeverity').textContent = ce.with_severity ?? 0;
+            document.getElementById('cvesTotal2').textContent = ce.total ?? 0;
+
+            // Match distribution
+            const md = data.match_distribution || {};
+            document.getElementById('cpeHighPct').textContent = (md.cpe_high_pct ?? 0) + '%';
+            document.getElementById('cpeHighMatches').textContent = md.cpe_high ?? 0;
+            document.getElementById('totalMatches').textContent = md.total ?? 0;
+            document.getElementById('cpeHighBar').style.width = (md.cpe_high_pct ?? 0) + '%';
+            document.getElementById('distrTotal').textContent = md.total ?? 0;
+            document.getElementById('distrCpeHigh').textContent = md.cpe_high ?? 0;
+            document.getElementById('distrCpeMedium').textContent = md.cpe_medium ?? 0;
+            document.getElementById('distrKeyword').textContent = md.keyword_fallback ?? 0;
+
+            // Last sync
+            const ls = data.last_sync || {};
+            document.getElementById('lastSyncTimestamp').textContent = ls.timestamp
+                ? new Date(ls.timestamp).toLocaleString()
+                : 'Never';
+            const statusBadge = document.getElementById('lastSyncStatus');
+            statusBadge.textContent = ls.status || 'unknown';
+            statusBadge.className = 'badge ' + (
+                ls.status === 'success' ? 'bg-success' :
+                ls.status === 'error' ? 'bg-danger' :
+                'bg-secondary'
+            );
+
+            // Generated at
+            document.getElementById('generatedAt').textContent = data.generated_at
+                ? new Date(data.generated_at).toLocaleString()
+                : '—';
+        })
+        .catch(err => {
+            console.error('Failed to fetch health summary:', err);
+            const banner = document.getElementById('overallStatusBanner');
+            banner.classList.remove('d-none');
+            banner.classList.add('alert-danger');
+            document.getElementById('overallStatusLabel').textContent = 'Failed to load health data';
+            document.getElementById('overallStatusSignals').textContent = err.message || String(err);
+        });
+}
+
+document.addEventListener('DOMContentLoaded', refreshHealthSummary);
+</script>
+{% endblock %}
