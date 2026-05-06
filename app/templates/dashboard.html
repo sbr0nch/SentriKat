@@ -4478,6 +4478,21 @@
                             ${vuln.is_zero_day ? '<span class="badge" style="background: linear-gradient(135deg, #6d47a8, #9b4d7c); color: white; font-size: 0.7rem;" title="Zero-day: detected by SentriKat before CISA KEV publication"><i class="bi bi-lightning-fill me-1"></i>0-DAY</span>' : ''}
                             ${vuln.nvd_data_incomplete ? `<span class="badge bg-warning text-dark" style="font-size: 0.7rem;" title="NVD status: ${escapeHtml(vuln.nvd_status || 'Unknown')} — CPE data may be incomplete"><i class="bi bi-hourglass-split me-1"></i>${escapeHtml(vuln.nvd_status || 'Pending')}</span>` : ''}
                             ${vuln.source === 'euvd' ? '<span class="badge" style="background-color: #3b5998; font-size: 0.7rem;" title="Detected via ENISA EUVD — not yet in CISA KEV"><i class="bi bi-shield-exclamation me-1"></i>EUVD</span>' : vuln.source === 'cisa_kev+euvd' ? '<span class="badge" style="background-color: #4a6fa5; font-size: 0.7rem;" title="Confirmed by both CISA KEV and ENISA EUVD"><i class="bi bi-shield-check me-1"></i>KEV+EUVD</span>' : vuln.source === 'nvd' ? '<span class="badge" style="background-color: #6d47a8; font-size: 0.7rem;" title="Detected via NVD early import — not yet in CISA KEV"><i class="bi bi-database me-1"></i>NVD Early</span>' : '<span class="badge" style="background-color: #3d7a4f; font-size: 0.7rem;" title="Source: CISA Known Exploited Vulnerabilities"><i class="bi bi-shield-check me-1"></i>CISA KEV</span>'}
+                            ${(() => {
+                                /* 6-must #3 data quality badge: aggregate match confidence across affected_products.
+                                   Verified = all matches are cpe/high; Probable = mix or only keyword. */
+                                const aps = group.affected_products || [];
+                                if (!aps.length) return '';
+                                const allCpeHigh = aps.every(p => p.match_method === 'cpe' && p.match_confidence === 'high');
+                                const anyKeyword = aps.some(p => p.match_method && !['cpe'].includes(p.match_method));
+                                if (allCpeHigh) {
+                                    return '<span class="badge" style="background-color: #1e7e34; font-size: 0.7rem;" title="Verified: all matches use CPE version-range comparison (high confidence)"><i class="bi bi-patch-check-fill me-1"></i>Verified</span>';
+                                } else if (anyKeyword) {
+                                    return '<span class="badge" style="background-color: #856404; color: #fff; font-size: 0.7rem;" title="Probable: at least one match uses name-based fallback (no version range available — verify manually)"><i class="bi bi-question-circle me-1"></i>Probable</span>';
+                                } else {
+                                    return '<span class="badge" style="background-color: #5a6268; font-size: 0.7rem;" title="Partial: CPE match without version range — confidence reduced"><i class="bi bi-info-circle me-1"></i>Partial</span>';
+                                }
+                            })()}
                         </div>
                     </div>
                     <h6 class="mb-2 fw-semibold" style="line-height: 1.3;">${escapeHtml(vuln.vulnerability_name)}</h6>
