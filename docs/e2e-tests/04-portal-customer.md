@@ -260,3 +260,49 @@ L'utente conferma 04.6 (Support tickets, feedback, canned responses) e 04.7 (Acc
   - Questa è **prod license-server specifically**, con flow OTP email — diverso da welcome
 
 - La ricorrenza "risolto in passato, ora torna" suggerisce **mancanza di regression test** automatico sulla email OTP delivery. Follow-up: aggiungere test E2E playwright su "send OTP → email received via mock SMTP" nella CI pipeline `SentriKat-web/.github/workflows/ci.yml`
+
+---
+
+## Re-test addendum 2026-05-06: 04.6 Support + 04.7 Account
+
+### 04.6 Support — re-verify 2026-05-06
+
+| Dim | Stato | Note |
+|---|---|---|
+| 1 Happy path | ✅ | Pagina `/support` divisa in: My Submissions list (filter All Types + All Statuses, empty state "No submissions yet") + Report a Bug form + Request a Feature form + Manage Your Cloud Subscription callout + Need More Help (Email Support) |
+| 1 (b) Report a Bug | ✅ | Campi: Bug Title, Severity dropdown ("Medium - Feature not working correctly" default), Description, Steps to Reproduce con placeholder utile, Tags optional comma-separated, Submit Bug Report |
+| 1 (c) Request a Feature | ✅ | Campi: Feature Title, Category dropdown ("Vulnerability Management" default), Description, Tags optional, Submit Feature Request |
+| 1 (d) Cloud subscription | ✅ | Banner "Manage Your Cloud Subscription · plan changes (upgrade tier, change billing cycle, view invoices) are managed inside the app" + CTA "Open SentriKat Cloud →" |
+| 1 (e) Need More Help | ✅ | Email Support CTA per casi urgenti |
+| 2-7 | ⏸️ | Rinviato a sessione bug-test mirata (submit, persistenza, XSS, audit) |
+
+🟢 **OK overall** — form completo, separazione bug/feature, callout subscription corretta.
+
+### 04.7 Account Settings — re-verify 2026-05-06
+
+| Dim | Stato | Note |
+|---|---|---|
+| 1 Happy path | ✅ | Pagina `/account` con due card: Profile Information (Full Name "Denis Sota" editable, Email `contact.sotadenis@gmail.com` non-editable con label "Email cannot be changed", Company empty, Save Changes button) + Danger Zone "Delete My Account" |
+| 1 (b) | ✅ | Footer data sources coerente |
+| 3 CRUD | 🟢 partial | Update profile via Save Changes; Delete via Danger Zone (typed "DELETE" modal — verificato post PR #258→#263 hard-delete cascade) |
+| 5 State transitions | ✅ | Email immutable: vincolo coerente con architettura passwordless OTP |
+| 2/4/6/7 | ⏸️ | Rinviato |
+
+🟢 **OK overall** — semantica giusta + hard-delete funzionante post PR #258-263.
+
+---
+
+## Status finale 2026-05-06
+
+✅ **Phase 04 Portal Customer — re-test completato**.
+
+**Bug attivi sentrikat-web**:
+
+| Bug ID | Severity | Stato post nota utente |
+|---|---|---|
+| [04.5.1] beta.6 LATEST badge | 🟡 MEDIUM (era 🔴 HIGH) | **Mitigato manualmente**: utente gestisce releases via git tags + cancella i vecchi prima di rolloutare. Sort semver portal Astro resta nice-to-have post-EA |
+| [04.5.2] "Unknown" CVE count | 🟡 MEDIUM | post-EA |
+| [04.2.1] Enterprise 10/3 cap | 🔵 INFO | verificare plans_config canonical |
+| [04.7.1] Company vuoto | 🔵 INFO | verificare signup→profile flow |
+
+Nessun blocker pre-EA. Flusso customer end-to-end funziona: login OTP → dashboard → license → download → support → account → logout (logout testato a vista in sidebar).
