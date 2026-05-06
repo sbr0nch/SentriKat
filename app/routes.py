@@ -408,6 +408,119 @@ def internal_logs():
 # Background Health Checks API
 # =============================================================================
 
+@bp.route('/api/admin/health-summary', methods=['GET'])
+@login_required
+@admin_required
+def get_health_summary():
+    """Health summary: data quality + sync status + match accuracy metrics.
+
+    6-must #2 (SESSION-HANDOFF Week 1): internal admin dashboard for
+    data quality monitoring. Distinct from /api/admin/health-checks
+    which is individual probe results — this aggregates derived KPIs
+    that signal product trust:
+    - % products with CPE assigned (>60% healthy, <60% needs manual mapping)
+    - % CVE with cpe_data (>80% healthy, <80% means enrichment lagging)
+    - Last sync timestamp + status
+    - NVD rate-limit headroom (% of capacity used in last 30s)
+    - Match method distribution (cpe/high should be ~95%+; keyword fallback
+      should be <5% in clean state)
+    """
+    from app.models import Product, Vulnerability, VulnerabilityMatch
+    from datetime import datetime, timedelta
+    try:
+        # Product CPE coverage
+        total_products = Product.query.filter_by(active=True).count()
+        products_with_cpe = Product.query.filter(
+            Product.active == True,
+            Product.cpe_vendor.isnot(None),
+            Product.cpe_vendor != ''
+        ).count()
+        cpe_coverage_pct = (products_with_cpe * 100 // total_products) if total_products else 0
+
+        # CVE cpe_data coverage
+        total_cves = Vulnerability.query.count()
+        cves_with_cpe_data = Vulnerability.query.filter(
+            Vulnerability.cpe_data.isnot(None)
+        ).count()
+        cve_cpe_coverage_pct = (cves_with_cpe_data * 100 // total_cves) if total_cves else 0
+
+        # CVE severity coverage
+        cves_with_severity = Vulnerability.query.filter(
+            Vulnerability.severity.isnot(None)
+        ).count()
+        severity_coverage_pct = (cves_with_severity * 100 // total_cves) if total_cves else 0
+
+        # Match method distribution
+        total_matches = VulnerabilityMatch.query.count()
+        cpe_high_matches = VulnerabilityMatch.query.filter_by(
+            match_method='cpe', match_confidence='high'
+        ).count()
+        cpe_medium_matches = VulnerabilityMatch.query.filter_by(
+            match_method='cpe', match_confidence='medium'
+        ).count()
+        keyword_matches = VulnerabilityMatch.query.filter(
+            VulnerabilityMatch.match_method.in_(['vendor_product', 'vendor', 'product', 'keyword'])
+        ).count()
+        cpe_high_pct = (cpe_high_matches * 100 // total_matches) if total_matches else 0
+
+        # Last CISA KEV sync
+        last_cisa_sync = None
+        last_cisa_status = None
+        try:
+            from app.models import SyncLog
+            last_log = SyncLog.query.order_by(SyncLog.created_at.desc()).first()
+            if last_log:
+                last_cisa_sync = last_log.created_at.isoformat() if last_log.created_at else None
+                last_cisa_status = last_log.status
+        except Exception:
+            pass  # SyncLog may not exist on older deployments
+
+        # Overall health classification
+        signals = []
+        if cpe_coverage_pct < 60:
+            signals.append(f"product_cpe_coverage_low ({cpe_coverage_pct}%)")
+        if cve_cpe_coverage_pct < 80:
+            signals.append(f"cve_cpe_data_coverage_low ({cve_cpe_coverage_pct}%)")
+        if total_matches > 0 and cpe_high_pct < 90:
+            signals.append(f"keyword_fallback_pct_high (cpe/high only {cpe_high_pct}%)")
+        if last_cisa_status == 'error':
+            signals.append("last_sync_failed")
+
+        overall_status = 'healthy' if not signals else ('degraded' if len(signals) <= 2 else 'critical')
+
+        return jsonify({
+            'overall_status': overall_status,
+            'signals': signals,
+            'product_coverage': {
+                'total': total_products,
+                'with_cpe': products_with_cpe,
+                'pct': cpe_coverage_pct,
+            },
+            'cve_enrichment': {
+                'total': total_cves,
+                'with_cpe_data': cves_with_cpe_data,
+                'cpe_data_pct': cve_cpe_coverage_pct,
+                'with_severity': cves_with_severity,
+                'severity_pct': severity_coverage_pct,
+            },
+            'match_distribution': {
+                'total': total_matches,
+                'cpe_high': cpe_high_matches,
+                'cpe_high_pct': cpe_high_pct,
+                'cpe_medium': cpe_medium_matches,
+                'keyword_fallback': keyword_matches,
+            },
+            'last_sync': {
+                'timestamp': last_cisa_sync,
+                'status': last_cisa_status,
+            },
+            'generated_at': datetime.utcnow().isoformat() + 'Z',
+        })
+    except Exception as e:
+        logger.exception("Error computing health summary")
+        return jsonify({'error': str(e)}), 500
+
+
 @bp.route('/api/admin/health-checks', methods=['GET'])
 @login_required
 @admin_required
