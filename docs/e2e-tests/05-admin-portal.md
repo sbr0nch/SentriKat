@@ -48,7 +48,20 @@ Audit Log dedicato (visibile via Settings → "Go to Audit Log") + Status & Inci
 
 ### Findings
 
-- 🔴 **[05.1.1] Releases vuoto vs `/api/health` 1.0.0-beta.6** (HIGH)
+- 🟢 **[05.1.1] Releases vuoto vs `/api/health` 1.0.0-beta.6** (HIGH — ✅✅ **FIXED + VERIFIED 2026-05-06**)
+  - Live verify: 7 release popolate (1.0.0 RELEASED + 6 beta DRAFT/RELEASED), LATEST 1.0.0-beta.6 Apr 23 2026, KPI Total Releases=7, Sync from GitHub button operativo, manual release UI accessibile
+  - Page status: HEALTHY, ma vedi nuovi bug sotto [05.1.2] e [05.1.3]
+
+- 🔴 **[05.1.2] CVE Findings KPI tile mostra `0[object Object][object Object]...` literal** (HIGH — NEW 2026-05-06)
+  - **Severity**: 🔴 HIGH (visibile in admin landing, fa pessima impressione)
+  - **Sintomo**: il KPI tile "CVE Findings" stampa testo letterale `0[object Object][object Object][object Object][object Object][object Object][object Object][object Object]` con CTA "All clear" sotto
+  - **Hypothesis**: array di CVE objects renderizzato senza `.map().join()` o senza estrazione `cve.id`. Probabilmente `${cveCount}${cveList}` invece di `${cveCount}` da solo
+  - **Cross-repo**: fix in sentrikat-web `portal/src/.../admin/releases.tsx` o template Astro
+
+- 🟡 **[05.1.3] Download size "NaN MB" su tutte le 7 release** (MEDIUM — NEW 2026-05-06)
+  - **Severity**: 🟡 MEDIUM (UX confuse ma download link probabilmente funziona)
+  - **Sintomo**: ogni release riga mostra "NaN MB" come download size
+  - **Hypothesis**: campo `size` undefined/null in payload release → `(null/1024/1024).toFixed(0) → NaN`. Manca fallback "size ? `${size} MB` : 'N/A'"
   - Total Releases: **0** · Latest Version: **-** · Deprecated: 0 · CVE Findings: 0
   - Ma `/api/health` (verificato in [03.5.3]) restituisce `1.0.0-beta.6`, e questa è la versione effettivamente deployata in prod.
   - Diagnosi probabile: il job di "Sync from GitHub" non è mai stato eseguito, oppure pipeline release/changelog non popola questo endpoint.
@@ -96,7 +109,18 @@ Audit Log dedicato (visibile via Settings → "Go to Audit Log") + Status & Inci
 
 ### Findings
 
-- 🔴 **[05.3.1] Data source "Unknown" in stato Critical/DOWN, senza identificativo** (HIGH)
+- 🟢 **[05.3.1] Data source "Unknown" in stato Critical/DOWN, senza identificativo** (HIGH — ✅✅ **FIXED + VERIFIED 2026-05-06** per il naming)
+  - Live verify: 6 source con nomi reali e URL identificativi: NIST NVD (HEALTHY 455ms), CVE.org + Vulnrichment (DEGRADED 536ms), ENISA EUVD (SCHEMA_CHANGED 96ms), CISA KEV (AUTH_CHANGED 85ms), FIRST EPSS (HEALTHY 70ms), OSV.dev (HEALTHY 266ms)
+  - Counter: Total 6, Healthy 3, Degraded 1, Down 2 ← matematicamente coerente
+  - **Issue operativa NUOVA emersa** (separata dal bug naming): vedi [05.3.2] sotto
+
+- 🔴 **[05.3.2] CISA KEV `AUTH_CHANGED` + ENISA EUVD `SCHEMA_CHANGED`** (HIGH — NEW 2026-05-06, ops issue)
+  - **Severity**: 🔴 HIGH per la qualità del feed CVE platform-side
+  - **CISA KEV `AUTH_CHANGED`** — implica che l'API/endpoint atteso ha cambiato authorization scheme; il monitoring health-check non riesce più a validare risposta. **CRITICAL** perché KEV è la fonte primaria del flag `is_actively_exploited` del prodotto. Se il sentrikat-web platform-side feed non ingerisce più KEV → quando il broker (mese 2-3) sarà attivo, customer non vedrà CVE KEV nuove.
+  - **ENISA EUVD `SCHEMA_CHANGED`** — upstream ha cambiato JSON schema, il parser sentrikat-web richiede update.
+  - **CVE.org Vulnrichment `DEGRADED`** — 536ms latency alta ma operativa, tollerabile.
+  - **Cross-repo**: fix lato sentrikat-web platform-side (license-server o cron job di feed monitoring).
+  - **Pre-EA impact**: nullo direct (il core SentriKat oggi parla direttamente alle fonti, non passa via broker). Ma **se l'evento dimostra il vuln-feed broker pubblicamente, si vede questa pagina e fa figura male**.
   - 1 source totale, 0 healthy, **1 DOWN (Critical)**.
   - Card mostra: nome **"Unknown"**, status badge **UNKNOWN**, Response: `-`, Last Check: `-`. Nessun nome, nessun URL, nessuna data ultima probe.
   - "Health Check History" vuota → mai stata fatta una probe automatica.
@@ -119,7 +143,12 @@ Audit Log dedicato (visibile via Settings → "Go to Audit Log") + Status & Inci
 
 ### Findings
 
-- 🔴 **[05.4.1] Public status dichiara "All systems operational" mentre `/admin/datasources` mostra 1 source DOWN/Critical** (HIGH)
+- 🔴 **[05.4.1] Public status dichiara "All systems operational" mentre `/admin/datasources` mostra DOWN/Critical** (HIGH — **ANCORA APERTO 2026-05-06**)
+  - Live verify 2026-05-06: `/admin/status` conferma "No active incidents. All systems operational." mentre `/admin/datasources` riporta 2 DOWN + 1 DEGRADED. **Contraddizione conferma**.
+  - **Root cause confermato**: status page è basato su **manual incident creation** (`+ New Incident` / `Schedule Maintenance`), non integra automaticamente lo stato delle data source health-check.
+  - **Fix proposal**: integrare `/admin/datasources` health → quando una source è DOWN/DEGRADED auto-create un incident draft visibile in public status (con possibilità per admin di marcare "investigated" o "expected/maintenance").
+  - **Severity invariata**: HIGH — è proprio quello che un evento o due cliente sofisticato controlleranno. Public status disonesto = fiducia rotta.
+  - **Cross-repo**: fix lato sentrikat-web (admin status page logic).
   - Sezione "Active Incidents & Maintenance" → testo verde: *"No active incidents. All systems operational."*
   - Ma in [05.3.1] una data source è Critical/Down.
   - Mismatch: la status page **non legge** lo stato delle data source per popolare automaticamente gli incidents. È puramente manuale ("+ New Incident", "Schedule Maintenance").
@@ -232,7 +261,10 @@ Audit Log dedicato (visibile via Settings → "Go to Audit Log") + Status & Inci
 
 ### Findings
 
-- 🔴 **[05.8.1] `RSA_PRIVATE_KEY = NOT SET` in produzione** (HIGH)
+- 🟢 **[05.8.1] `RSA_PRIVATE_KEY = NOT SET` in produzione** (HIGH — ✅✅ **FIXED + VERIFIED 2026-05-06**)
+  - Live verify: `RSA_PRIVATE_KEY` ora `CONFIGURED` in `/admin/settings` Environment Configuration. License RSA-4096 signing operativo.
+  - Altri env confermati CONFIGURED: ADMIN_API_KEY, DATABASE_URL, RESEND_API_KEY, EMAIL_FROM, GITHUB_TOKEN, GITHUB_REPO, PUBLIC_API_URL, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET.
+  - 🟡 **Residuo NOT SET**: `NVD_API_KEY` — già tracked come `[05.8.2]` MEDIUM, atteso (l'enrichment NVD lato platform può attendere il broker mese 2-3).
   - Se il license server firma le license con questa chiave (vedi `AGENT_SIGNING.md` / `docs/ADMIN_GUIDE.md`), allora le license generate sono **non firmate** o il sign step è failed silently.
   - Possibile spiegazione benigna: la chiave è stata spostata in DB (vault) invece che in env, e il check qui non riflette. → Da verificare nel codice.
   - Impatto se davvero non firmata: agent può rifiutare la license, oppure non c'è proof of authenticity → rischio di license forgery.
@@ -259,7 +291,11 @@ Audit Log dedicato (visibile via Settings → "Go to Audit Log") + Status & Inci
 
 ## 05.9 — Bug trovati durante re-test 2026-04-29
 
-### `[05.9.1]` 🔴🔴 **CRITICAL** — Intera UI admin morta ai click: CSP `script-src-attr` blocca TUTTI gli inline handler
+### `[05.9.1]` ✅✅ **FIXED + VERIFIED 2026-05-06** (era 🔴🔴 CRITICAL) — Intera UI admin morta ai click: CSP `script-src-attr` blocca TUTTI gli inline handler
+
+> **Verified live 2026-05-06**: bottoni admin operativi, console pulita (utente conferma "funziona perfettamente"). Il fix è stato deployed senza PR esplicita tracciata in #252-#263 — probabilmente parte del deploy `23ce9da` o successivo. Da ora considerato chiuso.
+
+
 
 **ESCALATION 2026-04-29**: scoperto che NON è solo "Sign Out" — utente conferma che **tutti** i bottoni dell'admin sono incliccabili: Export CSV/JSON, campanellina notifiche, Sign Out, e per estensione presumibilmente anche `+ New User`, `+ New Incident`, `Probe`, `Sync from GitHub`, `Sync NVD`, `Sync Now`, `Probe All`, `Filter`, `Clear`, `Edit`, `Disable`, `Delete`, `Reset All Uptime History`, `Run Cleanup Now`, `Refresh`, `Go to Audit Log`, `+ Manual Release`, `Schedule Maintenance`. **L'intero portal admin è in pratica read-only forzato**, ma per bug, non per design.
 
@@ -388,7 +424,11 @@ Entrambe mostrano 0 entries dopo OTP login fresh. Stesso bug HIGH già tracked c
 - 🟢 **CTA `Send to All Subscribers`** presente.
 - 🔴 **`[05.13.1]`** **HIGH** — Subscribers list 403 "Invalid admin key" (vedi sotto).
 
-### `[05.13.1]` 🔴 **HIGH** — Subscribers list endpoint risponde 403 "Invalid admin key"
+### `[05.13.1]` ✅✅ **FIXED + VERIFIED 2026-05-06** (era 🔴 HIGH) — Subscribers list endpoint risponde 403 "Invalid admin key"
+
+> **Verified live 2026-05-06**: utente conferma "sembra funzionare". Subscribers list ora carica senza 403. Cluster auth-fail su admin endpoints (vedi [05.13.1] + [05.22.1]) ora completamente chiuso.
+
+
 
 **Sintomi**:
 - Sezione "Subscribers" sotto il compose form resta in stato `Loading...` indefinitamente.
