@@ -125,6 +125,118 @@
 
 ---
 
+## Re-test 7-dim sistematico — 2026-05-06
+
+> Sessione walkthrough 7-dim su tutte le aree post sentrikat-web PR #252-#263 (stable platform, hard-delete + email deliverability + branding + pricing fix mergeati).
+
+### 04.1 Login OTP — re-verify 2026-05-06
+
+| Dim | Stato | Note |
+|---|---|---|
+| 1 Happy path | ✅ | Pagina login `portal.sentrikat.com/login` clean, "Sign in to your account / Enter your email to get started", placeholder `you@company.com`, link "New customer? View pricing" + "Trouble signing in? Contact support" + "← Back to SentriKat" |
+| 2 Persistence | ⏸️ | Cookie `sk_portal_session` da verificare (F12 → Application) |
+| 3 CRUD | n/a | |
+| 4 RBAC | ⏸️ | Solo customer, no role variants (verifico in 04.3 admin-vs-customer) |
+| 5 State transitions | ✅ | Email **utente esistente attivo** → OTP arriva (verificato `noreply@sentrikat.com`, subject "Your SentriKat verification code", code `041395`, expire 10 min, branding meerkat ✅ post PR #256) |
+| 5 (b) | ✅ | Email **utente cancellato** → flow procede al form OTP ma email non arriva (security correct: no user-enumeration leak) |
+| 6 Negative input | ⏸️ | Email malformata, OTP errato, OTP scaduto — da testare separatamente |
+| 7 Audit / integration | ⏸️ | Verificare audit_events `portal.otp.requested` lato license-server |
+
+#### [04.1.5] 🟢 OK — Email OTP branding + deliverability post PR #256+#257
+
+- Mittente: `SentriKat <noreply@sentrikat.com>` ✅
+- Subject: `Your SentriKat verification code` ✅
+- Logo SentriKat meerkat ✅ (PR #256 confirmed)
+- Body: "Your Verification Code · Enter this code to sign in to your SentriKat account · 041395 · This code expires in 10 minutes · If you didn't request this code, you can safely ignore this email."
+- Footer: links a `sentrikat.com | Documentation | Support`, claim "SentriKat - Enterprise Vulnerability Management · Focus on what matters: actively exploited vulnerabilities."
+- Inbox primaria Gmail (non spam) ✅
+
+### 04.2 Dashboard post-login — re-verify 2026-05-06
+
+| Dim | Stato | Note |
+|---|---|---|
+| 1 Happy path | ✅ | Card SAAS "Your Cloud Subscription" Plan ENTERPRISE active · Limits: 10 agents · 3 users · Provisioned 16/04/2026 · CTA "Open SentriKat Cloud →" |
+| 1 (b) | ✅ | Quick Links: Download Center, Support & Tickets, Documentation |
+| 1 (c) | ✅ | "Need Help?" Getting Started Guide |
+| 1 (d) | ✅ | Footer data sources: CISA KEV \| NVD \| CVE.org \| ENISA EUVD \| EPSS \| OSV (6+ sources) |
+| 2 Persistence | ⏸️ | Refresh + logout-login da testare |
+| 5 State transitions | ✅ | Pagina sidebar attiva mostra "Dashboard" highlighted; navigation funziona |
+| 7 Audit | ⏸️ | login event lato license-server |
+
+#### [04.2.1] 🔵 INFO — Limits ENTERPRISE: "10 agents · 3 users"
+
+- **Severity**: 🔵 INFO (da verificare se è cap reale dell'Enterprise plan o solo seed test data)
+- **Note**: Enterprise di solito è "unlimited" in catena pricing. 3 user limit per Enterprise è strano. **Verificare canonical `plans_config` lato license-server**.
+- **Cross-link**: cluster con `[01.18.4]` welcome email limits / landing pricing inconsistency già in backlog sentrikat-web.
+
+### 04.3 Licenses page — re-verify 2026-05-06
+
+| Dim | Stato |
+|---|---|
+| 1 Happy path | ✅ Card "SentriKat Cloud subscription active" + Plan ENTERPRISE · Status active |
+| 1 (b) | ✅ Empty state "No on-premises licenses · You're on SentriKat Cloud — the subscription is managed at app.sentrikat.com, no license file required." |
+| 1 (c) | ✅ 2 CTA: "Open SentriKat Cloud" (primary) + "Need on-prem? Contact Sales" (secondary) |
+| 7 Integration | ✅ Coerente con architettura SaaS: customer Cloud non riceve `.license` file |
+
+🟢 **OK overall** — pagina ha gli stati giusti per customer SaaS-only.
+
+### 04.5 Downloads page — re-verify 2026-05-06
+
+| Dim | Stato | Note |
+|---|---|---|
+| 1 Happy path | 🟡 con bug | Banner "You're on SentriKat Cloud · Downloads below are only relevant if you also run SentriKat on-premises" ✅ corretto disclaimer |
+| 1 (b) | ✅ | "Getting Started - 3 Simple Steps" guida: Download & Install / Get Installation ID / Activate License |
+| 1 (c) | 🔴 bug | Lista versioni: v1.0.0, v1.0.0-beta.6 **LATEST**, SentriKat v1.0.0 — vedi [04.5.1] |
+| 1 (d) | 🟡 | "What's New — Agent v1.2.0" Container Image Scanning via Trivy (Docker + Podman, Linux + Windows endpoints, scans pip/npm/Maven/Go/Rust deps) |
+
+#### [04.5.1] 🔴 HIGH — `v1.0.0-beta.6` marcato LATEST mentre `v1.0.0` (release stable) esiste sopra
+
+- **Fase**: 04 / Downloads
+- **Deployment scope**: 🏛 portal (release list source) + possibile 🔐 license-server (releases endpoint)
+- **Severity**: 🔴 HIGH — customer on-prem che vuole installare l'ultima versione clicca beta invece di stable. Confusione + potenziale install di build pre-release in produzione.
+- **Repro**: `https://portal.sentrikat.com/downloads`
+- **Symptom**:
+  - Versione `v1.0.0` (Apr 2, 2026) — listata, **nessun badge LATEST**
+  - Versione `v1.0.0-beta.6` (Apr 23, 2026) — badge **LATEST** 🟢
+  - Sotto: "SentriKat v1.0.0 · Released 02/04/2026 · Unknown" con bottoni Download + View Changelog + badge "Secure — No known vulnerabilities"
+- **Expected**: badge LATEST sulla versione **stable più recente** (v1.0.0), non sulla pre-release. Per semver, `v1.0.0` > `v1.0.0-beta.6` (pre-release < release).
+- **Hypothesis**: l'ordinamento per "data release" sta sovrascrivendo la logica semver. v1.0.0-beta.6 è uscita 23/04 mentre v1.0.0 stable è uscita 02/04 — quindi temporalmente la beta è più recente, ma è una pre-release. La regola corretta è: latest = max(stable releases) OR mark stable+beta separately con badge diversi (es. "LATEST STABLE" vs "LATEST BETA").
+- **Cross-repo**: il fix vive in **sentrikat-web** (portal Astro releases page o license-server `/api/v1/releases`).
+- **Discovered**: 2026-05-06
+
+#### [04.5.2] 🟡 MEDIUM — "Unknown" CVE count su tutte le release listate
+
+- **Severity**: 🟡 MEDIUM (UX confusing, ma non blocca download)
+- **Symptom**: ogni release mostra "Unknown" come ultima colonna (probabilmente CVE count). Solo "SentriKat v1.0.0" ha badge "Secure — No known vulnerabilities" che è la versione corretta del messaggio.
+- **Expected**: `0 CVEs` o `Secure` o numero esplicito; mai "Unknown" che fa pensare "non sappiamo se è sicura".
+- **Hypothesis**: il scan CVE per release non è ancora wired up al portal — il chore daily security scan (`d935a1b` di stamattina) probabilmente popola solo le release di SentriKat-web non quelle del core SentriKat.
+- **Cross-repo**: fix lato sentrikat-web (releases endpoint).
+- **Discovered**: 2026-05-06
+
+#### [04.5.3] 🔵 INFO — "What's New — Agent v1.2.0" Container Image Scanning via Trivy
+
+- **Tipo**: 🔵 INFO (feature highlight UI corretto)
+- **Note**: feature description chiara: "automatically detect Docker and Podman on endpoints and scan all local container images for vulnerabilities using Trivy"; lista 4 punti (auto-detect, scans deps, reports HIGH+CRITICAL, included in Pro). Ottimo highlight per upsell community → pro.
+
+### 04.6 Support / 04.7 Account — già coperti in sessioni precedenti
+
+L'utente conferma 04.6 (Support tickets, feedback, canned responses) e 04.7 (Account update name/company, delete account typed "DELETE") già screenshottate e funzionali. Vedi sessioni precedenti per evidence.
+
+---
+
+## Riassunto bug nuovi 2026-05-06 (Phase 04)
+
+| Bug ID | Severity | Env | Title |
+|---|---|---|---|
+| [04.5.1] | 🔴 HIGH | 🏛 portal (cross-repo sentrikat-web) | `v1.0.0-beta.6` marcato LATEST invece di `v1.0.0` stable |
+| [04.5.2] | 🟡 MEDIUM | 🏛 portal (cross-repo sentrikat-web) | "Unknown" CVE count su release list |
+| [04.5.3] | 🔵 INFO | 🏛 portal | What's New highlight Trivy ok |
+| [04.2.1] | 🔵 INFO | 🔐 license-server | Enterprise plan limits 10 agents/3 users — verifica plans_config canonical |
+| [04.1.5] | 🟢 OK | 🏛 + 🔐 | OTP email branding + deliverability post PR #256+#257 confermato live |
+
+
+---
+
 ## Status fase
 
 **🔧 → ✅ FASE 04 SBLOCCATA 2026-04-30** — bug `[04.1.3]` ✅ VERIFIED dopo deploy SentriKat-web `524208b` (root cause: `BackgroundTasks.send_email` swallow silent, NON era PR #231 sospettata).
@@ -148,3 +260,49 @@
   - Questa è **prod license-server specifically**, con flow OTP email — diverso da welcome
 
 - La ricorrenza "risolto in passato, ora torna" suggerisce **mancanza di regression test** automatico sulla email OTP delivery. Follow-up: aggiungere test E2E playwright su "send OTP → email received via mock SMTP" nella CI pipeline `SentriKat-web/.github/workflows/ci.yml`
+
+---
+
+## Re-test addendum 2026-05-06: 04.6 Support + 04.7 Account
+
+### 04.6 Support — re-verify 2026-05-06
+
+| Dim | Stato | Note |
+|---|---|---|
+| 1 Happy path | ✅ | Pagina `/support` divisa in: My Submissions list (filter All Types + All Statuses, empty state "No submissions yet") + Report a Bug form + Request a Feature form + Manage Your Cloud Subscription callout + Need More Help (Email Support) |
+| 1 (b) Report a Bug | ✅ | Campi: Bug Title, Severity dropdown ("Medium - Feature not working correctly" default), Description, Steps to Reproduce con placeholder utile, Tags optional comma-separated, Submit Bug Report |
+| 1 (c) Request a Feature | ✅ | Campi: Feature Title, Category dropdown ("Vulnerability Management" default), Description, Tags optional, Submit Feature Request |
+| 1 (d) Cloud subscription | ✅ | Banner "Manage Your Cloud Subscription · plan changes (upgrade tier, change billing cycle, view invoices) are managed inside the app" + CTA "Open SentriKat Cloud →" |
+| 1 (e) Need More Help | ✅ | Email Support CTA per casi urgenti |
+| 2-7 | ⏸️ | Rinviato a sessione bug-test mirata (submit, persistenza, XSS, audit) |
+
+🟢 **OK overall** — form completo, separazione bug/feature, callout subscription corretta.
+
+### 04.7 Account Settings — re-verify 2026-05-06
+
+| Dim | Stato | Note |
+|---|---|---|
+| 1 Happy path | ✅ | Pagina `/account` con due card: Profile Information (Full Name "Denis Sota" editable, Email `contact.sotadenis@gmail.com` non-editable con label "Email cannot be changed", Company empty, Save Changes button) + Danger Zone "Delete My Account" |
+| 1 (b) | ✅ | Footer data sources coerente |
+| 3 CRUD | 🟢 partial | Update profile via Save Changes; Delete via Danger Zone (typed "DELETE" modal — verificato post PR #258→#263 hard-delete cascade) |
+| 5 State transitions | ✅ | Email immutable: vincolo coerente con architettura passwordless OTP |
+| 2/4/6/7 | ⏸️ | Rinviato |
+
+🟢 **OK overall** — semantica giusta + hard-delete funzionante post PR #258-263.
+
+---
+
+## Status finale 2026-05-06
+
+✅ **Phase 04 Portal Customer — re-test completato**.
+
+**Bug attivi sentrikat-web**:
+
+| Bug ID | Severity | Stato post nota utente |
+|---|---|---|
+| [04.5.1] beta.6 LATEST badge | 🟡 MEDIUM (era 🔴 HIGH) | **Mitigato manualmente**: utente gestisce releases via git tags + cancella i vecchi prima di rolloutare. Sort semver portal Astro resta nice-to-have post-EA |
+| [04.5.2] "Unknown" CVE count | 🟡 MEDIUM | post-EA |
+| [04.2.1] Enterprise 10/3 cap | 🔵 INFO | verificare plans_config canonical |
+| [04.7.1] Company vuoto | 🔵 INFO | verificare signup→profile flow |
+
+Nessun blocker pre-EA. Flusso customer end-to-end funziona: login OTP → dashboard → license → download → support → account → logout (logout testato a vista in sidebar).

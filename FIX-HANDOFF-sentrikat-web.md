@@ -112,3 +112,130 @@ state.
 ---
 
 End of handoff for sentrikat-web session.
+
+---
+
+# UPDATE 2026-05-06 — bug aperti consolidati dalla sessione core
+
+> Aggiunto dopo sessione walkthrough Phase 04 + Phase 05 re-verify post PR #252-#263 stable.
+> **Tutto sotto è già documentato in dettaglio nei file della repo `sbr0nch/SentriKat`** (pubblica). Leggere lì per evidence + screenshot + repro steps.
+
+## Files da leggere (in ordine)
+
+1. `docs/SESSION-HANDOFF-2026-05-06.md` — orientation generale
+2. `docs/e2e-tests/04-portal-customer.md` — § "Re-test 7-dim sistematico — 2026-05-06" (in fondo). 5 finding portal customer
+3. `docs/e2e-tests/05-admin-portal.md` — sezioni `[05.x]` aggiornate con verify/fix status + 3 nuovi bug
+4. `docs/architecture/VULN-FEED-BROKER-DESIGN.md` — § "R-PARSER-RESILIENCE" requirement nuovo
+
+## Bug aperti consolidati lato sentrikat-web
+
+### 🔴 HIGH — pre-EA / urgent
+
+| Bug ID | File detail | Title sintetico | Suggerimento fix |
+|---|---|---|---|
+| `[05.1.2]` | `05-admin-portal.md` § 05.1 | KPI tile "CVE Findings" su `/admin/releases` stampa literal `0[object Object][object Object]...` | Trova template `<div>{cveCount}{cveList}</div>` o equivalente, sostituisci con solo `{cveCount}` o `{cveList.map(c => c.id).join(', ')}` |
+| `[05.3.2]` | `05-admin-portal.md` § 05.3 | CISA KEV `AUTH_CHANGED`, ENISA EUVD `SCHEMA_CHANGED`, CVE.org `DEGRADED` su `/admin/datasources` | (1) Verificare URL/auth CISA KEV — se feed pubblico immutato, fix monitor fingerprint. (2) Aggiornare parser EUVD per nuovo schema. (3) Implementare R-PARSER-RESILIENCE per evitare ricorrenza |
+| `[05.4.1]` | `05-admin-portal.md` § 05.4 | Public status "All systems operational" mentre datasources mostra DOWN | Auto-create incident draft quando data source DOWN/DEGRADED. Status page deve riflettere monitoring automatico, non solo incidents manuali |
+
+### 🟡 MEDIUM — post-EA backlog
+
+| Bug ID | File detail | Title |
+|---|---|---|
+| `[04.5.1]` | `04-portal-customer.md` § 04.5 | `v1.0.0-beta.6` marcato LATEST invece di `v1.0.0` stable (semver sort) — utente mitiga manualmente cancellando tag obsoleti |
+| `[04.5.2]` | `04-portal-customer.md` § 04.5 | "Unknown" CVE count su tutte le release; solo l'ultima ha "Secure — No known vulnerabilities" |
+| `[05.1.3]` | `05-admin-portal.md` § 05.1 | "NaN MB" su tutte le 7 release in `/admin/releases` (size field undefined senza fallback) |
+| `[05.21.1]` | `05-admin-portal.md` § 05.21 | `/admin/plans` ancora hardcoded ("Plans are defined in code"), prezzi/limits divergono da Calculator e plans_config canonical. Customer-facing OK. |
+
+### 🔵 INFO — nice-to-have
+
+| Bug ID | File detail | Title |
+|---|---|---|
+| `[04.2.1]` | `04-portal-customer.md` § 04.2 | Enterprise plan limits: 10 agents · 3 users — verificare che sia il valore canonical voluto, non residuo seed/test |
+| `[04.7.1]` | `04-portal-customer.md` § 04.7 | Field "Company" vuoto in /account anche se l'utente l'ha compilato a signup — verifica che customer.profile.company persista da signup form |
+| `[04.5.3]` | `04-portal-customer.md` § 04.5 | "What's New — Agent v1.2.0" Trivy container scanning — feature highlight ok, mantenere il pattern |
+
+## Verde / chiusi (non più da toccare)
+
+PR #252-#263 hanno fixato (verified live 2026-05-06):
+- `[05.1.1]` releases empty → ora 7 release popolate
+- `[05.3.1]` data source "Unknown" → 6 source nominati
+- `[05.5.1]` centralized logs vuoto (deploy `23ce9da`)
+- `[05.6.1]` last login `-` (deploy `23ce9da`)
+- `[05.8.1]` RSA_PRIVATE_KEY → CONFIGURED
+- `[05.9.1]` CSP script-src-attr → handlers funzionano
+- `[05.13.1]` newsletter subscribers 403 → carica
+- `[05.22.1]` EA Tenants stats 401 → cards funzionano
+- `[04.1.3]` OTP email regression → email arriva (PR #257)
+
+## Nuova architettura — R-PARSER-RESILIENCE (non-funzionale)
+
+Aggiunto a `VULN-FEED-BROKER-DESIGN.md` § "R-PARSER-RESILIENCE" come requirement obbligatorio per il broker mese 2-3. **Quando implementi i parser in `license-server/vuln_feed/enrichment/`, segui il pattern**: REQUIRED vs OPTIONAL, field aliases, schema drift telemetry non-blocking, Pydantic `extra='ignore'`. Evita di hardcodare il path `data['key']` ovunque.
+
+Lo stesso pattern è raccomandato anche per `sbr0nch/sentrikat/app/cisa_sync.py` esistente (post-EA backlog F.4).
+
+---
+
+## Prompt copia-incolla aggiornato per la sessione gemella
+
+```
+Sessione Claude su sbr0nch/SentriKat-web. Pre-EA è stable, le PR
+#252-#263 sono mergeate in prod e l'evento è in corso. Ora ti
+arrivano dalla sessione core (sbr0nch/SentriKat) i nuovi bug
+emersi dal walkthrough Phase 04 + 05 re-verify del 2026-05-06.
+
+Leggi questi file dalla repo pubblica sbr0nch/sentrikat tramite
+WebFetch o equivalente:
+
+1. https://github.com/sbr0nch/sentrikat/blob/main/FIX-HANDOFF-sentrikat-web.md
+   — sezione "UPDATE 2026-05-06" in fondo. Dossier sintetico bug
+   aperti, già categorizzati HIGH / MEDIUM / INFO.
+
+2. https://github.com/sbr0nch/sentrikat/blob/main/docs/e2e-tests/05-admin-portal.md
+   — dettaglio per ogni [05.x] bug: repro, screenshot URL,
+   hypothesis root-cause, suggerimento fix.
+
+3. https://github.com/sbr0nch/sentrikat/blob/main/docs/e2e-tests/04-portal-customer.md
+   — sezione "Re-test 7-dim sistematico — 2026-05-06" per i 5
+   findings portal customer.
+
+4. https://github.com/sbr0nch/sentrikat/blob/main/docs/architecture/VULN-FEED-BROKER-DESIGN.md
+   — sezione "R-PARSER-RESILIENCE": requirement nuovo per i parser
+   broker mese 2-3.
+
+Dopo aver letto, NON scrivere codice subito. Riporta all'utente:
+
+A. Per i 3 bug HIGH (`[05.1.2]`, `[05.3.2]`, `[05.4.1]`):
+   - Identifica il file colpevole nel tuo repo (path probabile)
+   - Stima effort di fix (S = <2h, M = mezza giornata, L = giornata+)
+   - Identifica eventuali blocker (es. credenziali CISA da
+     ottenere, schema EUVD nuovo da analizzare)
+
+B. Per i 4 bug MEDIUM:
+   - Conferma se vanno in backlog post-EA (raccomandato) o
+     fixati ora prima dell'evento (solo se < 2h totali e zero
+     rischio regressione)
+
+C. R-PARSER-RESILIENCE:
+   - Quando arrivi al lavoro broker mese 2-3, conferma che il
+     pattern è applicabile in license-server/vuln_feed/.
+     Se vedi obiezioni o miglior approccio (es. un parser
+     library ufficiale vuln-data Python), dimmelo prima di
+     implementare.
+
+D. Stato attuale del tuo repo lato deploy:
+   - tutti i container sono ancora running e healthy?
+   - daily security scan (`d935a1b`) sta girando?
+   - prossimo deploy schedulato quando?
+
+E. Domande aperte per Massimiliano (l'operatore): max 5.
+
+Regole:
+- Frugale con i Read (offset/limit su file >200 righe)
+- Push su tuo branch claude/<name>, non su main
+- Aggiorna FIX-HANDOFF-sentrikat-web.md sul repo sentrikat (push
+  via PR su sbr0nch/sentrikat) quando un bug viene chiuso, così
+  l'altra sessione vede il progresso
+
+Non aspettarti risposta dalla sessione core fino a quando
+Massimiliano non riapre quella e ti porta news.
+```
