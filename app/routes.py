@@ -77,7 +77,7 @@ def _get_cached_nvd_status():
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
         response = http_requests.get(
-            'https://services.nvd.nist.gov/rest/json/cves/2.0',
+            Config.NVD_CVE_API_URL,
             params={'resultsPerPage': 1},
             timeout=10,
             proxies=proxies,
@@ -5262,7 +5262,7 @@ def lookup_single_cve(cve_id):
             headers['apiKey'] = api_key
 
         resp = http_requests.get(
-            f'https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={cve_id}',
+            f'{Config.NVD_CVE_API_URL}?cveId={cve_id}',
             headers=headers,
             timeout=15,
             **kwargs
@@ -5768,7 +5768,7 @@ def test_connection():
 
     try:
         # Test connection to CISA KEV catalog
-        test_url = 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json'
+        test_url = Config.CISA_KEV_URL
         response = requests.head(
             test_url,
             timeout=10,

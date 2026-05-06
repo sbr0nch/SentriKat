@@ -732,7 +732,7 @@ def get_sync_settings():
         'auto_sync_enabled': get_setting('auto_sync_enabled', 'false') == 'true',
         'sync_interval': get_setting('sync_interval', 'daily'),
         'sync_time': get_setting('sync_time', '02:00'),
-        'cisa_kev_url': get_setting('cisa_kev_url', 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json'),
+        'cisa_kev_url': get_setting('cisa_kev_url', Config.CISA_KEV_URL),
         'nvd_api_key': '********' if nvd_api_key_configured else '',  # Masked for security
         'nvd_api_key_configured': nvd_api_key_configured
     }
@@ -812,7 +812,7 @@ def _validate_nvd_api_key(api_key):
     from config import Config
 
     try:
-        url = 'https://services.nvd.nist.gov/rest/json/cpes/2.0'
+        url = Config.NVD_CPE_API_URL
         params = {'keywordSearch': 'test', 'resultsPerPage': 1}
         headers = {'apiKey': api_key}
 
@@ -889,7 +889,7 @@ def get_nvd_status():
             return jsonify(result)
 
         # Test connection
-        url = 'https://services.nvd.nist.gov/rest/json/cpes/2.0'
+        url = Config.NVD_CPE_API_URL
         params = {'keywordSearch': 'test', 'resultsPerPage': 1}
         headers = {'apiKey': nvd_key} if nvd_key else {}
 

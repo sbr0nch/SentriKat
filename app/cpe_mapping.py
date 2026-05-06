@@ -8,9 +8,12 @@ CPE format: cpe:2.3:a:vendor:product:version:...
 We store just vendor and product for matching.
 """
 
+import logging
 import re
 from app import db
 from sqlalchemy import func
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # CPE Mappings Database
@@ -373,10 +376,20 @@ def apply_cpe_to_product(product):
         try:
             from app.cpe_mappings import get_cpe_for_software
             cpe_vendor, cpe_product, _ = get_cpe_for_software(
-                product.vendor, product.product_name, use_nvd_fallback=False
+                product.vendor, product.product_name,
+                # B.2 (audit 2026-05-06): NVD fallback intentionally disabled
+                # here. NVD lookups are deferred to scheduled
+                # batch_apply_cpe_mappings cron (see CVE-MATCHING-PIPELINE.md
+                # §F.1) to avoid blocking agent ingestion on NVD rate-limit.
+                use_nvd_fallback=False
             )
-        except Exception:
-            pass
+        except Exception as e:
+            # A.2 fix (audit 2026-05-06): was silent pass — DB transient or
+            # import error masked F.2/F.3 fix regressions. Now logged.
+            logger.warning(
+                f"Tier 2 (curated dict) lookup failed for "
+                f"{product.vendor!r}/{product.product_name!r}: {type(e).__name__}: {e}"
+            )
 
     # Tier 3: Try local CPE dictionary (extracted from vulnerability data)
     if not cpe_vendor or not cpe_product:
@@ -385,8 +398,12 @@ def apply_cpe_to_product(product):
             cpe_vendor, cpe_product, _ = lookup_cpe_dictionary(
                 product.vendor, product.product_name
             )
-        except Exception:
-            pass
+        except Exception as e:
+            # A.2 fix (audit 2026-05-06): was silent pass.
+            logger.warning(
+                f"Tier 3 (local CPE dict) lookup failed for "
+                f"{product.vendor!r}/{product.product_name!r}: {type(e).__name__}: {e}"
+            )
 
     if cpe_vendor and cpe_product:
         # Sanity check: prevent clearly wrong mappings

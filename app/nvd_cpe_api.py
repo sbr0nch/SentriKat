@@ -212,7 +212,7 @@ def search_cpe(
         return cached
 
     # Build API request
-    url = "https://services.nvd.nist.gov/rest/json/cpes/2.0"
+    url = Config.NVD_CPE_API_URL
     params = {
         'resultsPerPage': min(limit, 2000),
         'startIndex': 0
@@ -540,7 +540,7 @@ def get_cpe_versions(vendor: str, product: str, limit: int = 50) -> List[str]:
     if cached is not None:
         return cached
 
-    url = "https://services.nvd.nist.gov/rest/json/cpes/2.0"
+    url = Config.NVD_CPE_API_URL
     params = {
         'cpeMatchString': f"cpe:2.3:*:{vendor}:{product}:*",
         'resultsPerPage': min(limit * 2, 500),  # Fetch extra to account for deduplication
@@ -615,7 +615,7 @@ def match_cve_to_cpe(cve_id: str) -> List[Dict]:
     if cached is not None:
         return cached
 
-    url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    url = Config.NVD_CVE_API_URL
     params = {'cveId': cve_id}
 
     api_key = _get_api_key()
@@ -707,7 +707,7 @@ def match_cve_to_cpe_with_status(cve_id: str) -> Tuple[List[Dict], Optional[str]
         # cached is a dict with 'cpes' and 'status' keys
         return cached.get('cpes', []), cached.get('status')
 
-    url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    url = Config.NVD_CVE_API_URL
     params = {'cveId': cve_id}
 
     api_key = _get_api_key()

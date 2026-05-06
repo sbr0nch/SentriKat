@@ -94,8 +94,35 @@ class Config:
     # Application URL (for generating share links, email links, etc.)
     SENTRIKAT_URL = os.environ.get('SENTRIKAT_URL', '').rstrip('/')
 
-    # CISA KEV Feed URL
-    CISA_KEV_URL = 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json'
+    # =========================================================================
+    # External vulnerability feed endpoints (B.1 audit 2026-05-06)
+    # All overridable via env var so vuln-feed broker (month 2-3) can swap to
+    # https://vuln-feed.sentrikat.com/api/v1/* without code changes.
+    # =========================================================================
+    CISA_KEV_URL = os.environ.get(
+        'CISA_KEV_URL',
+        'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json'
+    )
+    NVD_CVE_API_URL = os.environ.get(
+        'NVD_CVE_API_URL',
+        'https://services.nvd.nist.gov/rest/json/cves/2.0'
+    )
+    NVD_CPE_API_URL = os.environ.get(
+        'NVD_CPE_API_URL',
+        'https://services.nvd.nist.gov/rest/json/cpes/2.0'
+    )
+    MITRE_CVE_API_URL = os.environ.get(
+        'MITRE_CVE_API_URL',
+        'https://cveawg.mitre.org/api/cve'
+    )
+    CPE_DICTIONARY_CSV_URL = os.environ.get(
+        'CPE_DICTIONARY_CSV_URL',
+        'https://raw.githubusercontent.com/tiiuae/cpedict/main/data/cpes.csv'
+    )
+    EUVD_API_URL = os.environ.get(
+        'EUVD_API_URL',
+        'https://euvd.enisa.europa.eu/api/v1'
+    )
 
     # Sync schedule (daily at 2 AM UTC)
     SYNC_HOUR = int(os.environ.get('SYNC_HOUR', '') or 2)

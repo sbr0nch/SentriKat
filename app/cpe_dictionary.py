@@ -26,6 +26,8 @@ import json
 import logging
 from datetime import datetime
 
+from config import Config
+
 logger = logging.getLogger(__name__)
 
 
@@ -354,10 +356,10 @@ def get_dictionary_stats():
 # ============================================================================
 
 # CSV source: tiiuae/cpedict - daily-updated vendor:product pairs from NVD
-_CPE_CSV_URL = "https://raw.githubusercontent.com/tiiuae/cpedict/main/data/cpes.csv"
+_CPE_CSV_URL = Config.CPE_DICTIONARY_CSV_URL
 
 # NVD API 2.0 for incremental sync
-_NVD_CPE_API_URL = "https://services.nvd.nist.gov/rest/json/cpes/2.0"
+_NVD_CPE_API_URL = Config.NVD_CPE_API_URL
 
 
 def sync_nvd_cpe_dictionary():
