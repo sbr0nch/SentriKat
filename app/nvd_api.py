@@ -80,7 +80,7 @@ def _fetch_cvss_from_nvd(cve_id):
             logger.warning(f"NVD rate limit timeout for {cve_id}")
             return None, None
 
-        url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+        url = Config.NVD_CVE_API_URL
         params = {'cveId': cve_id}
         kwargs = _get_request_kwargs()
 
@@ -148,7 +148,7 @@ def _fetch_cvss_from_cve_org(cve_id):
     Returns: (cvss_score, severity) or (None, None).
     """
     try:
-        url = f"https://cveawg.mitre.org/api/cve/{cve_id}"
+        url = f"{Config.MITRE_CVE_API_URL}/{cve_id}"
         kwargs = _get_request_kwargs()
 
         response = requests.get(url, timeout=5, **kwargs)
@@ -286,7 +286,7 @@ def fetch_cve_details(cve_id):
             logger.warning(f"NVD rate limit timeout for {cve_id}")
             return None
 
-        url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+        url = Config.NVD_CVE_API_URL
         params = {'cveId': cve_id}
         kwargs = _get_request_kwargs()
 

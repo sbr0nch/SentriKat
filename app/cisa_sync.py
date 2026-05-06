@@ -1704,7 +1704,7 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
 
                 try:
                     response = requests.get(
-                        'https://services.nvd.nist.gov/rest/json/cves/2.0',
+                        Config.NVD_CVE_API_URL,
                         params=params,
                         headers=headers,
                         timeout=20,
@@ -1906,7 +1906,7 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
 
             try:
                 response = requests.get(
-                    'https://services.nvd.nist.gov/rest/json/cves/2.0',
+                    Config.NVD_CVE_API_URL,
                     params=params,
                     headers=headers,
                     timeout=20,
@@ -2120,7 +2120,7 @@ def sync_nvd_recent_cves(hours_back=6, severity_filter=None, max_results=500):
 
                 try:
                     response = requests.get(
-                        'https://services.nvd.nist.gov/rest/json/cves/2.0',
+                        Config.NVD_CVE_API_URL,
                         params=mod_params,
                         headers=headers,
                         timeout=20,
@@ -2332,7 +2332,7 @@ def fetch_cves_by_cpe(cpe_vendor, cpe_product, max_results=2000):
 
             try:
                 response = requests.get(
-                    'https://services.nvd.nist.gov/rest/json/cves/2.0',
+                    Config.NVD_CVE_API_URL,
                     params=params,
                     headers=headers,
                     timeout=30,
