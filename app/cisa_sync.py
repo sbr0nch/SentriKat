@@ -872,10 +872,50 @@ def download_cisa_kev(max_retries=3, retry_delay=5):
     raise Exception(f"Failed to download CISA KEV after {max_retries} attempts: {last_error}")
 
 def parse_and_store_vulnerabilities(kev_data):
-    """Parse CISA KEV JSON and store in database"""
+    """Parse CISA KEV JSON and store in database.
+
+    F.7 fix (CVE-MATCHING-PIPELINE.md §F.7, audit 2026-05-06): besides
+    setting is_actively_exploited=True for entries IN the current KEV,
+    we also reset is_actively_exploited=False for entries previously
+    flagged from KEV that are NO LONGER in the current feed (CISA does
+    occasionally drop entries when criteria change). This prevents
+    "exploited forever" stale flag.
+
+    Reset is conservative: only flips to False if the row's source is
+    'cisa_kev' alone (not also 'euvd' or another exploited source) and
+    EPSS score is NOT >= 0.95 (which independently flags exploited).
+    """
     vulnerabilities = kev_data.get('vulnerabilities', [])
+    current_kev_cves = {v.get('cveID') for v in vulnerabilities if v.get('cveID')}
     stored_count = 0
     updated_count = 0
+    reset_count = 0
+
+    # F.7: reset stale flags BEFORE processing the current feed
+    if current_kev_cves:
+        try:
+            from app.models import Vulnerability
+            stale_query = Vulnerability.query.filter(
+                Vulnerability.is_actively_exploited == True,
+                ~Vulnerability.cve_id.in_(current_kev_cves),
+                Vulnerability.source.in_(['cisa_kev']),  # source=cisa_kev only, not 'cisa_kev+euvd'
+                # Don't reset if EPSS independently flags as exploited
+                db.or_(
+                    Vulnerability.epss_percentile.is_(None),
+                    Vulnerability.epss_percentile < 0.95
+                )
+            )
+            stale_vulns = stale_query.all()
+            for sv in stale_vulns:
+                sv.is_actively_exploited = False
+                reset_count += 1
+            if reset_count > 0:
+                logger.info(
+                    f"F.7 stale KEV reset: {reset_count} CVE no longer in CISA KEV "
+                    f"and not EPSS≥0.95 → is_actively_exploited=False"
+                )
+        except Exception as e:
+            logger.warning(f"F.7 stale KEV reset failed (non-critical): {e}")
 
     for vuln_data in vulnerabilities:
         cve_id = vuln_data.get('cveID')
