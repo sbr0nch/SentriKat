@@ -51,9 +51,117 @@
 
 > Ogni sezione viene riempita man mano durante il walkthrough. Bug ID format: `[13.S.B]` o `[13.S.B.N]`.
 
-### 13.1 — Admin panel landing `/admin`
+### 13.1 — Admin panel landing (Dashboard)
 
-_Da iniziare. URL on-prem: `http://localhost/admin` (via nginx) o `http://localhost:5000/admin` (diretto)._
+> **URL effettivo**: `http://localhost/` (on-prem) e `https://app.sentrikat.com/` (SaaS) — **non è una rotta `/admin` separata**, l'admin landing è la stessa Vulnerability Dashboard del normale utente, con sidebar estesa per super-admin. Sezioni admin-only sono sotto **Management** (Organizations, Users & Access cross-org), **System** (Settings, License/Subscription, Health Checks, System Logs, Platform Operations [SaaS only]).
+
+#### Sidebar/menu — confronto on-prem vs SaaS
+
+| Sezione | On-prem | SaaS | Note |
+|---|---|---|---|
+| Overview → Dashboard, Assignments | ✅ | ✅ | identico |
+| Inventory → Products, Endpoints, Containers, Dependencies, Import Queue, SBOM Export, Exclusions | ✅ | ✅ | identico |
+| Management → Users & Access (All Users, LDAP Users, LDAP Groups) | ✅ | ✅ | identico |
+| Management → **Organizations** | ✅ | ❌ | Coerente: SaaS è single-tenant per il customer, super-admin SaaS gestisce orgs solo dal portal admin esterno (`portal.sentrikat.com/admin`) |
+| Integrations → Integrations, Agent Keys, Agent Activity, Scheduled Reports, Issue Trackers | ✅ | ✅ | identico |
+| System → Settings, Authentication, Alert Mgmt, SMTP, SIEM/Syslog, System, Compliance, Appearance | ✅ | ✅ | identico |
+| System → **License** | ✅ | ❌ | On-prem mostra licenza locale (DEMO/PRO RSA-4096) |
+| System → **Subscription** | ❌ | ✅ | SaaS mostra subscription Stripe-backed |
+| System → Health Checks, System Logs, Admin Guide | ✅ | ✅ | identico |
+| **Platform Operations** (4 voci) | ❌ | ✅ | SaaS only: Cross-Repo Integration, Webhook Events, Usage Uploads, + Platform Operations parent — relativo al collegamento con portal admin / license-server |
+
+**Verdict menu**: differenze coerenti con l'architettura. Nessun gap inatteso.
+
+#### Dashboard content — on-prem (Test Org, Community Edition)
+
+- **Top banner Community Edition**: "Limited to 3 user, 100 products. Get a License" → ✅ allineato con landing pricing
+- **Banner import queue**: "89 products waiting for review" → richiama F.3 (CPE applicato a queue approval, ma non auto-approve)
+- **Banner system health**: "2 warnings" → da investigare in 13.2
+- **Banner CPE mapping**: "30 products without CPE mapping" + bottone "Auto-Detect CPE" → 70/100 hanno CPE (coerente con audit precedente; 30 sono prodotti Windows generici tipo "Windows SDK", "Universal CRT Headers Libraries and Sources" che falliscono Tier 1-3)
+- **Banner version**: "4 products without a known version" → coerente con F.9 (agent registry parser limitations)
+- **Stat cards**: 0-DAY 0, **CRITICAL 1** (1 match), HIGH 0, MEDIUM 0
+- **KEV Catalog**: 2,396 CVE (87% del totale 2,748 enriched) | Affecting Products: 1 | Needs Review: 0 | Products Tracked: 100
+- **Remediation Actions**: 1 riga — "Update Igor Pavlov 7-Zip 19.00 (x64) from 19.00" con badge **EXPLOITED** ← coerente con CVE-2025-0411
+- **SLA Compliance**: "No SLA policies configured" — atteso (no setup eseguito)
+- **Last Synchronization**: 06/05/2026 02:00:15 **FAILED** | 0 matches found in 15.11s ⚠️
+- **CRITICAL RISK card**: CVE-2025-0411, OVERDUE BY 432 DAYS, CISA KEV, 1 PRODUCT (1 OPEN), 1 ENDPOINT, button NVD + Share
+
+#### Dashboard content — SaaS (`SentriKat test` tenant)
+
+- **Top**: badge "SENTRIKAT" (no org dropdown — single-tenant view per customer)
+- **Banner agent**: "No agent reports received in the last 48 hours. Check agent connectivity"
+- **Banner import queue**: "1 product waiting for review"
+- **Banner system health**: "1 critical config issue(s): SMTP not configured (email alerts will not work)" 🔴
+- **Banner CPE mapping**: "1 products without CPE mapping"
+- **Stat cards**: tutto 0
+- **KEV Catalog**: 15,604 CVE (vs 2,396 on-prem — SaaS ha enrichment più maturo, ~6.5x dataset)
+- **Affecting Products**: 0 | Products Tracked: 1
+- **Vulnerability Trends**: tutto 0 da 2026-04-06 a oggi
+
+---
+
+#### Bug identificati 13.1
+
+##### [13.1.1] 🔴 Pagination "Showing 1-50 of 0" mentre header dice "Vulnerabilities (1 CVEs)"
+
+- **Env**: 🏢 on-prem (probabilmente anche ☁️ SaaS — non testato perché 0 vuln)
+- **Severity**: 🔴 HIGH (UI inconsistency visibile a customer al demo)
+- **Symptom**: Header sezione Vulnerabilities mostra "(1 CVEs)" coerente con la card CRITICAL RISK renderizzata sotto, ma pagination dice "Showing 1-50 of 0".
+- **Hypothesis**: Counter `total_count` per pagination calcolato su query post-filter diversa dal counter dell'header (probabile filter `Unacknowledged Only` ON nel filtro di default che esclude la riga, mentre header conta tutto).
+- **Repro**: aprire dashboard → osservare contatore in fondo
+- **Discovered**: 2026-05-06
+
+##### [13.1.2] 🟡 Filtro "Vendor=Microsoft, Product=Windows" sembra applicato di default ma il risultato è CVE 7-Zip
+
+- **Env**: 🏢 on-prem + ☁️ SaaS (entrambi mostrano gli stessi placeholder "Microsoft"/"Windows" nei campi)
+- **Severity**: 🟡 MEDIUM — confonde l'utente: vede valore in input ma il backend lo ignora
+- **Symptom**: Filter input Vendor mostra "Microsoft" e Product mostra "Windows" come testo, ma i risultati ignorano i valori (7-Zip CVE viene renderizzato).
+- **Hypothesis**: testo è **placeholder** HTML5, NON valore — disambiguazione mancante: dovrebbe essere `placeholder="Microsoft"` con campo vuoto, ma se renderizzato come `value=` confonde. Da verificare in DOM.
+- **Discovered**: 2026-05-06
+
+##### [13.1.3] 🟡 Last Synchronization on-prem: FAILED (0 matches in 15.11s)
+
+- **Env**: 🏢 on-prem (06/05/2026 02:00:15)
+- **Severity**: 🟡 MEDIUM (non blocca demo: dato corrente è già buono dalla sync precedente, ma scheduler non sta riuscendo)
+- **Symptom**: Run schedulato del 6 maggio 02:00 è fallito in 15s. Banner non specifica errore.
+- **Hypothesis A**: NVD rate-limit (test API key esposta in chat history potrebbe essere stata revocata)
+- **Hypothesis B**: timeout di rete dal container al NVD/CISA upstream
+- **Hypothesis C**: scheduler healthy ma il job ha sollevato eccezione → rollback senza match update
+- **Action**: 13.4 (sync trigger) farà un Run Now manuale per riprodurre + leggere log
+- **Discovered**: 2026-05-06
+
+##### [13.1.4] 🟡 SaaS tenant `SentriKat test`: SMTP not configured
+
+- **Env**: ☁️ SaaS
+- **Severity**: 🟡 MEDIUM — funzionale ma non urgente, in SaaS lo SMTP dovrebbe essere platform-default (Resend via license-server / sentrikat-web), non richiesto per-tenant
+- **Symptom**: Banner critical su SaaS dice "SMTP not configured" — implica che ogni nuovo tenant SaaS deve configurare SMTP a mano, contraddice l'integrazione Resend deliverability committed in sentrikat-web PR #257.
+- **Action**: chiedere a sessione gemella sentrikat-web se license-server espone SMTP shared via tenant provisioning, e se sì come il core lo legge
+- **Discovered**: 2026-05-06
+
+##### [13.1.5] 🔵 SaaS tenant: 0 agent reports negli ultimi 48h
+
+- **Env**: ☁️ SaaS
+- **Severity**: 🔵 INFO (atteso se è un tenant di test senza agent installato; banner è informativo corretto)
+- **Action**: nessuna — il banner è UX feedback corretto
+
+##### [13.1.6] 🟢 OK — Community Edition banner + KEV CRITICAL match coerenti
+
+- ✅ Banner pricing allineato con landing (3 user / 100 products)
+- ✅ CVE-2025-0411 visibile come unico match con tutti i metadata corretti (KEV, EXPLOITED, OVERDUE 432 days)
+- ✅ KEV Catalog 2,396 con 1 affecting product (87% enrichment dataset)
+- ✅ Sidebar admin-only correttamente nascosta a manager/user (da verificare in 13.1 dim 4 RBAC quando hai un user normale a portata)
+
+#### Coverage 7-dim per 13.1
+
+| Dim | Stato |
+|---|---|
+| 1. Happy path | ✅ |
+| 2. Persistence | ⏸️ da testare (logout-login + refresh) |
+| 3. CRUD | n/a per dashboard |
+| 4. RBAC | ⏸️ da testare con user non-admin |
+| 5. State transitions | n/a |
+| 6. Negative input | ⏸️ filter con SQL injection / unicode (rimandato a 15-security-edge) |
+| 7. Integration / audit | ⏸️ verificare audit_events `dashboard.view` (probabilmente NON loggato e va bene) |
 
 ---
 
