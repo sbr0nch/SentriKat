@@ -938,10 +938,16 @@ def parse_and_store_vulnerabilities(kev_data):
     if current_kev_cves:
         try:
             from app.models import Vulnerability
+            # Reset is safe for KEV-only sources AND KEV merged with feeds
+            # that don't carry an independent actively_exploited signal
+            # (NVD, CVE.org). EUVD-merged is EXCLUDED because EUVD has
+            # its own exploited flag (enrich_with_euvd_exploited) which
+            # could keep the CVE legitimately exploited even after KEV drops it.
+            kev_resettable_sources = ['cisa_kev', 'cisa_kev+nvd', 'cisa_kev+cve_org']
             stale_query = Vulnerability.query.filter(
                 Vulnerability.is_actively_exploited == True,
                 ~Vulnerability.cve_id.in_(current_kev_cves),
-                Vulnerability.source.in_(['cisa_kev']),  # source=cisa_kev only, not 'cisa_kev+euvd'
+                Vulnerability.source.in_(kev_resettable_sources),
                 # Don't reset if EPSS independently flags as exploited
                 db.or_(
                     Vulnerability.epss_percentile.is_(None),
@@ -1004,9 +1010,30 @@ def parse_and_store_vulnerabilities(kev_data):
             vuln.notes = notes
             # CISA KEV = confirmed actively exploited
             vuln.is_actively_exploited = True
-            # Reconcile source: if EUVD created it, now CISA confirms it
+            # Reconcile source: any upstream that created the row first
+            # gets reconciled when CISA KEV confirms it. Without this,
+            # KEV-listed CVEs ingested earlier via NVD recent sync (zero-day
+            # step) or CVE.org/EUVD path stay tagged with their original
+            # source forever, causing dashboard "KEV Catalog" widget under-
+            # count and breaking F.7 stale-KEV reset which filters
+            # source='cisa_kev' only.
+            #
+            # Bug discovered 2026-05-07 on SaaS: 15.631 vulnerabilities
+            # had source='nvd', zero source='cisa_kev', because NVD recent
+            # sync ran first and the previous reconciliation only handled
+            # the 'euvd' branch.
             if vuln.source == 'euvd':
                 vuln.source = 'cisa_kev+euvd'
+                vuln.date_added = date_added or vuln.date_added
+            elif vuln.source == 'nvd':
+                vuln.source = 'cisa_kev+nvd'
+                vuln.date_added = date_added or vuln.date_added
+            elif vuln.source == 'cve_org':
+                vuln.source = 'cisa_kev+cve_org'
+                vuln.date_added = date_added or vuln.date_added
+            elif vuln.source and 'cisa_kev' not in (vuln.source or ''):
+                # Catch-all for unknown future source labels: prepend cisa_kev
+                vuln.source = f'cisa_kev+{vuln.source}'
                 vuln.date_added = date_added or vuln.date_added
             updated_count += 1
         else:

@@ -162,3 +162,55 @@ class TestCpeLimitDefault:
         from app.cisa_sync import sync_cisa_kev
         sig = inspect.signature(sync_cisa_kev)
         assert sig.parameters['cpe_limit'].default == 300
+
+
+class TestKevSourceReconciliation:
+    """[CISA-RECONCILE] when KEV sync confirms a CVE that NVD/EUVD/CVE.org
+    created earlier, the source must be reconciled to cisa_kev+<original>
+    so the dashboard widget and F.7 stale reset see it correctly."""
+
+    def test_alias_map_keys_present(self):
+        # Sanity: the canonical KEV record fields are still aliased in cisa_sync
+        from app.cisa_sync import _KEV_ALIASES
+        for k in ('cve_id', 'vendor_project', 'product', 'vulnerability_name',
+                  'date_added', 'short_description', 'required_action',
+                  'due_date', 'known_ransomware', 'notes'):
+            assert k in _KEV_ALIASES, f"_KEV_ALIASES missing canonical key {k!r}"
+
+    def test_source_reconciliation_branches_documented(self):
+        """The reconciliation logic in parse_and_store_vulnerabilities must
+        cover all known upstream sources. Verifies via source-string parse,
+        not by running the function (which needs DB)."""
+        import inspect
+        from app import cisa_sync
+        src = inspect.getsource(cisa_sync.parse_and_store_vulnerabilities)
+        # Each branch should reconcile to a 'cisa_kev+<original>' label
+        assert "vuln.source = 'cisa_kev+euvd'" in src
+        assert "vuln.source = 'cisa_kev+nvd'" in src
+        assert "vuln.source = 'cisa_kev+cve_org'" in src
+        # And there's a catch-all for unknown future sources
+        assert "f'cisa_kev+{vuln.source}'" in src
+
+    def test_f7_resettable_sources_include_nvd_and_cve_org(self):
+        """F.7 reset must apply to cisa_kev+nvd and cisa_kev+cve_org since
+        those sources don't carry an independent actively_exploited signal.
+        EUVD-merged is excluded (EUVD has its own exploited flag)."""
+        import inspect
+        from app import cisa_sync
+        src = inspect.getsource(cisa_sync.parse_and_store_vulnerabilities)
+        assert "kev_resettable_sources = ['cisa_kev', 'cisa_kev+nvd', 'cisa_kev+cve_org']" in src
+
+
+class TestKevCatalogWidgetFilter:
+    """The /api/dashboard/stats endpoint must filter total_vulnerabilities
+    via LIKE '%cisa_kev%' so that all reconciled sources are counted under
+    'KEV Catalog' label."""
+
+    def test_routes_uses_like_filter(self):
+        import inspect
+        from app import routes
+        src = inspect.getsource(routes)
+        # Filter via LIKE catches cisa_kev, cisa_kev+euvd, cisa_kev+nvd, cisa_kev+cve_org
+        assert "Vulnerability.source.like('%cisa_kev%')" in src
+        # Also exposes total all-source count for forward-compat
+        assert "cve_database_total" in src
