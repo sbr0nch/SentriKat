@@ -129,3 +129,77 @@ def test_hard_delete_endpoint_registered_and_distinct_from_cancel():
     assert 'db.session.delete(org)' in src or 'Organization.query.get' in src, (
         "/hard-delete must perform actual delete, not just status flip"
     )
+
+
+# ============================================================================
+# SAAS-ACTIVATION-TOKEN endpoint tests
+# ============================================================================
+
+
+class TestRegenerateActivationToken:
+    def _hdr(self):
+        return {'X-Provision-Key': 'test-provision-key-12345'}
+
+    def test_missing_key_returns_401(self, client):
+        resp = client.post('/api/provision/regenerate-activation-token', json={'email': 'foo@example.com'})
+        assert resp.status_code in (401, 403)
+
+    def test_missing_identifier_returns_400(self, client):
+        resp = client.post('/api/provision/regenerate-activation-token', json={'expiry_hours': 24}, headers=self._hdr())
+        assert resp.status_code == 400
+
+    def test_unknown_user_returns_404(self, client):
+        resp = client.post(
+            '/api/provision/regenerate-activation-token',
+            json={'email': 'nobody@example.com'},
+            headers=self._hdr(),
+        )
+        assert resp.status_code == 404
+
+
+def test_activation_token_endpoint_registered():
+    """Snapshot test: /regenerate-activation-token must exist as a distinct
+    endpoint from /reset-password — license-server team relies on this
+    contract for the SAAS-ACTIVATION-TOKEN-CONTRACT."""
+    import inspect
+    from app import provision_api
+    src = inspect.getsource(provision_api)
+    assert "@provision_bp.route('/regenerate-activation-token'" in src, (
+        "Missing /regenerate-activation-token route — license-server team's "
+        "welcome-email mono-CTA flow depends on this endpoint per cross-repo "
+        "contract 2026-05-07."
+    )
+
+
+def test_provision_response_includes_activation_url_when_requested():
+    """When license-server passes include_activation_url:true in /api/provision,
+    the response must include activation_url + activation_expires_at, AND
+    suppress temporary_password (customer never sees a temp password in the
+    activation flow)."""
+    import inspect
+    from app import provision_api
+    src = inspect.getsource(provision_api.provision_tenant)
+    assert "include_activation_url" in src, (
+        "/api/provision must support include_activation_url flag"
+    )
+    assert "activation_url" in src, (
+        "Response payload must contain activation_url field"
+    )
+    assert "generate_activation_token" in src, (
+        "Must use the new generate_activation_token method (not the 30-min "
+        "password reset token)"
+    )
+
+
+def test_user_model_has_generate_activation_token():
+    """User model must expose generate_activation_token with default 48h
+    expiry — distinct semantically from the 30-minute password reset flow
+    even if both share the same DB column."""
+    from app.models import User
+    assert hasattr(User, 'generate_activation_token'), (
+        "User model missing generate_activation_token method"
+    )
+    import inspect
+    sig = inspect.signature(User.generate_activation_token)
+    assert 'expiry_hours' in sig.parameters
+    assert sig.parameters['expiry_hours'].default == 48

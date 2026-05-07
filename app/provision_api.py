@@ -10,14 +10,15 @@ Security:
 - Never exposed to end users
 
 Endpoints:
-- POST /api/provision             — Create new tenant (org + user + subscription)
-- POST /api/provision/upgrade     — Change subscription plan
-- POST /api/provision/cancel      — Cancel subscription (subscription-status flip only)
-- POST /api/provision/hard-delete — GDPR-style cascade delete (orphan zombie purge)
-- GET  /api/provision/status      — Check tenant status (single tenant)
-- POST /api/provision/reset-password — Reset tenant user password
-- GET  /api/provision/tenants     — List all tenants (for license-server admin UI)
-- GET  /api/provision/plans       — List all subscription plans
+- POST /api/provision                              — Create new tenant (org + user + subscription)
+- POST /api/provision/upgrade                      — Change subscription plan
+- POST /api/provision/cancel                       — Cancel subscription (subscription-status flip only)
+- POST /api/provision/hard-delete                  — GDPR-style cascade delete (orphan zombie purge)
+- POST /api/provision/regenerate-activation-token  — Refresh welcome-email activation URL
+- GET  /api/provision/status                       — Check tenant status (single tenant)
+- POST /api/provision/reset-password               — Reset tenant user password
+- GET  /api/provision/tenants                      — List all tenants (for license-server admin UI)
+- GET  /api/provision/plans                        — List all subscription plans
 """
 
 import hmac
@@ -314,6 +315,33 @@ def provision_tenant():
             }
         }
 
+        # SAAS-ACTIVATION-TOKEN contract (cross-repo with sentrikat-web,
+        # 2026-05-07): if license-server requests an activation token, we
+        # generate a long-lived (default 48h) password-reset-token-equivalent
+        # and return the activation_url. License-server then embeds this URL
+        # in the welcome email's mono-CTA "Set your password" button.
+        # Industry pattern: Linear, Vercel, Notion, Slack all do this.
+        if data.get('include_activation_url'):
+            expiry_hours = int(data.get('activation_expiry_hours') or 48)
+            # Cap at 7 days (anything longer is a security smell — orphan
+            # invites should be revoked, not eternally valid)
+            expiry_hours = min(max(expiry_hours, 1), 168)
+            token = user.generate_activation_token(expiry_hours=expiry_hours)
+            activation_url = f"{base_url.rstrip('/')}/reset-password?token={token}"
+            response_payload['tenant']['activation_url'] = activation_url
+            response_payload['tenant']['activation_expires_at'] = (
+                user.password_reset_expires.isoformat() + 'Z'
+                if user.password_reset_expires else None
+            )
+            # Suppress the temporary_password from the response when an
+            # activation flow is used — the customer never needs to know it.
+            response_payload['tenant']['temporary_password'] = None
+            response_payload['tenant']['must_change_password'] = False
+            logger.info(
+                f"Activation token issued for user={email} (id={user.id}), "
+                f"expiry={expiry_hours}h"
+            )
+
         # Persist idempotency cache entry (same transaction as the tenant
         # writes so retries never see partial state).
         if idem_setting_key:
@@ -482,6 +510,90 @@ def cancel_subscription():
         db.session.rollback()
         logger.exception(f"Failed to cancel subscription for org {org_id}: {e}")
         return jsonify({'error': 'Failed to cancel subscription'}), 500
+
+
+@provision_bp.route('/regenerate-activation-token', methods=['POST'])
+@limiter.limit("20/minute")
+@_require_provision_key
+def regenerate_activation_token():
+    """Generate a fresh activation token + URL for an existing tenant user.
+
+    Use case: license-server welcome email's original token expired (default
+    48h) and the customer asks for a new link, OR an admin invites a new
+    user to an existing tenant and needs a one-time set-password URL.
+
+    Distinct from /api/auth/request-password-reset which is end-user-driven
+    via web form. This is system-to-system (HMAC auth) and skips the
+    'rate limit per IP' that protects against enumeration.
+
+    Request body:
+        { email | organization_id | user_id, expiry_hours? (default 48, max 168) }
+
+    Response 200:
+        { activation_url, expires_at, user_id, email }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    email = (data.get('email') or '').strip().lower() or None
+    org_id = data.get('organization_id')
+    user_id = data.get('user_id')
+    expiry_hours = int(data.get('expiry_hours') or 48)
+    expiry_hours = min(max(expiry_hours, 1), 168)
+
+    if not (email or org_id or user_id):
+        return jsonify({'error': 'email, organization_id, or user_id is required'}), 400
+
+    # Resolve the target user
+    user = None
+    if user_id:
+        user = User.query.get(user_id)
+    elif email:
+        user = User.query.filter_by(email=email).first()
+    elif org_id:
+        # Org admin user: pick the first super_admin / org_admin in the org
+        user = User.query.filter_by(
+            organization_id=org_id, auth_type='local'
+        ).filter(User.role.in_(['super_admin', 'org_admin', 'admin'])).first()
+        if not user:
+            user = User.query.filter_by(organization_id=org_id, auth_type='local').first()
+
+    if not user:
+        return jsonify({'error': 'No matching tenant user found'}), 404
+
+    if user.auth_type != 'local':
+        return jsonify({
+            'error': 'User auth_type is not local — activation tokens are for password-based users only',
+            'auth_type': user.auth_type,
+        }), 400
+
+    try:
+        token = user.generate_activation_token(expiry_hours=expiry_hours)
+        base_url = (
+            data.get('base_url')
+            or request.host_url.rstrip('/')
+        )
+        activation_url = f"{base_url.rstrip('/')}/reset-password?token={token}"
+
+        logger.info(
+            f"Activation token regenerated for user={user.email} (id={user.id}), "
+            f"expiry={expiry_hours}h"
+        )
+        return jsonify({
+            'success': True,
+            'activation_url': activation_url,
+            'expires_at': (
+                user.password_reset_expires.isoformat() + 'Z'
+                if user.password_reset_expires else None
+            ),
+            'user_id': user.id,
+            'email': user.email,
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.exception(f"Failed to regenerate activation token: {e}")
+        return jsonify({'error': 'Failed to regenerate activation token', 'detail': str(e)[:200]}), 500
 
 
 @provision_bp.route('/hard-delete', methods=['POST'])
