@@ -249,3 +249,59 @@ def test_sla_save_toast_reflects_actual_outcome():
     assert "saved + ' SLA polic'" in text or "saved + ' SLA policies'" in text, (
         "saveSLAPolicies must report actual saved count"
     )
+
+
+# ============================================================================
+# Pattern B (2026-05-07): user role can mark OWN assignments resolved
+# ============================================================================
+
+
+def test_pattern_b_backend_allows_assignee_status_update():
+    """update_assignment must allow regular user to update their own
+    assignment (limited to status + resolution_notes)."""
+    src = (REPO_ROOT / 'app' / 'remediation_api.py').read_text()
+    # Decorator must NOT be @org_admin_required (we relaxed it)
+    func_match = re.search(
+        r"@bp\.route\('/api/remediation/assignments/<int:assignment_id>',\s*methods=\['PUT'\]\)\s*\n([@\w\s_]+)\ndef update_assignment",
+        src,
+    )
+    assert func_match, "update_assignment route not found"
+    decorators = func_match.group(1)
+    assert '@org_admin_required' not in decorators, (
+        "update_assignment must not use @org_admin_required (Pattern B allows assignee)"
+    )
+    # Body must check is_assignee
+    body_match = re.search(r"def update_assignment.*?(?=^@|^def )", src, re.DOTALL | re.MULTILINE)
+    assert body_match, "update_assignment body not extracted"
+    body = body_match.group(0)
+    assert 'is_assignee' in body, "Pattern B logic missing in update_assignment"
+    assert 'allowed_keys' in body, "Pattern B field whitelist missing"
+
+
+def test_pattern_b_frontend_renders_mark_resolved_for_assignee():
+    """assignments.html must render a Mark Resolved button when current
+    user is the assignee (and not admin)."""
+    text = (REPO_ROOT / 'app' / 'templates' / 'assignments.html').read_text()
+    assert 'isCurrentUserAssignee' in text, (
+        "isCurrentUserAssignee helper missing in assignments.html"
+    )
+    assert 'Mark Resolved' in text, (
+        "Mark Resolved button not rendered for assignee in assignments.html"
+    )
+    # currentUserEmail / currentUserUsername must be captured from /api/auth/status
+    assert 'currentUserEmail' in text and 'currentUserUsername' in text, (
+        "Pattern B identity capture missing in assignments.html"
+    )
+
+
+def test_risk_exceptions_panel_has_open_trigger():
+    """[09.X.2] regression: the exceptionsPanel was hidden with d-none and
+    NO UI button opened it. Must have at least one onclick that toggles it."""
+    text = DASHBOARD_HTML.read_text()
+    # Count occurrences of toggleExceptionsPanel — must be > 1 (one in the
+    # close button inside the panel + at least one external trigger).
+    occurrences = text.count('toggleExceptionsPanel')
+    assert occurrences >= 2, (
+        f"Risk Exceptions panel must have at least one external open trigger; "
+        f"found only {occurrences} reference(s) to toggleExceptionsPanel."
+    )

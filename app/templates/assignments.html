@@ -169,8 +169,13 @@
      * that via /api/auth/status and hide/disable the controls accordingly.
      */
 
-    const ASSIGN_ADMIN_ROLES = ['org_admin', 'super_admin'];
+    const ASSIGN_ADMIN_ROLES = ['org_admin', 'super_admin', 'admin', 'manager'];
     let canEditAssignments = false;
+    // Pattern B (2026-05-07): regular `user` role can mark its OWN assignments
+    // resolved. We capture identity so renderModalFooter() can compare against
+    // assignment.assigned_to.
+    let currentUserEmail = '';
+    let currentUserUsername = '';
     let currentPage = 1;
     const pageSize = 25;
 
@@ -181,10 +186,18 @@
             const data = await res.json();
             const role = (data.user && data.user.role) || '';
             canEditAssignments = ASSIGN_ADMIN_ROLES.includes(role) || data.user?.is_admin === true;
+            currentUserEmail = (data.user && data.user.email || '').toLowerCase().trim();
+            currentUserUsername = (data.user && data.user.username || '').toLowerCase().trim();
         } catch (_) { /* default read-only */ }
         if (!canEditAssignments) {
             document.getElementById('readonlyBanner').style.display = '';
         }
+    }
+
+    function isCurrentUserAssignee(assignment) {
+        const assignee = (assignment.assigned_to || '').toLowerCase().trim();
+        if (!assignee) return false;
+        return assignee === currentUserEmail || assignee === currentUserUsername;
     }
 
     function esc(s) {
@@ -461,6 +474,19 @@
               <button class="btn btn-outline-danger btn-sm assignment-action" data-action="delete" data-assignment-id="${a.id}">
                 <i class="bi bi-trash me-1"></i>Delete
               </button>
+              <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+            `;
+        } else if (isCurrentUserAssignee(a) && !['resolved', 'accepted_risk'].includes(a.status)) {
+            // Pattern B: assignee can self-mark their non-terminal assignment as resolved
+            footer.innerHTML = `
+              <div class="me-auto">
+                <span class="text-muted small fst-italic me-2">
+                  This assignment is yours — mark it resolved when fixed.
+                </span>
+                <button class="btn btn-success btn-sm assignment-action" data-action="status" data-assignment-id="${a.id}" data-status="resolved">
+                  <i class="bi bi-check2-circle me-1"></i>Mark Resolved
+                </button>
+              </div>
               <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
             `;
         } else {
