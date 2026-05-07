@@ -305,3 +305,29 @@ def test_risk_exceptions_panel_has_open_trigger():
         f"Risk Exceptions panel must have at least one external open trigger; "
         f"found only {occurrences} reference(s) to toggleExceptionsPanel."
     )
+
+
+def test_password_reset_update_uses_bool_param_not_int_literal():
+    """[AUTH-PWRESET] regression: must_change_password column is boolean
+    in PostgreSQL; the previous SQL literal `must_change_password = 0`
+    triggered DatatypeMismatch on Postgres (works on SQLite).
+
+    Discovered 2026-05-07 via cross-team sentrikat-web journey test on
+    SaaS prod: token check passed → UPDATE crashed → 500 sanitized →
+    frontend mismapped as 'Invalid token'. Customer journey blocked.
+
+    Fix: bind boolean as :must_change parameter so SQLAlchemy translates
+    to engine-native (FALSE on Postgres, 0 on SQLite)."""
+    auth_py = (REPO_ROOT / 'app' / 'auth.py').read_text()
+    assert "must_change_password = :must_change" in auth_py, (
+        "reset_password UPDATE must use parameterized bool, not int literal "
+        "(see 2026-05-07 cross-team bug — PostgreSQL strict type check)"
+    )
+    assert '"must_change": False' in auth_py or "'must_change': False" in auth_py, (
+        "must_change parameter must bind to Python False"
+    )
+    # Ensure the int literal regression hasn't crept back
+    assert '"    must_change_password = 0,"' not in auth_py, (
+        "Regression: 'must_change_password = 0' int literal returned. "
+        "Use parameterized bool (engine-portable)."
+    )
