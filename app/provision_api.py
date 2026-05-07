@@ -684,27 +684,108 @@ def hard_delete_tenant():
                 except Exception as e:
                     logger.debug("agent_api_keys pre-count failed (non-critical): %s", e)
 
-                # Stripe subscription bookkeeping is already handled by the
-                # license-server Stripe webhook BEFORE this endpoint is called.
-                # We just remove the SaaS-side row(s) here.
-                Subscription.query.filter_by(organization_id=org_id).delete(
-                    synchronize_session=False
-                )
+                # 2026-05-07 fix: previously we just called db.session.delete(org)
+                # and relied on Postgres FK ondelete='CASCADE'. That worked for
+                # tables that had CASCADE configured, but the codebase has 7
+                # FK references to organizations.id WITHOUT cascade
+                # (integrations_models.py, ldap_models.py, shared_views.py)
+                # plus user_organizations.user_id which lacks cascade too.
+                # SQLAlchemy autoflush during the cascade tries to set those
+                # to NULL → NotNullViolation → 500.
+                #
+                # Two-layer fix:
+                #   (a) no_autoflush: prevents premature flush of intermediate
+                #       state during the cascade walk
+                #   (b) explicit raw-SQL DELETE on the non-cascade tables FIRST
+                #       (mirroring the manual SQL workaround that the operator
+                #       runs by hand). Then db.session.delete(org) is safe.
+                #
+                # Long-term: an alembic migration adds proper ondelete='CASCADE'
+                # to those 7+10 FKs (todo [FK-CASCADE]). After that this
+                # explicit-pre-delete block becomes redundant but doesn't hurt.
+                from sqlalchemy import text as _sql_text
+                with db.session.no_autoflush:
+                    # Tables with org FK lacking ondelete='CASCADE'
+                    for tbl in (
+                        'import_queue',
+                        'integrations',
+                        'agent_registrations',
+                        'ldap_group_mappings',
+                        'ldap_sync_logs',
+                        'ldap_audit_logs',
+                        'shared_views',
+                    ):
+                        try:
+                            db.session.execute(
+                                _sql_text(f"DELETE FROM {tbl} WHERE organization_id = :oid"),
+                                {'oid': org_id},
+                            )
+                        except Exception as e:
+                            logger.debug(
+                                "Pre-cascade delete from %s failed (table may not exist): %s",
+                                tbl, e,
+                            )
+                    # user_organizations.user_id lacks cascade — clear m2m for
+                    # all users in this org BEFORE the org cascade nullifies
+                    # the user_id column (would violate NOT NULL).
+                    try:
+                        db.session.execute(
+                            _sql_text(
+                                "DELETE FROM user_organizations "
+                                "WHERE user_id IN (SELECT id FROM users WHERE organization_id = :oid)"
+                            ),
+                            {'oid': org_id},
+                        )
+                    except Exception as e:
+                        logger.debug(
+                            "user_organizations cleanup failed (non-critical): %s", e,
+                        )
+                    # Also clear m2m where the org itself is referenced (safe with cascade
+                    # but explicit to be deterministic on PostgreSQL strict mode)
+                    try:
+                        db.session.execute(
+                            _sql_text("DELETE FROM user_organizations WHERE organization_id = :oid"),
+                            {'oid': org_id},
+                        )
+                    except Exception as e:
+                        logger.debug("user_organizations org cleanup: %s", e)
 
-                # Hard-delete: cascade via FK ondelete='CASCADE' on
-                # users.organization_id, subscriptions.organization_id, and
-                # all *_organization_id columns (~25 dependent tables).
-                db.session.delete(org)
-                deleted['organizations'] = 1
+                    # Subscriptions: redundant with cascade but leftover from
+                    # earlier code; kept as defense.
+                    Subscription.query.filter_by(organization_id=org_id).delete(
+                        synchronize_session=False
+                    )
+
+                    # Now the org-level cascade is unblocked: users +
+                    # subscriptions + assets + vulnerability_matches +
+                    # agent_api_keys + ~20 other org-scoped tables go via FK
+                    # ondelete='CASCADE'.
+                    db.session.delete(org)
+                    deleted['organizations'] = 1
 
         # Email-only path: also catch any orphan User row carrying that
         # email (e.g., user without proper org link, or m2m-only user
-        # whose primary org has been deleted in a prior call).
+        # whose primary org has been deleted in a prior call). Same
+        # no_autoflush + explicit m2m cleanup pattern as above.
         if email:
-            for orphan in User.query.filter_by(email=email).all():
-                if orphan.id:
-                    db.session.delete(orphan)
-                    deleted['users'] += 1
+            from sqlalchemy import text as _sql_text2
+            with db.session.no_autoflush:
+                orphans = User.query.filter_by(email=email).all()
+                if orphans:
+                    orphan_ids = [u.id for u in orphans if u.id]
+                    if orphan_ids:
+                        try:
+                            db.session.execute(
+                                _sql_text2(
+                                    "DELETE FROM user_organizations WHERE user_id = ANY(:ids)"
+                                ),
+                                {'ids': orphan_ids},
+                            )
+                        except Exception as e:
+                            logger.debug("orphan user_organizations cleanup: %s", e)
+                    for orphan in orphans:
+                        db.session.delete(orphan)
+                        deleted['users'] += 1
 
         db.session.commit()
 

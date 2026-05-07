@@ -203,3 +203,40 @@ def test_user_model_has_generate_activation_token():
     sig = inspect.signature(User.generate_activation_token)
     assert 'expiry_hours' in sig.parameters
     assert sig.parameters['expiry_hours'].default == 48
+
+
+def test_hard_delete_handles_non_cascade_fk_via_explicit_delete():
+    """[HARD-DELETE-FK] regression: 2026-05-07 bug where /hard-delete returned
+    500 NotNullViolation because SQLAlchemy autoflush hit FK references that
+    lack ondelete='CASCADE' (integrations_models, ldap_models, shared_views,
+    user_organizations.user_id).
+
+    Fix verified by source inspection: the endpoint must (a) wrap deletes in
+    db.session.no_autoflush, AND (b) explicitly DELETE from the non-cascade
+    tables BEFORE calling db.session.delete(org).
+    """
+    import inspect
+    from app import provision_api
+    src = inspect.getsource(provision_api.hard_delete_tenant)
+
+    # Defense layer 1: no_autoflush block must be present
+    assert 'no_autoflush' in src, (
+        "hard_delete_tenant must wrap deletes in db.session.no_autoflush "
+        "to prevent premature flush of intermediate state during cascade walk"
+    )
+
+    # Defense layer 2: explicit DELETE on each known non-cascade table
+    for tbl in (
+        'import_queue',
+        'integrations',
+        'agent_registrations',
+        'ldap_group_mappings',
+        'ldap_sync_logs',
+        'ldap_audit_logs',
+        'shared_views',
+        'user_organizations',
+    ):
+        assert tbl in src, (
+            f"hard_delete_tenant must explicitly DELETE from {tbl!r} "
+            f"before db.session.delete(org) — its FK lacks ondelete='CASCADE'"
+        )
