@@ -5479,7 +5479,12 @@
         function closeSecuritySettings() {
             const modalEl = document.getElementById('securitySettingsModal');
 
-            if (securityModal) {
+            // Defensive: only call hide() if Bootstrap modal still has its
+            // internal _element reference. After certain failure paths
+            // (e.g. CSRF rejection that triggers showAlert overlay),
+            // _element gets nulled and hide() throws TypeError. Cleanup
+            // proceeds via the setTimeout regardless.
+            if (securityModal && securityModal._element && modalEl) {
                 try {
                     securityModal.hide();
                 } catch (e) {}
@@ -5570,7 +5575,10 @@
             const setupDiv = document.getElementById('2faSetup');
 
             try {
-                const response = await fetch('/api/auth/2fa/setup', { method: 'POST' });
+                const response = await fetch('/api/auth/2fa/setup', {
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': getCSRFToken() }
+                });
                 const data = await response.json();
 
                 if (data.success) {
@@ -5606,7 +5614,10 @@
             try {
                 const response = await fetch('/api/auth/2fa/verify', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCSRFToken()
+                    },
                     body: JSON.stringify({ code })
                 });
 
@@ -5641,7 +5652,10 @@
             try {
                 const response = await fetch('/api/auth/2fa/disable', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCSRFToken()
+                    },
                     body: JSON.stringify({ password })
                 });
 
@@ -5720,7 +5734,10 @@
             try {
                 const response = await fetch('/api/auth/change-password', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCSRFToken()
+                    },
                     body: JSON.stringify({
                         current_password: currentPassword,
                         new_password: newPassword
