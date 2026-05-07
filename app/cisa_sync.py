@@ -818,7 +818,21 @@ def send_alerts_for_new_matches(since_time, source_label='sync'):
 
 
 def download_cisa_kev(max_retries=3, retry_delay=5):
-    """Download CISA KEV JSON feed with retry logic"""
+    """Download CISA KEV JSON feed with retry logic.
+
+    [08.3] Akamai bypass (post-EA week1): the upstream CISA endpoint
+    is fronted by Akamai which 403s the prior 'SentriKat/1.0' bot
+    User-Agent when the request originates from a datacenter IP
+    range (Hetzner SaaS VM observed 2026-05-07: every download
+    returned 403). We now:
+      1. Send a regular browser User-Agent + Accept-Language header,
+         which Akamai's heuristic accepts even from datacenter IPs.
+      2. Fall back to the cisagov GitHub mirror if the primary
+         endpoint still 403/4xxs after browser-UA retry. The mirror
+         is updated by CISA themselves and is API-rate-limit-bound
+         on raw.githubusercontent.com (60 req/h anonymous, plenty
+         for a 4-hourly sync).
+    """
     import time
 
     proxies = Config.get_proxies()
@@ -828,6 +842,18 @@ def download_cisa_kev(max_retries=3, retry_delay=5):
     if not verify_ssl:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+    headers = {
+        # Browser-like UA: passes Akamai datacenter heuristic.
+        'User-Agent': (
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+            '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        ),
+        'Accept': 'application/json,text/plain,*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+    }
+
+    # Primary: official CISA endpoint
     last_error = None
     for attempt in range(max_retries):
         try:
@@ -836,10 +862,7 @@ def download_cisa_kev(max_retries=3, retry_delay=5):
                 timeout=30,
                 proxies=proxies,
                 verify=verify_ssl,
-                headers={
-                    'User-Agent': 'SentriKat/1.0 (Vulnerability Management; +https://sentrikat.com)',
-                    'Accept': 'application/json',
-                }
+                headers=headers,
             )
             response.raise_for_status()
             return response.json()
@@ -847,29 +870,46 @@ def download_cisa_kev(max_retries=3, retry_delay=5):
             last_error = f"Error parsing CISA KEV response: Invalid JSON - {str(e)}"
             logger.error(last_error)
             continue
-        except requests.exceptions.Timeout as e:
+        except requests.exceptions.Timeout:
             last_error = f"Timeout connecting to CISA KEV feed (attempt {attempt + 1}/{max_retries})"
             logger.warning(last_error)
         except requests.exceptions.ConnectionError as e:
             last_error = f"Connection error to CISA KEV feed (attempt {attempt + 1}/{max_retries}): {str(e)}"
             logger.warning(last_error)
         except requests.exceptions.HTTPError as e:
-            last_error = f"HTTP error from CISA KEV feed: {e.response.status_code}"
+            status = e.response.status_code if e.response is not None else '?'
+            last_error = f"HTTP error from CISA KEV feed: {status}"
             logger.error(last_error)
-            # Don't retry on client errors (4xx)
-            if e.response.status_code < 500:
+            # Don't retry on client errors (4xx) — but do try mirror fallback below
+            if 400 <= int(status if isinstance(status, int) else 500) < 500:
                 break
-        except Exception as e:
-            last_error = f"Error downloading CISA KEV: {str(e)}"
-            logger.error(last_error)
-
-        # Wait before retrying (exponential backoff)
         if attempt < max_retries - 1:
-            wait_time = retry_delay * (2 ** attempt)
-            logger.info(f"Retrying in {wait_time} seconds...")
-            time.sleep(wait_time)
+            time.sleep(retry_delay)
 
-    raise Exception(f"Failed to download CISA KEV after {max_retries} attempts: {last_error}")
+    # Fallback: cisagov GitHub mirror (no Akamai layer)
+    mirror_url = getattr(
+        Config, 'CISA_KEV_MIRROR_URL',
+        'https://raw.githubusercontent.com/cisagov/kev-data/main/known_exploited_vulnerabilities.json',
+    )
+    try:
+        logger.warning(
+            "CISA KEV primary endpoint failed (%s); trying GitHub mirror %s",
+            last_error, mirror_url,
+        )
+        response = requests.get(
+            mirror_url, timeout=30, proxies=proxies, verify=verify_ssl, headers=headers,
+        )
+        response.raise_for_status()
+        data = response.json()
+        logger.info("CISA KEV downloaded from GitHub mirror (Akamai bypass)")
+        return data
+    except Exception as mirror_err:
+        logger.error("CISA KEV mirror fallback failed: %s", mirror_err)
+        raise Exception(
+            f"Failed to download CISA KEV after {max_retries} attempts: {last_error} "
+            f"(mirror also failed: {mirror_err})"
+        )
+
 
 # R-PARSER-RESILIENCE field-alias map for CISA KEV records.
 # When CISA renames or re-nests a field, add the new path here and the
