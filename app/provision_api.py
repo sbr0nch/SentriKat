@@ -12,7 +12,8 @@ Security:
 Endpoints:
 - POST /api/provision             — Create new tenant (org + user + subscription)
 - POST /api/provision/upgrade     — Change subscription plan
-- POST /api/provision/cancel      — Cancel subscription
+- POST /api/provision/cancel      — Cancel subscription (subscription-status flip only)
+- POST /api/provision/hard-delete — GDPR-style cascade delete (orphan zombie purge)
 - GET  /api/provision/status      — Check tenant status (single tenant)
 - POST /api/provision/reset-password — Reset tenant user password
 - GET  /api/provision/tenants     — List all tenants (for license-server admin UI)
@@ -481,6 +482,142 @@ def cancel_subscription():
         db.session.rollback()
         logger.exception(f"Failed to cancel subscription for org {org_id}: {e}")
         return jsonify({'error': 'Failed to cancel subscription'}), 500
+
+
+@provision_bp.route('/hard-delete', methods=['POST'])
+@limiter.limit("10/minute")
+@_require_provision_key
+def hard_delete_tenant():
+    """GDPR-style hard delete of a tenant + all dependent rows.
+
+    Distinct from /cancel which only flips subscription status (Stripe-side
+    workflow). /hard-delete is for:
+      - GDPR right-to-erasure
+      - Test/admin reset (clear orphan zombie users that would block re-signup
+        with a 409 on email conflict — the original 2026-05-07 driver)
+      - Abuse / fraud account purge
+
+    Contract (formalized in sentrikat-web docs-internal/SAAS-HARD-DELETE-CONTRACT.md):
+      Request:  { email?, organization_id?, reason? }
+                At least one of {email, organization_id} required.
+      Response 200: { deleted: { users, organizations, subscriptions, ... }, reason }
+      Idempotent: 200 even if already deleted (deleted counts = 0).
+      Atomic: single transaction; on failure, rollback and return 500 with no partial state.
+      Cascade: org deletion fires Postgres ondelete='CASCADE' on subscriptions,
+               users, assets, vulnerability_matches, agent_api_keys, etc.
+
+    Auth: same X-Provision-Key header as the rest of the bridge.
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    email = (data.get('email') or '').strip().lower() or None
+    org_id = data.get('organization_id')
+    reason = (data.get('reason') or 'unspecified').strip()[:200]
+
+    if not email and not org_id:
+        return jsonify({'error': 'Either email or organization_id is required'}), 400
+
+    # Resolve org_id from email if needed
+    resolved_via_email = False
+    if not org_id and email:
+        user_lookup = User.query.filter_by(email=email).first()
+        if user_lookup and user_lookup.organization_id:
+            org_id = user_lookup.organization_id
+            resolved_via_email = True
+
+    deleted = {
+        'users': 0,
+        'organizations': 0,
+        'subscriptions': 0,
+        'assets': 0,
+        'vulnerability_matches': 0,
+        'agent_api_keys': 0,
+    }
+
+    try:
+        # Pre-count for response (best-effort; cascade does the actual work)
+        if org_id:
+            org = Organization.query.get(org_id)
+            if org:
+                # Counts BEFORE delete so the response is informative
+                deleted['users'] = User.query.filter_by(organization_id=org_id).count()
+
+                deleted['subscriptions'] = Subscription.query.filter_by(organization_id=org_id).count()
+                deleted['assets'] = Asset.query.filter_by(organization_id=org_id).count()
+
+                # vulnerability_matches via product_organizations (best effort)
+                try:
+                    from app.models import VulnerabilityMatch, product_organizations
+                    from sqlalchemy import select
+                    org_product_ids = db.session.execute(
+                        select(product_organizations.c.product_id).where(
+                            product_organizations.c.organization_id == org_id
+                        )
+                    ).scalars().all()
+                    if org_product_ids:
+                        deleted['vulnerability_matches'] = VulnerabilityMatch.query.filter(
+                            VulnerabilityMatch.product_id.in_(org_product_ids)
+                        ).count()
+                except Exception as e:
+                    logger.debug("vulnerability_match pre-count failed (non-critical): %s", e)
+
+                # agent_api_keys (count if model is present)
+                try:
+                    from app.models import AgentApiKey
+                    deleted['agent_api_keys'] = AgentApiKey.query.filter_by(
+                        organization_id=org_id,
+                    ).count()
+                except Exception as e:
+                    logger.debug("agent_api_keys pre-count failed (non-critical): %s", e)
+
+                # Stripe subscription bookkeeping is already handled by the
+                # license-server Stripe webhook BEFORE this endpoint is called.
+                # We just remove the SaaS-side row(s) here.
+                Subscription.query.filter_by(organization_id=org_id).delete(
+                    synchronize_session=False
+                )
+
+                # Hard-delete: cascade via FK ondelete='CASCADE' on
+                # users.organization_id, subscriptions.organization_id, and
+                # all *_organization_id columns (~25 dependent tables).
+                db.session.delete(org)
+                deleted['organizations'] = 1
+
+        # Email-only path: also catch any orphan User row carrying that
+        # email (e.g., user without proper org link, or m2m-only user
+        # whose primary org has been deleted in a prior call).
+        if email:
+            for orphan in User.query.filter_by(email=email).all():
+                if orphan.id:
+                    db.session.delete(orphan)
+                    deleted['users'] += 1
+
+        db.session.commit()
+
+        logger.info(
+            "Hard delete completed: org_id=%s email=%s resolved_via_email=%s "
+            "reason=%s deleted=%s",
+            org_id, email, resolved_via_email, reason, deleted,
+        )
+        return jsonify({
+            'success': True,
+            'deleted': deleted,
+            'reason': reason,
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        logger.exception(
+            "Hard delete failed: org_id=%s email=%s reason=%s: %s",
+            org_id, email, reason, e,
+        )
+        return jsonify({
+            'error': 'Hard delete failed (atomic rollback)',
+            'detail': str(e)[:200],
+            'reason': reason,
+        }), 500
 
 
 @provision_bp.route('/status', methods=['GET'])

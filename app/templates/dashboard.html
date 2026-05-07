@@ -575,9 +575,6 @@
                     <option value="expired">Expired</option>
                     <option value="revoked">Revoked</option>
                 </select>
-                <button class="btn btn-sm btn-primary py-0 px-2" onclick="openRiskExceptionModal()" title="Create new risk exception">
-                    <i class="bi bi-plus-lg"></i> Add
-                </button>
                 <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="toggleExceptionsPanel()" title="Close">
                     <i class="bi bi-x-lg"></i>
                 </button>
@@ -3680,6 +3677,10 @@
                 const m = bootstrap.Modal.getInstance(document.getElementById('riskExceptionModal'));
                 if (m) m.hide();
                 showToast('Risk exception created', 'success');
+                // Refresh dashboard CVE list — excepted matches must drop off /
+                // get the EXCEPTED badge so the user sees the action take effect.
+                if (typeof loadGroupedVulnerabilities === 'function') loadGroupedVulnerabilities();
+                if (typeof loadDashboardStats === 'function') loadDashboardStats();
                 if (!document.getElementById('exceptionsPanel').classList.contains('d-none')) loadExceptionsTable();
             } else {
                 const err = await resp.json().catch(() => ({}));

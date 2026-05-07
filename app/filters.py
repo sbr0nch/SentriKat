@@ -999,4 +999,13 @@ def get_filtered_vulnerabilities(filters=None):
     # Order by match creation date (newest first)
     query = query.order_by(VulnerabilityMatch.created_at.desc())
 
-    return query.all()
+    results = query.all()
+
+    # [09.X.3] Suppress matches covered by an active RiskException so the
+    # dashboard reflects the action immediately (without waiting for the
+    # next sync to recompute matches via match_vulnerabilities_to_products).
+    # _has_active_risk_exception is the same helper used during sync.
+    if results:
+        results = [m for m in results if not _has_active_risk_exception(m.vulnerability, m.product)]
+
+    return results
