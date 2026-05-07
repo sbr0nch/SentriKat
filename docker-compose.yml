@@ -139,8 +139,16 @@ services:
       - DB_STATEMENT_TIMEOUT=${DB_STATEMENT_TIMEOUT:-60000}
       # === MANAGED EMAIL — RESEND (SaaS only) ===
       - RESEND_API_KEY=${RESEND_API_KEY:-}
-      - EMAIL_FROM_ADDRESS=${EMAIL_FROM_ADDRESS:-noreply@alerts.sentrikat.com}
-      - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-SentriKat Alerts}
+      # Default: root domain noreply@sentrikat.com (verified on Resend).
+      # NOTE 2026-05-07: 'noreply@alerts.sentrikat.com' was the previous
+      # default but the subdomain is NOT verified on Resend → all
+      # transactional emails (forgot-password, alerts, 2FA recovery)
+      # silently failed with 'domain not verified'. Move to root domain
+      # which IS verified. Re-introduce a dedicated subdomain (e.g.
+      # alerts.sentrikat.com) only when launching a separate marketing
+      # mailing flow that needs reputation isolation from transactional.
+      - EMAIL_FROM_ADDRESS=${EMAIL_FROM_ADDRESS:-noreply@sentrikat.com}
+      - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-SentriKat}
       - RESEND_WEBHOOK_SECRET=${RESEND_WEBHOOK_SECRET:-}
       # === SMTP / EMAIL (on-premise, can also be configured via UI) ===
       - SMTP_HOST=${SMTP_HOST:-}
