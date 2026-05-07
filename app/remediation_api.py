@@ -650,17 +650,53 @@ def create_assignment():
 
 @bp.route('/api/remediation/assignments/<int:assignment_id>', methods=['PUT'])
 @login_required
-@org_admin_required
 def update_assignment(assignment_id):
-    """Update a remediation assignment (change status, add notes, etc)."""
+    """Update a remediation assignment.
+
+    Authorization (Pattern B, 2026-05-07):
+    - org_admin / super_admin / manager: full update on any assignment in org
+    - regular user: may update ONLY their own assignment (assigned_to matches
+      their email/username) and ONLY the fields {status, resolution_notes}.
+      This enables the "user fixes the issue and marks it resolved" workflow
+      that vulnerability-management customers expect (JIRA/ServiceNow pattern).
+    """
     org_id = session.get('organization_id')
     assignment = RemediationAssignment.query.filter_by(
         id=assignment_id, organization_id=org_id
     ).first_or_404()
 
+    # Permission check
+    from app.auth import _safe_get_user, AUTH_ENABLED
+    is_privileged = True
+    is_assignee = False
+    current_user_obj = None
+    if AUTH_ENABLED:
+        current_user_obj = _safe_get_user(session.get('user_id'))
+        if not current_user_obj:
+            return jsonify({'error': 'User not found'}), 401
+        role = (current_user_obj.role or '').lower()
+        is_privileged = role in ('super_admin', 'admin', 'org_admin', 'manager')
+        # Match by email (canonical) OR username (legacy assigned_to format)
+        assignee_value = (assignment.assigned_to or '').strip().lower()
+        is_assignee = bool(assignee_value) and (
+            assignee_value == (current_user_obj.email or '').strip().lower()
+            or assignee_value == (current_user_obj.username or '').strip().lower()
+        )
+        if not is_privileged and not is_assignee:
+            return jsonify({'error': 'Insufficient permissions'}), 403
+
     data = request.get_json()
     if not data:
         return jsonify({'error': 'No data provided'}), 400
+
+    # Pattern B: assignee-only users can update only status + resolution_notes
+    if not is_privileged and is_assignee:
+        allowed_keys = {'status', 'resolution_notes'}
+        rejected = [k for k in data.keys() if k not in allowed_keys]
+        if rejected:
+            return jsonify({
+                'error': f'Assignee can only update {sorted(allowed_keys)}; rejected: {rejected}',
+            }), 403
 
     # M3: enforce assignment state machine.
     # Terminal states (resolved, accepted_risk) cannot transition back to

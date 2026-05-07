@@ -497,6 +497,18 @@
                     <div class="text-center text-muted py-2 small">Loading...</div>
                 </div>
             </div>
+            <!-- Risk Exceptions Summary trigger ([09.X.2] fix 2026-05-07: panel was hidden d-none with no UI to open it) -->
+            <div class="card mt-2">
+                <div class="card-header py-2 d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-shield-exclamation me-2"></i>Risk Exceptions</span>
+                    <button class="btn btn-sm btn-outline-primary py-0 px-2" onclick="toggleExceptionsPanel(); loadExceptionsTable();" title="View all risk exceptions">
+                        <i class="bi bi-list-ul"></i>
+                    </button>
+                </div>
+                <div class="card-body py-2 small text-muted" id="exceptionsSummary">
+                    Click to view active risk exceptions
+                </div>
+            </div>
         </div>
     </div>
 
