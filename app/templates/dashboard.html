@@ -575,6 +575,9 @@
                     <option value="expired">Expired</option>
                     <option value="revoked">Revoked</option>
                 </select>
+                <button class="btn btn-sm btn-primary py-0 px-2" onclick="openRiskExceptionModal()" title="Create new risk exception">
+                    <i class="bi bi-plus-lg"></i> Add
+                </button>
                 <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="toggleExceptionsPanel()" title="Close">
                     <i class="bi bi-x-lg"></i>
                 </button>
@@ -4602,6 +4605,9 @@
                                 </button>`
                             }
                             ${trackerBtn}
+                            <button class="btn btn-sm btn-outline-warning py-0 px-2" onclick="openRiskExceptionModal(${matchIds[0] || 'null'}, '${escapeHtml(vuln.cve_id).replace(/'/g, "\\'")}', null, '${escapeHtml(vuln.vulnerability_name).replace(/'/g, "\\'")}')" title="Create risk exception (suppress this CVE with justification + expiry)">
+                                <i class="bi bi-shield-exclamation me-1"></i>Risk Exception
+                            </button>
                         </div>
                         <div class="btn-group">
                             <a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(vuln.cve_id)}" target="_blank" class="btn btn-sm btn-outline-primary py-0 px-2">
