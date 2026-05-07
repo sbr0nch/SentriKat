@@ -979,6 +979,16 @@ def reset_password():
         # finds password_reset_token = NULL and rowcount == 0. We deliberately
         # do NOT use RETURNING to stay portable across SQLite (tests) and
         # PostgreSQL (prod); rowcount is sufficient to detect the winner.
+        # NOTE 2026-05-07: previously this UPDATE used the int literal
+        # `must_change_password = 0` which works on SQLite (tests) but
+        # PostgreSQL strict type mode rejects with:
+        #   DatatypeMismatch: column "must_change_password" is of type
+        #   boolean but expression is of type integer
+        # → token check passed, UPDATE crashed on SET, 500 sanitized to
+        # the frontend which mis-mapped it as 'Invalid or expired reset
+        # token'. Customer journey blocked. Fix: bind the boolean as a
+        # parameter so SQLAlchemy translates to the engine-native
+        # representation (FALSE on PostgreSQL, 0 on SQLite).
         result = db.session.execute(
             text(
                 "UPDATE users "
@@ -986,13 +996,18 @@ def reset_password():
                 "    password_reset_token = NULL, "
                 "    password_reset_expires = NULL, "
                 "    password_changed_at = :now, "
-                "    must_change_password = 0, "
+                "    must_change_password = :must_change, "
                 "    failed_login_attempts = 0, "
                 "    locked_until = NULL "
                 "WHERE password_reset_token = :token_hash "
                 "  AND password_reset_expires > :now"
             ),
-            {"ph": new_hash, "now": now, "token_hash": token_hash},
+            {
+                "ph": new_hash,
+                "now": now,
+                "token_hash": token_hash,
+                "must_change": False,
+            },
         )
 
         if result.rowcount == 0:
