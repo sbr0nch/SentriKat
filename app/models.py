@@ -1382,17 +1382,41 @@ class User(db.Model):
         self.totp_secret = None
         self.totp_enabled = False
 
-    def generate_password_reset_token(self):
-        """Generate a secure password reset token, set expiry to 30 minutes, save to DB, return token.
-        The token is hashed (SHA-256) before storage so a DB compromise doesn't expose valid tokens."""
+    def generate_password_reset_token(self, expiry_minutes=30):
+        """Generate a secure password reset token, save to DB, return token.
+
+        Default expiry is 30 minutes (forgot-password recovery flow).
+        Pass a longer expiry_minutes for activation-token flows where the
+        user needs more time to act on the welcome email (industry standard
+        for activation links is 24-48h — see also generate_activation_token).
+
+        The token is hashed (SHA-256) before storage so a DB compromise
+        doesn't expose valid tokens.
+        """
         import secrets
         import hashlib
         from datetime import timedelta
         token = secrets.token_urlsafe(48)
         self.password_reset_token = hashlib.sha256(token.encode()).hexdigest()
-        self.password_reset_expires = datetime.utcnow() + timedelta(minutes=30)
+        self.password_reset_expires = datetime.utcnow() + timedelta(minutes=expiry_minutes)
         db.session.commit()
         return token
+
+    def generate_activation_token(self, expiry_hours=48):
+        """Generate a longer-lived token for the welcome-email activation flow.
+
+        Distinct from password reset semantically (welcome onboarding, not
+        password recovery), but reuses the same DB column / verification
+        machinery — they're functionally the same: a one-time token that
+        lets the user set a new password without knowing the current one.
+
+        Industry standard: 24-72h expiry. Default 48h to give customers
+        comfortable time to act on the welcome email.
+
+        Returns the plaintext token. Caller embeds it in the URL passed to
+        license-server which puts it in the welcome email's mono-CTA button.
+        """
+        return self.generate_password_reset_token(expiry_minutes=expiry_hours * 60)
 
     @classmethod
     def verify_password_reset_token(cls, token):
