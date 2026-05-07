@@ -13,6 +13,8 @@ Run:
     pytest tests/test_audit_fixes_post_ea_week1.py -v
 """
 import json
+from datetime import datetime
+
 import pytest
 
 
@@ -160,6 +162,10 @@ def test_f7_parse_and_store_resets_stale_kev_flag(db_session):
         cve_id='CVE-2025-AAAA',
         vendor_project='Acme',
         product='Widget',
+        vulnerability_name='Widget Bug',
+        date_added=datetime(2025, 1, 1).date(),
+        short_description='widget',
+        required_action='patch',
         is_actively_exploited=True,
         source='cisa_kev',
         epss_percentile=0.5,  # not high enough to keep True via EPSS
@@ -168,6 +174,10 @@ def test_f7_parse_and_store_resets_stale_kev_flag(db_session):
         cve_id='CVE-2025-BBBB',
         vendor_project='Acme',
         product='Gizmo',
+        vulnerability_name='Gizmo Bug',
+        date_added=datetime(2025, 1, 1).date(),
+        short_description='gizmo',
+        required_action='patch',
         is_actively_exploited=True,
         source='cisa_kev',
         epss_percentile=0.5,
@@ -177,6 +187,10 @@ def test_f7_parse_and_store_resets_stale_kev_flag(db_session):
         cve_id='CVE-2025-CCCC',
         vendor_project='Acme',
         product='Doodad',
+        vulnerability_name='Doodad Bug',
+        date_added=datetime(2025, 1, 1).date(),
+        short_description='doodad',
+        required_action='patch',
         is_actively_exploited=True,
         source='cisa_kev',
         epss_percentile=0.97,
@@ -186,6 +200,10 @@ def test_f7_parse_and_store_resets_stale_kev_flag(db_session):
         cve_id='CVE-2025-DDDD',
         vendor_project='Acme',
         product='Whatsit',
+        vulnerability_name='Whatsit Bug',
+        date_added=datetime(2025, 1, 1).date(),
+        short_description='whatsit',
+        required_action='patch',
         is_actively_exploited=True,
         source='cisa_kev+euvd',
         epss_percentile=0.3,

@@ -155,7 +155,12 @@ def _get_dependency_components(org_id):
         for scan in scans:
             try:
                 results = scan.results.all() if hasattr(scan.results, 'all') else list(scan.results)
-            except Exception:
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "SBOM scan.results enumeration failed for scan id=%s: %s",
+                    getattr(scan, 'id', '?'), e,
+                )
                 results = []
             for row in results:
                 ref = _build_dep_bom_ref(row)

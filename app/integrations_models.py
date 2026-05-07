@@ -63,11 +63,22 @@ class Integration(db.Model):
             from app.encryption import decrypt_value
             decrypted = decrypt_value(self.config_encrypted)
             return json.loads(decrypted)
-        except Exception:
-            # Fallback to unencrypted (for migration)
+        except Exception as e:
+            # Fallback to unencrypted (for migration). Log because a recurring
+            # decrypt failure here would silently downgrade to plaintext-config
+            # mode, which the integration owner must be aware of.
+            import logging
+            logging.getLogger(__name__).warning(
+                "Integration config decrypt failed for id=%s, using fallback: %s",
+                getattr(self, 'id', '?'), e,
+            )
             try:
                 return json.loads(self.config_encrypted)
-            except (json.JSONDecodeError, TypeError, ValueError):
+            except (json.JSONDecodeError, TypeError, ValueError) as parse_err:
+                logging.getLogger(__name__).warning(
+                    "Integration config fallback parse failed for id=%s: %s",
+                    getattr(self, 'id', '?'), parse_err,
+                )
                 return {}
 
     def set_config(self, config_dict):

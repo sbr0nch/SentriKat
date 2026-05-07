@@ -128,7 +128,7 @@
 
     <p class="text-muted small text-end">
         Generated at <span id="generatedAt">—</span> ·
-        <a href="/api/admin/health-summary" target="_blank">raw JSON</a>
+        <a href="#" id="rawJsonLink" onclick="openHealthSummaryJson(event)">raw JSON</a>
     </p>
 </div>
 
@@ -221,6 +221,22 @@ function refreshHealthSummary() {
             document.getElementById('overallStatusLabel').textContent = 'Failed to load health data';
             document.getElementById('overallStatusSignals').textContent = err.message || String(err);
         });
+}
+
+function openHealthSummaryJson(ev) {
+    if (ev) ev.preventDefault();
+    fetch('/api/admin/health-summary', {credentials: 'same-origin', headers: {'Accept': 'application/json'}})
+        .then(r => {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
+        .then(data => {
+            const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank');
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+        })
+        .catch(err => alert('Failed to fetch raw JSON: ' + (err.message || err)));
 }
 
 document.addEventListener('DOMContentLoaded', refreshHealthSummary);

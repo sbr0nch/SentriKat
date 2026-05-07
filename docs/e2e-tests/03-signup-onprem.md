@@ -3067,3 +3067,57 @@ docker exec sentrikat sh -c "wc -l /var/log/sentrikat/*.log"   # se 'test diagno
 **Deployment scope**: 🏢 on-prem (presumibile anche ☁️ SaaS, da verificare separatamente)
 **Cluster**: blocca audit completo di tutti i fix che dipendono da log entry per dimostrarsi "verified".
 
+
+---
+
+## W3 — Fresh install wizard verification protocol (2026-05-07)
+
+> Da eseguire dall'utente sulla **PC casa testlab** dopo i merge PR #410-#416. Verifica che le 3 HIGH `[03.6.3]` `[03.6.3.b]` `[03.6.7]` siano effettivamente fix-verified su un fresh install **simulando un customer EA**.
+
+### Pre-flight
+
+```powershell
+# Da C:\SentriKat\v1.0.0-beta.6\testlab\
+docker compose -f docker-compose.testlab.yml down -v
+cd ..
+docker compose down -v
+git checkout main; git pull origin main   # essere su tip aggiornato
+docker compose build --no-cache
+docker compose up -d
+docker compose ps    # verifica sentrikat + sentrikat-db + sentrikat-nginx healthy
+```
+
+Aspetta ~30s che migrations completino (`docker compose logs sentrikat | grep -i alembic | tail`).
+
+### Step-by-step protocol
+
+| # | Azione | Atteso | Bug-ID se fallisce |
+|---|---|---|---|
+| 1 | Apri `http://localhost/setup` in browser **incognito** | Card wizard step 1 (Welcome) | regressione first-run detection |
+| 2 | Click `Next →` | Step 2 Organization form | — |
+| 3 | Compila org name + slug + admin email + click `Next →` (verifica label NON è `Create`) | Step 3 Admin Account | `[03.6.5]` regressione label |
+| 4 | Compila admin password (≥8 char, mix) + Confirm + click `Create Admin →` | Step 4 Seed Catalog visibile, NESSUN banner rosso, NESSUN 401/403 in DevTools console | `[03.6.3]` `[03.6.3.b]` regressione |
+| 5 | Click `Seed Catalog →` | Banner verde "80+ services seeded", avanza a step 5 | `[03.6.3]` regressione |
+| 6 | Click `Start Sync →` allo step 5 | Polling job_id (NO 504, NO frontend crash). Banner "Sync in progress" → "Completed" entro ~3min | `[03.6.7]` regressione |
+| 7 | Allo step 6 (Finalize) verifica label bottone | `Finish →` o `Complete →` (NON `Create →`) | `[03.6.5]` regressione |
+| 8 | Click `Finish →` | Redirect a `/login` o `/` (HTTP 302) | `[03.6.8]` regressione |
+| 9 | Login con admin appena creato | Dashboard onboarded | — |
+| 10 | Sidebar non mostra "Platform Operations" | OK on-prem nasconde sezione SaaS | `[03.6.6]` regressione |
+| 11 | DevTools Network panel: cerca request a `/var/log` o errori 5xx | NESSUNA | — |
+| 12 | `docker exec sentrikat ls -la /var/log/sentrikat/` | File `application.log` `audit.log` `security.log` con dimensione > 0 e timestamp recente | bug logger fork (vedi nota in coda al doc) |
+
+### Cosa annotare durante il test
+
+Per ogni step che NON raggiunge l'atteso, l'utente riporta:
+- **Step #** + **screenshot** (se browser-side) o **log snippet** (se backend)
+- Output `docker compose logs sentrikat --tail 100` per gli step backend
+- Output `docker exec sentrikat-db psql -U sentrikat -d sentrikat -c "SELECT key,value FROM system_settings WHERE key LIKE '%setup%';"` per stato setup
+
+### Smoke check post-wizard
+
+| Check | Azione | Atteso |
+|---|---|---|
+| /admin/health | Login admin → naviga `/admin/health` direttamente in URL | Dashboard "Data Quality & Sync Health" KPI populated |
+| Raw JSON link | Click "raw JSON" link nel footer di `/admin/health` | Nuova tab con JSON pretty-printed (NESSUN 404) |
+| Dashboard filter | Naviga `/dashboard` → ispeziona DOM filtri Vendor/Product | `placeholder="e.g. Microsoft"` / `placeholder="e.g. Windows"`, NON `value="..."` |
+

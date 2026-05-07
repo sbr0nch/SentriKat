@@ -22,6 +22,8 @@ Run:
     pytest tests/test_cve_matching_critical_paths.py -v
 """
 import json
+from datetime import datetime
+
 import pytest
 
 
@@ -127,6 +129,10 @@ def test_check_cpe_match_high_confidence_in_range(db_session, test_org):
         cve_id='CVE-TEST-IN-RANGE',
         vendor_project='Apache',
         product='Tomcat',
+        vulnerability_name='Test CVE in range',
+        date_added=datetime(2024, 1, 1).date(),
+        short_description='test',
+        required_action='patch',
         cpe_data=json.dumps([{
             'vendor': 'apache',
             'product': 'tomcat',
@@ -139,7 +145,6 @@ def test_check_cpe_match_high_confidence_in_range(db_session, test_org):
         }]),
         nvd_status='Analyzed',
     )
-    from datetime import datetime
     vuln.cpe_fetched_at = datetime.utcnow()
     db_session.add(vuln)
     db_session.commit()
@@ -182,6 +187,10 @@ def test_check_keyword_match_no_version_returns_low_confidence(db_session, test_
         cve_id='CVE-2010-4204',
         vendor_project='Google',
         product='Chrome',
+        vulnerability_name='Chrome Test CVE',
+        date_added=datetime(2010, 12, 1).date(),
+        short_description='test',
+        required_action='patch',
         cpe_data=None,
         nvd_status=None,
     )

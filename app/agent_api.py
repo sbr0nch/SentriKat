@@ -1205,8 +1205,8 @@ def _worker_pool_supervisor(app):
                     finally:
                         try:
                             db.session.remove()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.warning("agent supervisor: db.session.remove() failed: %s", e)
 
             except Exception as e:
                 logger.error(f"Worker supervisor error: {e}", exc_info=True)
@@ -1493,6 +1493,10 @@ def process_inventory_job(job):
         version_changed_product_ids = set()  # Products whose version changed — need re-matching
         touched_product_ids = set()  # Products whose last_agent_report should be bumped atomically at end
         new_cpe_pairs = set()  # Track unique (cpe_vendor, cpe_product) pairs from new products for NVD lookup
+        # 6-must #5 telemetry: track which signal the Windows agent used per item
+        # so customer-side anomalies (high 'null' or 'Version'/'MajorMinor' rates)
+        # surface in server logs without requiring a schema migration.
+        version_source_counts = {'DisplayVersion': 0, 'Version': 0, 'MajorMinor': 0, 'null': 0, 'absent': 0}
 
         # Resolve the agent_key for license gating (reuse from above if loaded)
         agent_key_for_gating = None
@@ -1504,6 +1508,16 @@ def process_inventory_job(job):
                 vendor = product_data.get('vendor')
                 product_name = product_data.get('product')
                 version = product_data.get('version')
+
+                # 6-must #5 telemetry: tally Windows agent version-source signal
+                vsrc = product_data.get('version_source')
+                if vsrc is None:
+                    if 'version_source' in product_data:
+                        version_source_counts['null'] += 1
+                    else:
+                        version_source_counts['absent'] += 1
+                else:
+                    version_source_counts[vsrc] = version_source_counts.get(vsrc, 0) + 1
 
                 if not vendor or not product_name:
                     items_failed += 1
@@ -1755,8 +1769,8 @@ def process_inventory_job(job):
                         f"Job {job_id}: kept {len(version_changed_product_ids)} version-change "
                         f"entries across rollback (stale matches will be cleaned on next successful commit)"
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("Job %s: re-fetch after rollback failed: %s", job_id, e)
 
         # Remove installations NOT seen in this scan (software was uninstalled)
         if existing_installations:
@@ -1779,6 +1793,19 @@ def process_inventory_job(job):
                     logger.warning(f"Error removing uninstalled product in job {job_id}: {e}")
             if removed_ids:
                 logger.info(f"Job {job_id}: Removed {len(removed_ids)} uninstalled products")
+
+        # 6-must #5: emit version-source breakdown when any signal was reported.
+        # 'absent' = legacy agent without telemetry; 'null' = agent reported the
+        # field but cascade resolved no version (long-tail registry edge case).
+        if any(v > 0 for k, v in version_source_counts.items() if k != 'absent'):
+            logger.info(
+                f"Job {job_id}: agent version-source breakdown: "
+                f"DisplayVersion={version_source_counts['DisplayVersion']} "
+                f"Version={version_source_counts['Version']} "
+                f"MajorMinor={version_source_counts['MajorMinor']} "
+                f"null={version_source_counts['null']} "
+                f"absent={version_source_counts['absent']}"
+            )
 
         # Commit pending changes (version updates, installation removals)
         # before atomic timestamp bump + re-matching.
@@ -2527,8 +2554,8 @@ def report_inventory():
                             new_version='(uninstalled)',
                             detected_by='agent'
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("Failed to record uninstall version history for installation %s: %s", removed_inst.id, e)
                     removed_inst.removed_at = datetime.utcnow()
                     installations_removed += 1
                 if removed_ids:
@@ -2776,8 +2803,8 @@ def agent_heartbeat():
                     source_ip=request.remote_addr,
                     user_agent=request.headers.get('User-Agent', '')[:500]
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to log heartbeat status_changed event for asset %s: %s", asset.id, e)
 
         # Log agent_updated event when version changes
         if new_version and previous_version and new_version != previous_version:
@@ -2792,8 +2819,8 @@ def agent_heartbeat():
                     source_ip=request.remote_addr,
                     user_agent=request.headers.get('User-Agent', '')[:500]
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to log agent_updated event for asset %s: %s", asset.id, e)
 
         db.session.commit()
     except Exception as e:
@@ -4533,8 +4560,8 @@ def _get_latest_agent_versions():
             ).first()
             if setting and setting.value:
                 versions[platform] = setting.value
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Could not load latest_agent_version_* settings: %s", e)
     return versions
 
 
@@ -4596,8 +4623,8 @@ def get_agent_commands():
                     source_ip=request.remote_addr,
                     user_agent=request.headers.get('User-Agent', '')[:500]
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to log command_poll status_changed event for asset %s: %s", asset.id, e)
 
         # Log agent_updated event when version changes
         if agent_version and previous_version and agent_version != previous_version:
@@ -5674,8 +5701,8 @@ def report_container_scan():
                 user_agent=request.headers.get('User-Agent', '')[:500]
             )
             db.session.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to log container scan AgentEvent: %s", e)
 
         return jsonify({
             'status': 'success',
@@ -5989,8 +6016,8 @@ def report_dependency_scan():
                 user_agent=request.headers.get('User-Agent', '')[:500]
             )
             db.session.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to log lockfile scan AgentEvent: %s", e)
 
         return jsonify({
             'status': 'success',
@@ -6605,8 +6632,8 @@ def get_dependency_detail(product_id):
                 fix_vers = []
                 try:
                     fix_vers = _json.loads(osv_r.fixed_versions) if osv_r.fixed_versions else []
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("Could not parse osv fixed_versions for %s: %s", osv_r.cve_id or osv_r.vuln_id, e)
 
                 vuln_list.append({
                     'match_id': None,

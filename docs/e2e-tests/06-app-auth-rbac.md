@@ -701,3 +701,98 @@ B. **Allineare messaggio a codice**: cambiare il messaggio in "Only platform adm
 **Severity**: 🔵 INFO (semantica e governance, non breakage funzionale). Cluster con `[06.3.12]` originale.
 **Deployment scope**: 🏢☁️ both.
 **Effort**: 1-2h per option A (UI + backend + 1 migration test); 30 min per option B (msg + comment in code).
+
+---
+
+## Walkthrough protocol — pre-EA pass (2026-05-07) — 🏢 testlab
+
+> Prerequisite: testlab Keycloak + OpenLDAP up.
+> Verifica: `docker ps | findstr testlab` → `testlab-keycloak`, `testlab-openldap`, `testlab-phpldapadmin` running.
+>
+> Credenziali memo:
+> - Keycloak admin: `admin` / `admin123` su `http://localhost:8180`
+> - OpenLDAP bind: `cn=admin,dc=sentrikat-test,dc=local` / `admin123`
+
+### W06.A — Local DB user RBAC matrix (dim 4 sblocco — `[06.6.1]`)
+
+Crea 4 user nella stessa org con ruoli distinti via `/admin/users`:
+- `superadmin@local` → super_admin
+- `admin@local` → admin
+- `manager@local` → manager
+- `user@local` → user
+
+Per ogni ruolo, login + verifica accesso a:
+
+| URL / Action | super_admin | admin | manager | user |
+|---|---|---|---|---|
+| `/admin/users` | ✅ | ✅ | ❌ | ❌ |
+| `/admin/integrations` | ✅ | ✅ | ❌ (read-only?) | ❌ |
+| `/admin/health` | ✅ | ✅ | ❌ | ❌ |
+| `/admin/health-checks` POST run | ✅ | ✅ | ❌ | ❌ |
+| `/dashboard` | ✅ | ✅ | ✅ | ✅ |
+| `/api/products` POST | ✅ | ✅ | ✅ | ❌ |
+| `/api/products/<id>` DELETE | ✅ | ✅ | ✅ (own org) | ❌ |
+| `/api/admin/health-summary` | ✅ | ✅ | ❌ | ❌ |
+| `/admin-panel#settings:integrations` | ✅ | ✅ | ❌ | ❌ |
+| Sidebar "Platform Operations" (SaaS only) | ✅ | ❌ | ❌ | ❌ |
+
+Annota celle dove osservi accesso non previsto come `[06.6.X]` HIGH.
+
+### W06.B — LDAP login (`testlab-openldap`)
+
+1. Admin → Settings → LDAP/AD → Configure
+2. Server: `host.docker.internal`. Port: `389`. Use TLS: NO
+3. Bind DN: `cn=admin,dc=sentrikat-test,dc=local`. Password: `admin123`
+4. Base DN: `dc=sentrikat-test,dc=local`. User filter: `(uid={username})`
+5. Test Connection → expect green
+6. Save → verify in DB `system_settings.ldap_*` populated
+7. Logout. Login form → check "LDAP" tab visible (or unified login if only one auth)
+8. Login con un user LDAP esistente (verifica esistenza con `phpLDAPadmin` su `https://localhost:6443`)
+9. Verifica: utente auto-provisioned in `users` table with `auth_type=ldap`
+10. Re-login same user → no duplicate user created
+
+**Bug check**:
+- Server LDAP DOWN durante login → messaggio leggibile (NO stack trace, NO 500)
+- Bind credentials sbagliate → messaggio "Invalid LDAP credentials" (NON "Connection failed")
+- Filter sintassi rotta `(uid={username` (manca `)`) → validation block on save
+
+### W06.C — SAML SSO (Keycloak as IdP)
+
+1. Keycloak admin → realm "master" → Clients → Create
+   - Client ID: `sentrikat-saml-test`
+   - Protocol: SAML
+   - Valid Redirect URIs: `http://localhost/auth/saml/callback`
+   - Master SAML Processing URL: `http://localhost/auth/saml/callback`
+2. Save → "Installation" tab → SAML Metadata IDPSSODescriptor → copy XML
+3. Sentrikat Admin → Settings → SAML SSO → paste IdP metadata XML → save
+4. Get SP metadata from sentrikat → import into Keycloak client
+5. Logout sentrikat. Login form → "Login with SSO" → redirect to Keycloak login
+6. Keycloak login con `admin/admin123` (o user creato in Keycloak)
+7. Redirect back → user auto-provisioned con `auth_type=saml`
+
+**Bug check**:
+- Mismatch entityID → error message specifico
+- IdP cert expired → warning banner (NOT silent fail)
+- Replay attack: stesso `SAMLResponse` 2x → second blocked
+- User con email già registrata localmente (auth_type=local) tenta SAML login → behavior atteso documentato (mergiati? bloccati con error?)
+
+### W06.D — 2FA / TOTP
+
+1. Login → Profile → Setup 2FA → QR code shown
+2. Scan with Google Authenticator / 1Password
+3. Enter 6-digit code → enabled
+4. Logout → re-login → after password, prompt 6-digit code → success
+5. Disable 2FA flow tested
+6. Recovery codes generated, downloadable, one-time use
+7. Lost device flow: admin force reset 2FA via `/admin/users/<id>/reset-2fa`
+
+### W06.E — Session & cookies
+
+- Login → DevTools cookies: `Secure` flag (verify on https), `HttpOnly`, `SameSite=Lax/Strict`
+- Idle timeout: leave tab → 30min later try action → redirect login
+- Concurrent sessions: same user 2 browser → admin can revoke other session
+- "Logout all devices" button works
+
+### Bug ID format
+
+Continua serie esistente: `[06.6.X]` per RBAC matrix, `[06.B.X]` LDAP, `[06.C.X]` SAML, `[06.D.X]` 2FA, `[06.E.X]` session.

@@ -3118,8 +3118,18 @@ def get_vulnerability_stats():
         default_org = Organization.query.filter_by(name='default').first()
         org_id = default_org.id if default_org else None
 
-    # Use simple ORM count - avoid complex select patterns
-    total_vulns = Vulnerability.query.count() or 0
+    # [13.X.1] (post-EA week1): "KEV Catalog" widget previously counted
+    # ALL Vulnerability rows including NVD recent sync (zero-day step)
+    # and EUVD-only entries — on SaaS this inflated to 15k+ vs the
+    # ~2k real KEV count. Now filtered via LIKE to catch all reconciled
+    # source labels: cisa_kev, cisa_kev+euvd, cisa_kev+nvd, cisa_kev+cve_org,
+    # cisa_kev+<future>. is_actively_exploited=True is the secondary
+    # invariant — KEV implies actively exploited, but EPSS≥0.95 can also
+    # set it; we keep the source filter to align with widget label.
+    total_vulns = Vulnerability.query.filter(
+        Vulnerability.source.like('%cisa_kev%')
+    ).count() or 0
+    cve_database_total = Vulnerability.query.count() or 0
 
     # Filter matches by organization - fetch IDs first to avoid subquery issues
     if org_id:
@@ -3407,6 +3417,7 @@ def get_vulnerability_stats():
 
     return jsonify({
         'total_vulnerabilities': total_vulns,
+        'cve_database_total': cve_database_total,
         'total_matches': total_matches,
         'unacknowledged': unacknowledged,
         'unacknowledged_cves': total_cves,  # Unique CVE count
@@ -5280,17 +5291,38 @@ def trigger_sync():
             try:
                 result = sync_cisa_kev(job_id=job_id)
 
-                # Also run NVD recent CVEs sync
+                # Also run NVD recent CVEs sync (non-critical: KEV sync already
+                # succeeded above, this step is best-effort enrichment).
                 try:
                     prog.update(job_id, 7, 'Syncing recent NVD CVEs...', 'Zero-day coverage')
                     from app.cisa_sync import sync_nvd_recent_cves
                     nvd_new, nvd_skipped, nvd_errors = sync_nvd_recent_cves()
                     if nvd_new > 0:
-                        prog.update(job_id, 7, 'Matching NVD CVEs with products...', f'{nvd_new} new CVEs')
+                        # Rematch can take several minutes on tenants with
+                        # many products. Update progress label so the UI
+                        # doesn't appear stuck on "Zero-day coverage".
+                        prog.update(
+                            job_id, 7,
+                            f'Re-matching {nvd_new} new CVEs against products...',
+                            f'{nvd_new} new CVEs · this may take a few minutes',
+                        )
                         from app.filters import rematch_all_products
                         rematch_all_products()
+                        prog.update(
+                            job_id, 7,
+                            'Re-match completed',
+                            f'{nvd_new} new CVEs integrated',
+                        )
                 except Exception as e:
+                    # Bug A fix: keep KEV sync result green, surface NVD
+                    # step issue as a warning detail on a successful
+                    # finish() rather than a failed banner.
                     logger.warning(f"NVD sync during manual trigger failed (non-critical): {e}")
+                    prog.update(
+                        job_id, 7,
+                        'Completed (NVD recent step skipped)',
+                        f'KEV sync ok · NVD step warning: {str(e)[:120]}',
+                    )
 
                 prog.finish(job_id, result)
             except Exception as e:

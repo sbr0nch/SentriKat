@@ -96,8 +96,8 @@ def _build_dynamic_product_patterns():
                         patterns[_re.escape(cv.lower()) + r'\s+' + _re.escape(cp.lower())] = (
                             cv.title(), cp.title()
                         )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Skipped product when building dynamic patterns: %s", e)
 
     except Exception as e:
         # During app startup or outside request context, Products table
@@ -871,6 +871,34 @@ def download_cisa_kev(max_retries=3, retry_delay=5):
 
     raise Exception(f"Failed to download CISA KEV after {max_retries} attempts: {last_error}")
 
+# R-PARSER-RESILIENCE field-alias map for CISA KEV records.
+# When CISA renames or re-nests a field, add the new path here and the
+# parser keeps working without code changes elsewhere.
+_KEV_ALIASES = {
+    'cve_id':              ['cveID', 'cve_id', 'cve.id'],
+    'vendor_project':      ['vendorProject', 'vendor', 'vendorName'],
+    'product':             ['product', 'productName'],
+    'vulnerability_name':  ['vulnerabilityName', 'name', 'title'],
+    'date_added':          ['dateAdded', 'date_added', 'added'],
+    'short_description':   ['shortDescription', 'description', 'shortDesc'],
+    'required_action':     ['requiredAction', 'required_action', 'action'],
+    'due_date':            ['dueDate', 'due_date'],
+    'known_ransomware':    ['knownRansomwareCampaignUse', 'knownRansomware', 'ransomwareUse'],
+    'notes':               ['notes', 'note'],
+}
+
+
+def _parse_iso_date(raw, cve_id, field_name):
+    """Tolerant ISO-date parser. Returns None + log on malformed input."""
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(raw, '%Y-%m-%d').date()
+    except (ValueError, TypeError, AttributeError) as e:
+        logger.debug("CISA KEV %s: malformed %s=%r: %s", cve_id, field_name, raw, e)
+        return None
+
+
 def parse_and_store_vulnerabilities(kev_data):
     """Parse CISA KEV JSON and store in database.
 
@@ -884,8 +912,23 @@ def parse_and_store_vulnerabilities(kev_data):
     Reset is conservative: only flips to False if the row's source is
     'cisa_kev' alone (not also 'euvd' or another exploited source) and
     EPSS score is NOT >= 0.95 (which independently flags exploited).
+
+    R-PARSER-RESILIENCE (post-EA week1): record-level fields are read
+    via ``parser_resilience.get_aliased`` so a CISA-side rename
+    (e.g. ``vendorProject`` → ``vendor``) no longer silently produces
+    empty strings. Schema drift on the envelope is detected and logged
+    for ops follow-up; ingestion continues.
     """
+    from app.parser_resilience import (
+        SchemaIncompatibleError,
+        coerce_bool,
+        detect_schema_drift,
+        get_aliased,
+        require_aliased,
+    )
+
     vulnerabilities = kev_data.get('vulnerabilities', [])
+    detect_schema_drift('cisa_kev', kev_data)
     current_kev_cves = {v.get('cveID') for v in vulnerabilities if v.get('cveID')}
     stored_count = 0
     updated_count = 0
@@ -895,10 +938,16 @@ def parse_and_store_vulnerabilities(kev_data):
     if current_kev_cves:
         try:
             from app.models import Vulnerability
+            # Reset is safe for KEV-only sources AND KEV merged with feeds
+            # that don't carry an independent actively_exploited signal
+            # (NVD, CVE.org). EUVD-merged is EXCLUDED because EUVD has
+            # its own exploited flag (enrich_with_euvd_exploited) which
+            # could keep the CVE legitimately exploited even after KEV drops it.
+            kev_resettable_sources = ['cisa_kev', 'cisa_kev+nvd', 'cisa_kev+cve_org']
             stale_query = Vulnerability.query.filter(
                 Vulnerability.is_actively_exploited == True,
                 ~Vulnerability.cve_id.in_(current_kev_cves),
-                Vulnerability.source.in_(['cisa_kev']),  # source=cisa_kev only, not 'cisa_kev+euvd'
+                Vulnerability.source.in_(kev_resettable_sources),
                 # Don't reset if EPSS independently flags as exploited
                 db.or_(
                     Vulnerability.epss_percentile.is_(None),
@@ -917,63 +966,101 @@ def parse_and_store_vulnerabilities(kev_data):
         except Exception as e:
             logger.warning(f"F.7 stale KEV reset failed (non-critical): {e}")
 
+    schema_skipped = 0
     for vuln_data in vulnerabilities:
-        cve_id = vuln_data.get('cveID')
-        if not cve_id:
+        try:
+            cve_id = require_aliased(
+                vuln_data, _KEV_ALIASES['cve_id'], 'cve_id'
+            )
+        except SchemaIncompatibleError as e:
+            schema_skipped += 1
+            logger.warning("CISA KEV record skipped (no cve_id alias resolved): %s", e)
             continue
 
-        # Parse dates
-        date_added = None
-        due_date = None
-        try:
-            date_added = datetime.strptime(vuln_data.get('dateAdded'), '%Y-%m-%d').date()
-        except (ValueError, TypeError, AttributeError):
-            pass
+        date_added = _parse_iso_date(
+            get_aliased(vuln_data, _KEV_ALIASES['date_added']), cve_id, 'dateAdded'
+        )
+        due_date = _parse_iso_date(
+            get_aliased(vuln_data, _KEV_ALIASES['due_date']), cve_id, 'dueDate'
+        )
 
-        try:
-            if vuln_data.get('dueDate'):
-                due_date = datetime.strptime(vuln_data.get('dueDate'), '%Y-%m-%d').date()
-        except (ValueError, TypeError, AttributeError):
-            pass
+        vendor_project = get_aliased(vuln_data, _KEV_ALIASES['vendor_project'], '')
+        product = get_aliased(vuln_data, _KEV_ALIASES['product'], '')
+        vulnerability_name = get_aliased(vuln_data, _KEV_ALIASES['vulnerability_name'], '')
+        short_description = get_aliased(vuln_data, _KEV_ALIASES['short_description'], '')
+        required_action = get_aliased(vuln_data, _KEV_ALIASES['required_action'], '')
+        notes = get_aliased(vuln_data, _KEV_ALIASES['notes'], '')
+        known_ransomware = coerce_bool(
+            get_aliased(vuln_data, _KEV_ALIASES['known_ransomware']),
+            truthy=('true', '1', 'yes', 'known'),
+        )
 
         # Check if vulnerability already exists
         vuln = Vulnerability.query.filter_by(cve_id=cve_id).first()
 
         if vuln:
             # Update existing vulnerability (may have been created by EUVD first)
-            vuln.vendor_project = vuln_data.get('vendorProject', '')
-            vuln.product = vuln_data.get('product', '')
-            vuln.vulnerability_name = vuln_data.get('vulnerabilityName', '')
-            vuln.short_description = vuln_data.get('shortDescription', '')
-            vuln.required_action = vuln_data.get('requiredAction', '')
+            vuln.vendor_project = vendor_project
+            vuln.product = product
+            vuln.vulnerability_name = vulnerability_name
+            vuln.short_description = short_description
+            vuln.required_action = required_action
             vuln.due_date = due_date
-            vuln.known_ransomware = vuln_data.get('knownRansomwareCampaignUse', 'Unknown').lower() == 'known'
-            vuln.notes = vuln_data.get('notes', '')
+            vuln.known_ransomware = known_ransomware
+            vuln.notes = notes
             # CISA KEV = confirmed actively exploited
             vuln.is_actively_exploited = True
-            # Reconcile source: if EUVD created it, now CISA confirms it
+            # Reconcile source: any upstream that created the row first
+            # gets reconciled when CISA KEV confirms it. Without this,
+            # KEV-listed CVEs ingested earlier via NVD recent sync (zero-day
+            # step) or CVE.org/EUVD path stay tagged with their original
+            # source forever, causing dashboard "KEV Catalog" widget under-
+            # count and breaking F.7 stale-KEV reset which filters
+            # source='cisa_kev' only.
+            #
+            # Bug discovered 2026-05-07 on SaaS: 15.631 vulnerabilities
+            # had source='nvd', zero source='cisa_kev', because NVD recent
+            # sync ran first and the previous reconciliation only handled
+            # the 'euvd' branch.
             if vuln.source == 'euvd':
                 vuln.source = 'cisa_kev+euvd'
+                vuln.date_added = date_added or vuln.date_added
+            elif vuln.source == 'nvd':
+                vuln.source = 'cisa_kev+nvd'
+                vuln.date_added = date_added or vuln.date_added
+            elif vuln.source == 'cve_org':
+                vuln.source = 'cisa_kev+cve_org'
+                vuln.date_added = date_added or vuln.date_added
+            elif vuln.source and 'cisa_kev' not in (vuln.source or ''):
+                # Catch-all for unknown future source labels: prepend cisa_kev
+                vuln.source = f'cisa_kev+{vuln.source}'
                 vuln.date_added = date_added or vuln.date_added
             updated_count += 1
         else:
             # Create new vulnerability from CISA KEV
             vuln = Vulnerability(
                 cve_id=cve_id,
-                vendor_project=vuln_data.get('vendorProject', ''),
-                product=vuln_data.get('product', ''),
-                vulnerability_name=vuln_data.get('vulnerabilityName', ''),
+                vendor_project=vendor_project,
+                product=product,
+                vulnerability_name=vulnerability_name,
                 date_added=date_added,
-                short_description=vuln_data.get('shortDescription', ''),
-                required_action=vuln_data.get('requiredAction', ''),
+                short_description=short_description,
+                required_action=required_action,
                 due_date=due_date,
-                known_ransomware=vuln_data.get('knownRansomwareCampaignUse', 'Unknown').lower() == 'known',
-                notes=vuln_data.get('notes', ''),
+                known_ransomware=known_ransomware,
+                notes=notes,
                 source='cisa_kev',
                 is_actively_exploited=True,  # CISA KEV = confirmed actively exploited
             )
             db.session.add(vuln)
             stored_count += 1
+
+    if schema_skipped:
+        logger.warning(
+            "CISA KEV: %d record(s) skipped due to schema-incompatibility — "
+            "verify _KEV_ALIASES coverage if persistent",
+            schema_skipped,
+        )
 
     db.session.commit()
     return stored_count, updated_count
@@ -1375,8 +1462,17 @@ def enrich_with_euvd_exploited():
         return 0, 0
 
 
-def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=100, job_id=None):
-    """Main sync function to download and process CISA KEV"""
+def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=300, job_id=None):
+    """Main sync function to download and process CISA KEV.
+
+    [08.5.1] (post-EA week1): cpe_limit raised from 100→300 to close
+    the long-tail enrichment gap. With 100, ~24h were needed to
+    backfill the full 2400 KEV CVEs (one batch per scheduler run);
+    300 brings cold-start enrichment down to ~8 cycles, well within
+    a customer's first-day expectation. NVD rate limit (5/30s with
+    API key, 5/30s without) still respected by the downstream
+    fetch_cpe_version_data limiter.
+    """
     from app import progress as prog
     if job_id:
         prog.start(job_id, 7, 'Starting sync...')
@@ -1483,8 +1579,8 @@ def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=10
         # Rollback any failed transaction first
         try:
             db.session.rollback()
-        except Exception:
-            pass
+        except Exception as rb_err:
+            logger.warning("CISA sync rollback after error failed: %s", rb_err)
 
         # Log error
         duration = (datetime.utcnow() - start_time).total_seconds()
@@ -1502,8 +1598,8 @@ def sync_cisa_kev(enrich_cvss=True, cvss_limit=200, fetch_cpe=True, cpe_limit=10
             logger.error(f"Failed to log sync error: {log_error}")
             try:
                 db.session.rollback()
-            except Exception:
-                pass
+            except Exception as rb_err:
+                logger.warning("CISA sync rollback after log error failed: %s", rb_err)
 
         return {
             'status': 'error',
@@ -1548,7 +1644,8 @@ def reenrich_fallback_cvss(limit=50):
                 vuln.severity = severity
                 vuln.cvss_source = 'nvd'
                 upgraded += 1
-        except Exception:
+        except Exception as e:
+            logger.warning("Re-enrich CVSS skipped for %s: %s", vuln.cve_id, e)
             continue
 
     if upgraded:
@@ -1587,7 +1684,8 @@ def reenrich_fallback_cvss(limit=50):
             elif live_status:
                 # Still pending -- just update the status field
                 vuln.nvd_status = live_status
-        except Exception:
+        except Exception as e:
+            logger.warning("CNA→NVD upgrade skipped for %s: %s", vuln.cve_id, e)
             continue
 
     if cna_upgraded:

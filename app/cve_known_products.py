@@ -517,7 +517,11 @@ def _ensure_cache():
     if needs_refresh:
         try:
             refresh_known_cve_products()
-        except Exception:
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Known-CVE products DB refresh failed, using static set: %s", e,
+            )
             # If DB refresh fails, at least use the static set
             if not _known_cve_products:
                 with _cache_lock:

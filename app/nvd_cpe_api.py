@@ -53,11 +53,12 @@ def _get_api_key() -> Optional[str]:
             if setting.is_encrypted:
                 try:
                     return decrypt_value(setting.value)
-                except Exception:
+                except Exception as e:
+                    logger.warning("NVD CPE API key decrypt failed, using raw value: %s", e)
                     return setting.value  # Return raw if decrypt fails
             return setting.value
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("NVD CPE API key DB lookup failed, falling back to env: %s", e)
 
     # Fallback to environment variable
     return os.environ.get('NVD_API_KEY')

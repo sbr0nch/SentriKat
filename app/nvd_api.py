@@ -33,11 +33,12 @@ def _get_api_key():
             if setting.is_encrypted:
                 try:
                     return decrypt_value(setting.value)
-                except Exception:
+                except Exception as e:
+                    logger.warning("NVD API key decrypt failed, using raw value: %s", e)
                     return setting.value
             return setting.value
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("NVD API key DB lookup failed, falling back to env: %s", e)
 
     return os.environ.get('NVD_API_KEY')
 
@@ -69,11 +70,41 @@ def _get_request_kwargs():
 # Source 1: NVD API 2.0 (NIST)
 # ---------------------------------------------------------------------------
 
+# R-PARSER-RESILIENCE alias map for NVD CVSS extraction.
+# Maps each canonical field to a list of dotted lookup paths within an
+# NVD ``metrics.cvssMetricVxx[i]`` entry. Adding a new path is enough
+# to absorb upstream schema renames.
+_NVD_CVSS_ALIASES = {
+    'base_score':    ['cvssData.baseScore', 'baseScore', 'cvss.baseScore'],
+    'base_severity': ['cvssData.baseSeverity', 'baseSeverity', 'cvss.baseSeverity'],
+}
+
+
+def _extract_cvss_entry(entry):
+    """Extract (score, severity) from a single CVSS metric entry.
+
+    Uses field aliases + type coercion so that an upstream renaming
+    ``cvssData.baseScore`` → ``baseScore`` (or vice versa) does not
+    silently break enrichment.
+    """
+    from app.parser_resilience import coerce_float, coerce_severity, get_aliased
+    score = coerce_float(get_aliased(entry, _NVD_CVSS_ALIASES['base_score']))
+    severity = coerce_severity(get_aliased(entry, _NVD_CVSS_ALIASES['base_severity']))
+    if score is not None and severity is None:
+        severity = coerce_severity(score)  # derive from numeric band
+    return score, severity
+
+
 def _fetch_cvss_from_nvd(cve_id):
     """
     Fetch CVSS score and severity from NVD API 2.0.
     Returns: (cvss_score, severity) or (None, None) if not found/error.
+
+    R-PARSER-RESILIENCE (post-EA week1): metric extraction goes through
+    ``_extract_cvss_entry`` which uses field aliases + type coercion,
+    so upstream NVD renames do not silently zero-out enrichment.
     """
+    from app.parser_resilience import detect_schema_drift
     try:
         limiter = get_rate_limiter()
         if not limiter.acquire(timeout=30.0, block=True):
@@ -94,6 +125,7 @@ def _fetch_cvss_from_nvd(cve_id):
 
         if response.status_code == 200:
             data = response.json()
+            detect_schema_drift('nvd_cve', data)
             vulnerabilities = data.get('vulnerabilities', [])
             if not vulnerabilities:
                 return None, None
@@ -107,21 +139,20 @@ def _fetch_cvss_from_nvd(cve_id):
                 # First pass: look for NVD Primary score
                 for entry in entries:
                     if entry.get('type') == 'Primary':
-                        cvss_data = entry.get('cvssData', {})
-                        return cvss_data.get('baseScore'), cvss_data.get('baseSeverity')
+                        return _extract_cvss_entry(entry)
                 # Second pass: accept Secondary (CNA) as fallback
                 for entry in entries:
                     if entry.get('type') == 'Secondary':
-                        cvss_data = entry.get('cvssData', {})
-                        return cvss_data.get('baseScore'), cvss_data.get('baseSeverity')
+                        return _extract_cvss_entry(entry)
                 # Last resort: any entry
                 if entries:
-                    cvss_data = entries[0].get('cvssData', {})
-                    return cvss_data.get('baseScore'), cvss_data.get('baseSeverity')
+                    return _extract_cvss_entry(entries[0])
             if 'cvssMetricV2' in metrics and metrics['cvssMetricV2']:
-                cvss_data = metrics['cvssMetricV2'][0]['cvssData']
-                score = cvss_data.get('baseScore')
-                return score, _score_to_severity(score)
+                score, severity = _extract_cvss_entry(metrics['cvssMetricV2'][0])
+                # CVSS v2 has no baseSeverity field — derive from band
+                if score is not None and severity is None:
+                    severity = _score_to_severity(score)
+                return score, severity
 
             return None, None
 
@@ -140,13 +171,38 @@ def _fetch_cvss_from_nvd(cve_id):
 # Source 2: CVE.org API (MITRE + CISA Vulnrichment ADP)
 # ---------------------------------------------------------------------------
 
+def _extract_cve_org_metric(metric):
+    """Extract (score, severity) from a CVE.org metric block.
+
+    CVE 5.x schema nests CVSS as ``cvssV3_1`` or ``cvssV4_0``; alias chain
+    absorbs minor variants (cvssV3.1, cvssV4.0, ``cvss``).
+    """
+    from app.parser_resilience import coerce_float, coerce_severity, get_aliased
+    aliases = ['cvssV4_0', 'cvssV3_1', 'cvssV3_0', 'cvssV3.1', 'cvssV4.0', 'cvss']
+    for key in aliases:
+        cvss = metric.get(key)
+        if cvss:
+            score = coerce_float(get_aliased(cvss, ['baseScore', 'score']))
+            severity = coerce_severity(get_aliased(cvss, ['baseSeverity', 'severity']))
+            if score is None and severity is None:
+                continue
+            if severity is None and score is not None:
+                severity = coerce_severity(score)
+            return score, severity
+    return None, None
+
+
 def _fetch_cvss_from_cve_org(cve_id):
     """
     Fetch CVSS from CVE.org API which includes CISA Vulnrichment ADP data.
     The ADP container often has CVSS scores even when NVD hasn't processed the CVE.
     License: CVE-TOU (permissive) + CC0 (Vulnrichment).
     Returns: (cvss_score, severity) or (None, None).
+
+    R-PARSER-RESILIENCE: per-metric extraction goes through alias chain
+    so MITRE 5.x → 6.x renames do not silently break Vulnrichment lookup.
     """
+    from app.parser_resilience import detect_schema_drift
     try:
         url = f"{Config.MITRE_CVE_API_URL}/{cve_id}"
         kwargs = _get_request_kwargs()
@@ -157,31 +213,22 @@ def _fetch_cvss_from_cve_org(cve_id):
             return None, None
 
         data = response.json()
+        detect_schema_drift('cve_org', data)
 
-        # Check ADP containers first (Vulnrichment data from CISA)
+        # ADP containers (Vulnrichment from CISA) — preferred
         adp_containers = data.get('containers', {}).get('adp', [])
         for adp in adp_containers:
-            metrics = adp.get('metrics', [])
-            for metric in metrics:
-                # CVSS v3.1
-                if 'cvssV3_1' in metric:
-                    cvss = metric['cvssV3_1']
-                    return cvss.get('baseScore'), cvss.get('baseSeverity')
-                # CVSS v3.0
-                if 'cvssV3_0' in metric:
-                    cvss = metric['cvssV3_0']
-                    return cvss.get('baseScore'), cvss.get('baseSeverity')
+            for metric in adp.get('metrics', []):
+                score, severity = _extract_cve_org_metric(metric)
+                if score is not None:
+                    return score, severity
 
-        # Check CNA container (vendor-provided scores)
+        # CNA container (vendor-provided scores) — fallback
         cna = data.get('containers', {}).get('cna', {})
-        cna_metrics = cna.get('metrics', [])
-        for metric in cna_metrics:
-            if 'cvssV3_1' in metric:
-                cvss = metric['cvssV3_1']
-                return cvss.get('baseScore'), cvss.get('baseSeverity')
-            if 'cvssV3_0' in metric:
-                cvss = metric['cvssV3_0']
-                return cvss.get('baseScore'), cvss.get('baseSeverity')
+        for metric in cna.get('metrics', []):
+            score, severity = _extract_cve_org_metric(metric)
+            if score is not None:
+                return score, severity
 
         return None, None
 
@@ -194,13 +241,27 @@ def _fetch_cvss_from_cve_org(cve_id):
 # Source 3: ENISA EUVD API (European Vulnerability Database)
 # ---------------------------------------------------------------------------
 
+# R-PARSER-RESILIENCE alias map for EUVD CVSS extraction.
+_EUVD_CVSS_ALIASES = {
+    'base_score':    ['baseScore', 'cvssScore', 'cvss.baseScore', 'score', 'cvssData.baseScore'],
+    'base_severity': ['baseSeverity', 'severity', 'cvss.baseSeverity'],
+}
+
+
 def _fetch_cvss_from_euvd(cve_id):
     """
     Fetch CVSS from ENISA European Vulnerability Database.
     NIS2-mandated EU source. No authentication required.
     License: ENISA IPR Policy (attribution required).
     Returns: (cvss_score, severity) or (None, None).
+
+    R-PARSER-RESILIENCE: extraction goes through alias chain + coercion
+    so an ENISA-side rename (recurring per audit, see SCHEMA_CHANGED
+    finding 2026-05-06) does not zero-out enrichment silently.
     """
+    from app.parser_resilience import (
+        coerce_float, coerce_severity, detect_schema_drift, get_aliased,
+    )
     try:
         url = "https://euvdservices.enisa.europa.eu/api/search"
         params = {'cveId': cve_id}
@@ -212,22 +273,21 @@ def _fetch_cvss_from_euvd(cve_id):
             return None, None
 
         data = response.json()
+        detect_schema_drift('euvd', data)
 
-        # EUVD returns a list of items
-        items = data.get('items', [])
+        # EUVD returns a list — accept multiple envelope shapes
+        items = data.get('items') or data.get('results') or data.get('data') or []
         if not items:
             return None, None
 
         item = items[0]
-        score = item.get('baseScore') or item.get('cvssScore')
-        if score is not None:
-            score = float(score)
-            severity = item.get('baseSeverity') or _score_to_severity(score)
-            if severity:
-                severity = severity.upper()
-            return score, severity
-
-        return None, None
+        score = coerce_float(get_aliased(item, _EUVD_CVSS_ALIASES['base_score']))
+        if score is None:
+            return None, None
+        severity = coerce_severity(get_aliased(item, _EUVD_CVSS_ALIASES['base_severity']))
+        if severity is None:
+            severity = _score_to_severity(score)
+        return score, severity
 
     except Exception as e:
         logger.warning(f"EUVD API failed for {cve_id}: {e}")
