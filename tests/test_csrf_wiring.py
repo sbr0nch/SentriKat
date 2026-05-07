@@ -14,6 +14,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BASE_HTML = REPO_ROOT / 'app' / 'templates' / 'base.html'
 LOGIN_HTML = REPO_ROOT / 'app' / 'templates' / 'login.html'
+DASHBOARD_HTML = REPO_ROOT / 'app' / 'templates' / 'dashboard.html'
 
 # Endpoints decorated with @csrf_protect_session in app/auth.py.
 # When adding a new one, add it here AND wire X-CSRFToken in the JS caller.
@@ -165,4 +166,86 @@ def test_close_security_settings_guards_against_null_element():
     assert 'securityModal._element' in body or '._element' in body, (
         "closeSecuritySettings must guard against null Bootstrap modal _element. "
         "See 2026-05-07 bug: TypeError 'this._element is null' in modal.js:244"
+    )
+
+
+# ============================================================================
+# remediation_api blueprint — NOT csrf.exempt() per design choice
+# (intentional: see app/remediation_api.py:28 comment).
+# All state-changing fetches in dashboard.html must include X-CSRFToken.
+# ============================================================================
+
+
+def _all_state_changing_fetches_for_path(html_text, path_substring):
+    """Find all fetch(...) calls whose URL contains path_substring AND
+    use a state-changing HTTP method. Returns list of (method, snippet) tuples."""
+    import re
+    blocks = []
+    pattern = re.compile(
+        r"fetch\(([^)]*?" + re.escape(path_substring) + r"[^)]*?)\)?\s*,?\s*\{(?P<body>[^}]*?method\s*:\s*['\"](POST|PUT|PATCH|DELETE)['\"][^}]*?)\}",
+        re.DOTALL,
+    )
+    for m in pattern.finditer(html_text):
+        body = m.group('body')
+        method_match = re.search(r"method\s*:\s*['\"]([A-Z]+)['\"]", body)
+        method = method_match.group(1) if method_match else '?'
+        blocks.append((method, body))
+    return blocks
+
+
+def test_dashboard_remediation_assignments_fetches_send_csrf():
+    text = DASHBOARD_HTML.read_text()
+    blocks = _all_state_changing_fetches_for_path(text, '/api/remediation/assignments')
+    assert blocks, "no remediation/assignments state-changing fetches found in dashboard.html"
+    for method, body in blocks:
+        assert 'X-CSRFToken' in body or 'X-CSRF-Token' in body, (
+            f"remediation/assignments {method} fetch missing X-CSRFToken header.\n"
+            f"Block: {body[:300]}"
+        )
+
+
+def test_dashboard_sla_policies_fetches_send_csrf():
+    text = DASHBOARD_HTML.read_text()
+    blocks = _all_state_changing_fetches_for_path(text, '/api/sla/policies')
+    assert blocks, "no /api/sla/policies state-changing fetches found in dashboard.html"
+    for method, body in blocks:
+        assert 'X-CSRFToken' in body or 'X-CSRF-Token' in body, (
+            f"/api/sla/policies {method} fetch missing X-CSRFToken header.\n"
+            f"Block: {body[:300]}"
+        )
+
+
+def test_dashboard_risk_exceptions_fetches_send_csrf():
+    text = DASHBOARD_HTML.read_text()
+    blocks = _all_state_changing_fetches_for_path(text, '/api/risk-exceptions')
+    assert blocks, "no /api/risk-exceptions state-changing fetches found in dashboard.html"
+    for method, body in blocks:
+        assert 'X-CSRFToken' in body or 'X-CSRF-Token' in body, (
+            f"/api/risk-exceptions {method} fetch missing X-CSRFToken header.\n"
+            f"Block: {body[:300]}"
+        )
+
+
+def test_remediation_api_blueprint_intentionally_not_csrf_exempt():
+    """remediation_api.bp is intentionally NOT exempted (the comment in the
+    source explains why). If someone changes that, the CSRF wiring tests
+    above can be relaxed — but they must also be updated to reflect the
+    new architecture."""
+    src = (REPO_ROOT / 'app' / 'remediation_api.py').read_text()
+    assert 'csrf.exempt' not in src, (
+        "remediation_api.py now exempts CSRF — relax the dashboard.html "
+        "CSRF wiring tests AND remove this assertion."
+    )
+
+
+def test_sla_save_toast_reflects_actual_outcome():
+    """Regression for the 2026-05-07 bug: showToast(saved + ' SLA policies
+    saved', 'success') was hardcoded to 'success' even when saved===0,
+    so the user saw a green toast 'OK' when the save had failed silently
+    (CSRF-rejection path). Toast type must match outcome."""
+    text = DASHBOARD_HTML.read_text()
+    # The fix splits into 3 branches: success / danger / warning
+    assert "if (saved > 0)" in text, "saveSLAPolicies must branch on saved>0 for toast type"
+    assert "saved + ' SLA polic'" in text or "saved + ' SLA policies'" in text, (
+        "saveSLAPolicies must report actual saved count"
     )

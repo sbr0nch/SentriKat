@@ -3658,7 +3658,7 @@
         try {
             const resp = await fetch('/api/risk-exceptions', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken()},
                 body: JSON.stringify(payload)
             });
             if (resp.ok) {
@@ -3714,7 +3714,7 @@
         try {
             const resp = await fetch(`/api/risk-exceptions/${id}`, {
                 method: 'PUT',
-                headers: {'Content-Type': 'application/json'},
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken()},
                 body: JSON.stringify({status: 'revoked'})
             });
             if (resp.ok) {
@@ -3941,6 +3941,7 @@
         ];
         const notifyBreach = document.getElementById('slaNotifyBreach').checked;
         let saved = 0;
+        let firstError = null;
 
         for (const sev of severities) {
             const days = parseInt(document.getElementById(sev.input).value);
@@ -3950,7 +3951,7 @@
                 // Try create first, if 409 (already exists) then update
                 let resp = await fetch('/api/sla/policies', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken()},
                     body: JSON.stringify({
                         severity: sev.key,
                         max_days: days,
@@ -3965,18 +3966,38 @@
                     if (existing) {
                         resp = await fetch('/api/sla/policies/' + existing.id, {
                             method: 'PUT',
-                            headers: {'Content-Type': 'application/json'},
+                            headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken()},
                             body: JSON.stringify({max_days: days, notify_on_breach: notifyBreach})
                         });
                     }
                 }
-                if (resp.ok) saved++;
-            } catch(e) { console.error('SLA save error:', e); }
+                if (resp.ok) {
+                    saved++;
+                } else {
+                    // Surface failure detail so user knows something went wrong
+                    let detail = 'HTTP ' + resp.status;
+                    try { const e = await resp.json(); detail = e.error || e.message || detail; } catch(_) {}
+                    console.warn('SLA save failed for', sev.key, ':', detail);
+                    if (!firstError) firstError = sev.key + ': ' + detail;
+                }
+            } catch(e) {
+                console.error('SLA save error:', e);
+                if (!firstError) firstError = sev.key + ': ' + (e.message || e);
+            }
         }
 
         const slaModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('slaPolicyModal'));
         slaModal.hide();
-        if (typeof showToast === 'function') showToast(saved + ' SLA policies saved', 'success');
+        // Toast type must reflect actual outcome — was always 'success' even when 0 saved
+        if (typeof showToast === 'function') {
+            if (saved > 0) {
+                showToast(saved + ' SLA polic' + (saved === 1 ? 'y' : 'ies') + ' saved', 'success');
+            } else if (firstError) {
+                showToast('SLA save failed: ' + firstError, 'danger');
+            } else {
+                showToast('No SLA policies saved — fill at least one severity (days)', 'warning');
+            }
+        }
         loadSlaCompliance();
     }
 
