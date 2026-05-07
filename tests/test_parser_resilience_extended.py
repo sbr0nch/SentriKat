@@ -214,3 +214,36 @@ class TestKevCatalogWidgetFilter:
         assert "Vulnerability.source.like('%cisa_kev%')" in src
         # Also exposes total all-source count for forward-compat
         assert "cve_database_total" in src
+
+
+class TestCisaAkamaiBypass:
+    """[08.3] CISA KEV download must use a browser-like User-Agent and
+    fall back to the GitHub mirror when Akamai 403s the datacenter IP."""
+
+    def test_browser_user_agent(self):
+        import inspect
+        from app import cisa_sync
+        src = inspect.getsource(cisa_sync.download_cisa_kev)
+        # The active User-Agent header must be a browser UA. The legacy
+        # 'SentriKat/1.0' may still appear in the docstring as a historical
+        # reference — we scope the assertion to the headers dict only.
+        ua_block = src.split("'User-Agent':", 1)[1].split('Accept', 1)[0]
+        assert 'Mozilla/5.0' in ua_block
+        assert 'Chrome/' in ua_block
+        assert 'SentriKat/1.0' not in ua_block
+
+    def test_github_mirror_fallback_present(self):
+        import inspect
+        from app import cisa_sync
+        src = inspect.getsource(cisa_sync.download_cisa_kev)
+        # Must have a fallback to the cisagov GitHub mirror
+        assert 'raw.githubusercontent.com/cisagov' in src
+        assert 'CISA_KEV_MIRROR_URL' in src
+
+    def test_mirror_can_be_overridden_via_config(self):
+        # Operator can point to an internal mirror via Config.CISA_KEV_MIRROR_URL
+        import inspect
+        from app import cisa_sync
+        src = inspect.getsource(cisa_sync.download_cisa_kev)
+        assert "getattr(\n        Config, 'CISA_KEV_MIRROR_URL'" in src or \
+               "getattr(Config, 'CISA_KEV_MIRROR_URL'" in src
