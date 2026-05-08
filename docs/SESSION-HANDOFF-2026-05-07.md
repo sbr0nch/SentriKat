@@ -38,9 +38,9 @@ Branch lavoro: `claude/review-cve-pipeline-Xdz9m` (2 commit nuovi, da PR-are qua
 
 Aggiornato 2026-05-07 fine-sessione. Ordinato per priorità decrescente.
 
-### 🔴 1. Smoke test residui (operatore, ~1h)
+### 🔴 1. Smoke test residui (operatore, ~30 min)
 
-- **B.5 W3 wizard step 2-6** — `docker compose down -v` + walkthrough setup wizard fresh on-prem. Da documentare in `docs/e2e-tests/03-signup-onprem.md` step 2-6.
+- ✅ ~~W3 wizard step 2-6~~ — confermato funzionante on-prem dall'utente 2026-05-07. Rimosso dal backlog.
 - **Verifica live [13.1.2] fix** — screenshot dashboard post-deploy con nuovo placeholder, confermare rimozione brand-confusion.
 - **Verifica live raw JSON link** — click dal `/admin/health` → deve aprire JSON in nuovo tab senza 404.
 - **Verifica live TODO #2 fallback** — creare tenant SaaS test, NON configurare custom email, attendere alert critical → deve arrivare all'email del registrazione admin con label "(registration default)" visibile in UI.
