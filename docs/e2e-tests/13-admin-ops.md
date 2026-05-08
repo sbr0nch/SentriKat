@@ -118,6 +118,7 @@
 - **Symptom**: Filter input Vendor mostra "Microsoft" e Product mostra "Windows" come testo, ma i risultati ignorano i valori (7-Zip CVE viene renderizzato).
 - **Hypothesis**: testo è **placeholder** HTML5, NON valore — disambiguazione mancante: dovrebbe essere `placeholder="Microsoft"` con campo vuoto, ma se renderizzato come `value=` confonde. Da verificare in DOM.
 - **Discovered**: 2026-05-06
+- **Fix** (`b4c5841` follow-up, branch `claude/review-cve-pipeline-Xdz9m`): `app/templates/dashboard.html:692,696` placeholder cambiato da `e.g. Microsoft` / `e.g. Windows` (brand names che il browser/screenshot fa sembrare valori applicati) a generico `Filter by vendor…` / `Filter by product…` + `autocomplete="off"`. Brand-confusion eliminata. Status: 🔧 unverified — richiede screenshot dashboard post-deploy per confermare.
 
 ##### [13.1.3] 🟡 Last Synchronization on-prem: FAILED (0 matches in 15.11s)
 

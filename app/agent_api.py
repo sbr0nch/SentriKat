@@ -4639,8 +4639,8 @@ def get_agent_commands():
                     source_ip=request.remote_addr,
                     user_agent=request.headers.get('User-Agent', '')[:500]
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to log agent_version_changed audit event: %s: %s", type(e).__name__, e)
 
         # Check for pending scan request
         if asset.pending_scan:
@@ -5618,8 +5618,8 @@ def report_container_scan():
                                     if 0.0 <= score <= 10.0:
                                         cvss_score = score
                                         break
-                                except (ValueError, TypeError):
-                                    pass
+                                except (ValueError, TypeError) as e:
+                                    logger.debug("Skipping malformed V3Score from source %r: %s", source_data.get('Source'), e)
 
                     # Determine fix status
                     fix_status = 'not_fixed'
