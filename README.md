@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/python-3.11+-green.svg" alt="Python"/>
   <img src="https://img.shields.io/badge/docker-ready-blue.svg" alt="Docker"/>
   <img src="https://img.shields.io/badge/license-Commercial-red.svg" alt="License"/>
-  <a href="docs/OWASP-ASVS.md"><img src="docs/owasp-asvs-badge.svg" alt="OWASP ASVS Level 1 Self-Assessment"/></a>
+  <a href="docs/customer/compliance/OWASP-ASVS.md"><img src="docs/owasp-asvs-badge.svg" alt="OWASP ASVS Level 1 Self-Assessment"/></a>
 </p>
 
 <p align="center">
@@ -181,9 +181,17 @@ SentriKat/
 │   ├── test_version_utils.py     # Version comparison tests
 │   └── test_scan_features.py     # Vulnerability matching, SBOM, assignments, compliance reports
 │
-├── docs/                         # Documentation
-│   ├── API.md                    # API endpoint reference
-│   └── business/                 # Business planning docs (22+ documents)
+├── docs/                         # Documentation — see docs/README.md for full audience-based index
+│   ├── README.md                 # Index by audience (customer / dev / ops / business)
+│   ├── customer/                 # Customer-facing docs (USER_GUIDE, API, AGENT_SIGNING, compliance/)
+│   ├── architecture/             # Technical reference (CVE flow, matching pipeline, broker design)
+│   ├── operations/               # Runbooks for production
+│   ├── contracts/                # Cross-repo API contracts (license-server bridge)
+│   ├── e2e-tests/                # 16 phase docs + INDEX (QA work-product)
+│   ├── audits/                   # Point-in-time audits (anti-pattern, OWASP)
+│   ├── business/                 # Internal strategy + legal (TOS, Privacy, SLA)
+│   ├── handoffs/                 # Cross-team and cross-session handoffs
+│   └── archive/                  # Stale / superseded historical docs
 │
 ├── sentrikat-scan/                # Lightweight dependency scanner (pip package)
 │   ├── pyproject.toml            # PyPI package metadata
