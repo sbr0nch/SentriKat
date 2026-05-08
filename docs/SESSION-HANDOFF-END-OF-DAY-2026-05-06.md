@@ -6,6 +6,26 @@
 
 🟢 **Prodotto SHIP-READY**. EA event può partire (2026-05-08) o slittare a 2026-05-09+ a discrezione operatore.
 
+**Update finale 2026-05-06 (post BoldBrain event andato bene)**:
+
+✅ **Customer journey verificato live in prod SaaS**:
+- Signup PRO tenant → login → dashboard popolata
+- KEV Catalog 1,589 entries visibili (= CISA 403 da Hetzner mitigato post sentrikat-web Bundle 2 GitHub mirror)
+- Hard-delete cascade funzionante (PR #260+#261+#263)
+
+⏸️ **Da retestare domani 2026-05-07** (email cancellate/utente ricreato):
+- Welcome email "Imposta password" link — 2 link su 3 hanno URL diversi tra loro (sospetto regressione PR #269 sentrikat-web?)
+- Click "Imposta password" non manda email follow-up
+- Massimiliano ricreerà utente fresh + screenshot
+
+🆕 **Feature request scoperto durante test (NUOVO)**:
+- **Alerting email default behavior**: oggi se utente non setta email di alerting né health check email, l'admin loggato (che ha registrato il tenant) **non riceve niente di automatico** (da verificare in codice).
+- **Comportamento desiderato**:
+  1. Default: use registration email del primo admin account
+  2. Override: se utente setta email custom → quelle vincono
+  3. UI: comunicare chiaramente quale email riceverà alerts ("Currently sending to: admin@example.com (registration default)" oppure "admin@example.com, ops@example.com (custom)")
+- **Effort**: ~2-4h (controllo codice + fallback logic + UI label) — backlog Week 1 post-EA
+
 **Sessione 2026-05-06 ha mergiato 6 PR su core + 5 su sentrikat-web** (totale 11+ PR mergiate). Score finale:
 
 | Metric | Stato |
