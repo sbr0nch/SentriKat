@@ -441,6 +441,56 @@ def apply_cpe_to_product(product):
     return False
 
 
+def purge_and_rematch_products(product_ids):
+    """Delete existing VulnerabilityMatch rows for the given products and
+    re-run match_vulnerabilities_to_products on them.
+
+    [CVE-MATCHING-PIPELINE F.8] When a product's CPE assignment flips
+    (manual admin edit, batch apply, future scheduled NVD backfill), the
+    keyword/vendor_product matches generated during the no-CPE era are
+    stale: the matcher should now have CPE-based authority and either
+    confirm or drop them. Without this purge, the dashboard mixes
+    pre-CPE noise (e.g. "Chrome 147 ↔ CVE-2010 critical") with post-CPE
+    confirmed matches and the operator can't tell which is which.
+
+    Args:
+        product_ids: iterable of Product.id values
+
+    Returns:
+        int: number of distinct products rematched (0 on empty input or failure)
+    """
+    if not product_ids:
+        return 0
+    try:
+        from app.models import Product, VulnerabilityMatch
+        from app.filters import match_vulnerabilities_to_products
+        unique_ids = list({pid for pid in product_ids if pid is not None})
+        if not unique_ids:
+            return 0
+        VulnerabilityMatch.query.filter(
+            VulnerabilityMatch.product_id.in_(unique_ids)
+        ).delete(synchronize_session=False)
+        db.session.commit()
+        targets = Product.query.filter(Product.id.in_(unique_ids)).all()
+        if targets:
+            match_vulnerabilities_to_products(target_products=targets)
+        logger.info(
+            "F.8 purge_and_rematch: rebuilt matches for %d product(s)",
+            len(unique_ids)
+        )
+        return len(unique_ids)
+    except Exception as e:
+        logger.warning(
+            "F.8 purge_and_rematch failed (non-fatal): %s: %s",
+            type(e).__name__, e
+        )
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return 0
+
+
 def batch_apply_cpe_mappings(commit=True, use_nvd=True, max_nvd_lookups=200):
     """
     Apply CPE mappings to all products that don't have CPE set.
@@ -615,26 +665,8 @@ def batch_apply_cpe_mappings(commit=True, use_nvd=True, max_nvd_lookups=200):
     # dashboard from 'Chrome 147 ↔ CVE-2010 critical' to a clean state
     # right after a batch_apply_cpe_mappings run, instead of waiting for
     # the next scheduled match cycle.
-    rematched_count = 0
     if commit and newly_cpe_product_ids:
-        try:
-            from app.models import Product, VulnerabilityMatch
-            unique_ids = list(set(newly_cpe_product_ids))
-            VulnerabilityMatch.query.filter(
-                VulnerabilityMatch.product_id.in_(unique_ids)
-            ).delete(synchronize_session=False)
-            db.session.commit()
-            from app.filters import match_vulnerabilities_to_products
-            targets = Product.query.filter(Product.id.in_(unique_ids)).all()
-            match_vulnerabilities_to_products(target_products=targets)
-            rematched_count = len(unique_ids)
-            logger.info(
-                f"CPE batch apply: rematched {rematched_count} products "
-                f"after CPE assignment"
-            )
-        except Exception as e:
-            logger.warning(f"Post-CPE rematch failed (non-fatal): {e}")
-            db.session.rollback()
+        purge_and_rematch_products(newly_cpe_product_ids)
 
     return updated_count, total_without_cpe
 

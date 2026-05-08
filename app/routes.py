@@ -2184,6 +2184,16 @@ def update_product(product_id):
                     product.organizations.remove(org)
                 product.organizations.append(new_org)
 
+    # [CVE-MATCHING-PIPELINE F.8] Detect CPE flip (set, cleared, or replaced)
+    # so we can purge stale keyword/vendor_product matches from the no-CPE
+    # era before re-matching. Without this, the dashboard keeps showing
+    # pre-CPE false-positives mixed with post-CPE verified matches even after
+    # the admin manually corrects the CPE.
+    cpe_changed = (
+        (product.cpe_vendor or '') != (old_cpe_vendor or '') or
+        (product.cpe_product or '') != (old_cpe_product or '')
+    )
+
     db.session.commit()
 
     # Audit log for product update
@@ -2192,8 +2202,12 @@ def update_product(product_id):
                     details={'vendor': product.vendor, 'product': product.product_name,
                              'version': product.version, 'updated_by': current_user_id})
 
-    # Re-run matching after update (scoped to this product only, not full rematch)
-    match_vulnerabilities_to_products(target_products=[product])
+    if cpe_changed:
+        from app.cpe_mapping import purge_and_rematch_products
+        purge_and_rematch_products([product.id])
+    else:
+        # Re-run matching after update (scoped to this product only, not full rematch)
+        match_vulnerabilities_to_products(target_products=[product])
 
     return jsonify(product.to_dict())
 
