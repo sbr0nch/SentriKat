@@ -737,20 +737,28 @@ def check_server_config():
             if not env_smtp:
                 missing.append('SMTP not configured (email alerts will not work)')
 
-        # Check organizations have notification emails
+        # Check organizations have at least one resolvable alert recipient
+        # (custom emails OR registration-default admin email). Only warn when
+        # the org has neither — those alerts would silently drop.
         orgs = Organization.query.filter_by(active=True).all()
-        orgs_without_emails = []
+        orgs_without_recipients = []
+        orgs_using_default = []
         for org in orgs:
-            try:
-                emails = json.loads(org.notification_emails or '[]')
-                if isinstance(emails, str):
-                    emails = json.loads(emails)
-                if not any(e and e.strip() for e in emails):
-                    orgs_without_emails.append(org.display_name or org.name)
-            except (json.JSONDecodeError, TypeError):
-                orgs_without_emails.append(org.display_name or org.name)
-        if orgs_without_emails:
-            warnings.append(f'{len(orgs_without_emails)} org(s) have no notification emails')
+            resolved = org.resolve_alert_recipients()
+            if not resolved['emails']:
+                orgs_without_recipients.append(org.display_name or org.name)
+            elif resolved['source'] == 'registration_default':
+                orgs_using_default.append(org.display_name or org.name)
+        if orgs_without_recipients:
+            warnings.append(
+                f'{len(orgs_without_recipients)} org(s) have no alert recipients '
+                f'(no custom emails AND no active admin user)'
+            )
+        if orgs_using_default:
+            warnings.append(
+                f'{len(orgs_using_default)} org(s) using registration-default '
+                f'alert recipient (no custom notification emails configured)'
+            )
 
         # Check for at least one agent API key
         key_count = AgentApiKey.query.filter_by(active=True).count()

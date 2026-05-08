@@ -175,7 +175,63 @@ class Organization(db.Model):
             'user_count': user_count,
             'active': self.active,
             'created_at': self.created_at.isoformat() if self.created_at else None,
-            'is_default': self.name == 'default'  # Flag for UI to prevent deletion
+            'is_default': self.name == 'default',  # Flag for UI to prevent deletion
+            'effective_recipients': self.resolve_alert_recipients(),
+        }
+
+    def resolve_alert_recipients(self):
+        """Resolve effective alert recipient emails for this organization.
+
+        Priority:
+            1. Custom recipients (notification_emails JSON, non-empty after trim).
+            2. Registration default — earliest active org_admin in the org.
+            3. Final fallback — earliest active user in the org.
+
+        Returns dict with keys:
+            emails: list[str]
+            source: 'custom' | 'registration_default' | 'none'
+            fallback_user_id: int | None
+            fallback_user_role: str | None
+        """
+        try:
+            parsed = json.loads(self.notification_emails) if self.notification_emails else []
+            if isinstance(parsed, str):
+                parsed = json.loads(parsed)
+            custom = [e.strip() for e in (parsed or []) if isinstance(e, str) and e.strip()]
+        except (json.JSONDecodeError, TypeError, ValueError):
+            custom = []
+
+        if custom:
+            return {
+                'emails': custom,
+                'source': 'custom',
+                'fallback_user_id': None,
+                'fallback_user_role': None,
+            }
+
+        fallback = (User.query
+            .filter_by(organization_id=self.id, role='org_admin', is_active=True)
+            .order_by(User.created_at.asc())
+            .first())
+        if not fallback:
+            fallback = (User.query
+                .filter_by(organization_id=self.id, is_active=True)
+                .order_by(User.created_at.asc())
+                .first())
+
+        if fallback and fallback.email:
+            return {
+                'emails': [fallback.email],
+                'source': 'registration_default',
+                'fallback_user_id': fallback.id,
+                'fallback_user_role': fallback.role,
+            }
+
+        return {
+            'emails': [],
+            'source': 'none',
+            'fallback_user_id': None,
+            'fallback_user_role': None,
         }
 
     def _decrypt_webhook_url(self):

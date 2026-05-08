@@ -710,7 +710,9 @@ def get_cpe_versions(cpe_vendor, cpe_product):
                 return products[cpe_product].get('versions', [])[:20]
 
         return []
-    except Exception:
+    except Exception as e:
+        logger.warning("CPE version lookup failed for %s/%s: %s: %s",
+                       cpe_vendor, cpe_product, type(e).__name__, e)
         return []
 
 
@@ -754,8 +756,11 @@ def create_product_from_queue(queue_item):
                 try:
                     from app.cpe_mapping import apply_cpe_to_product
                     apply_cpe_to_product(product)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(
+                        "F.3 fallback apply_cpe_to_product failed for queue item %s/%s: %s: %s",
+                        product.vendor, product.product_name, type(e).__name__, e
+                    )
 
             db.session.add(product)
             db.session.flush()  # Get the ID
