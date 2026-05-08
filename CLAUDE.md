@@ -35,7 +35,8 @@ I bug E2E sono divisi in **due repository** distinti. Il tuo working dir potrebb
 **Regole derivate**:
 - Bug `[01.*]` `[02.*]` `[04.*]` `[05.*]` (admin portal) → fix in `SentriKat-web`. **NON cercare il codice in questo repo**.
 - Bug `[03.*]` `[06.*]` `[07.*]`+ → fix in `SentriKat` core (questo repo se siamo qui).
-- I doc E2E (`docs/e2e-tests/*.md`) vivono SOLO in questo repo `SentriKat`. L'altro repo riceve handoff via `FIX-HANDOFF-sentrikat-web.md`.
+- I doc E2E (`docs/e2e-tests/*.md`) vivono SOLO in questo repo `SentriKat`. L'altro repo riceve handoff via `docs/handoffs/FIX-HANDOFF-sentrikat-web-*.md` (post-reorg 2026-05-08).
+- Cross-repo API contracts formalizzati in `docs/contracts/CROSS-REPO-CONTRACTS.md` — quando modifichi `/api/provision/*` aggiorna **anche** quel doc.
 - Mai eseguire `grep onclick` in questo repo per debuggare bug del portal admin — il template colpevole NON è qui.
 - `portal.sentrikat.com` non è raggiungibile in locale (no docker container) → tutti i test sono via browser su prod URL.
 
