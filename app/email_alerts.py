@@ -71,20 +71,18 @@ class EmailAlertManager:
 
         # Email provider handles SMTP vs Resend routing automatically
 
-        # Get recipient emails - handle potentially double-encoded JSON
-        recipients = []
-        if organization.notification_emails:
-            try:
-                parsed = json.loads(organization.notification_emails)
-                # Check if it's double-encoded (string instead of list)
-                if isinstance(parsed, str):
-                    parsed = json.loads(parsed)
-                recipients = parsed if isinstance(parsed, list) else []
-            except (json.JSONDecodeError, TypeError):
-                recipients = []
+        # Resolve recipients: custom list → registration default → none.
+        resolved = organization.resolve_alert_recipients()
+        recipients = resolved['emails']
 
         if not recipients:
             return {'status': 'error', 'reason': 'No recipients configured'}
+
+        if resolved['source'] == 'registration_default':
+            logger.info(
+                "Org %s using registration-default alert recipient %s (no custom emails configured)",
+                organization.name, recipients[0]
+            )
 
         # Filter matches by alert settings and confidence level
         filtered_matches = []
@@ -631,20 +629,18 @@ class EmailAlertManager:
         if not smtp_config['host'] or not smtp_config['from_email']:
             return {'status': 'error', 'reason': 'SMTP not configured'}
 
-        # Get recipients
-        recipients = []
-        if organization.notification_emails:
-            try:
-                import json as _json
-                parsed = _json.loads(organization.notification_emails)
-                if isinstance(parsed, str):
-                    parsed = _json.loads(parsed)
-                recipients = parsed if isinstance(parsed, list) else []
-            except Exception:
-                recipients = []
+        # Resolve recipients: custom list → registration default → none.
+        resolved = organization.resolve_alert_recipients()
+        recipients = resolved['emails']
 
         if not recipients:
             return {'status': 'error', 'reason': 'No recipients configured'}
+
+        if resolved['source'] == 'registration_default':
+            logger.info(
+                "Org %s container alerts using registration-default recipient %s",
+                organization.name, recipients[0]
+            )
 
         now = datetime.utcnow()
 

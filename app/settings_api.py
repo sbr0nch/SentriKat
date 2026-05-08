@@ -1326,6 +1326,7 @@ def get_alert_org_overrides():
                 'webhook_format': getattr(org, 'webhook_format', None),
                 'notification_email_count': len(email_list),
                 'notification_emails': email_list,
+                'effective_recipients': org.resolve_alert_recipients(),
             })
         return jsonify(result)
     except Exception as e:

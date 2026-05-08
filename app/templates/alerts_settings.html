@@ -372,6 +372,7 @@
                     <label class="form-label fw-semibold">Notification Email Recipients</label>
                     <textarea class="form-control" id="deliveryEmails" rows="3" placeholder="email1@company.com&#10;email2@company.com"></textarea>
                     <small class="form-text text-muted">One email per line, or comma-separated. These receive CVE alerts, ransomware warnings, and reports.</small>
+                    <div id="deliveryRecipientsLabel" class="mt-2 small"></div>
                 </div>
 
                 <hr>
@@ -862,9 +863,40 @@ function openDeliveryModal(orgId) {
     document.getElementById('deliveryWebhookFormat').value = org.webhook_format || 'slack';
     document.getElementById('deliveryWebhookName').value = '';
 
+    updateRecipientsLabel(org);
     toggleWebhookFields();
     new bootstrap.Modal(document.getElementById('deliveryModal')).show();
 }
+
+function updateRecipientsLabel(org) {
+    const label = document.getElementById('deliveryRecipientsLabel');
+    if (!label) return;
+    const eff = org.effective_recipients || {emails: [], source: 'none'};
+    const textarea = document.getElementById('deliveryEmails');
+    const typed = (textarea.value || '').split(/[\n,]+/).map(e => e.trim()).filter(e => e);
+
+    if (typed.length > 0) {
+        label.innerHTML = '<span class="text-success"><i class="bi bi-envelope-check me-1"></i>'
+            + 'Currently sending to: <strong>' + typed.join(', ') + '</strong> '
+            + '<span class="badge bg-success-subtle text-success">custom</span></span>';
+    } else if (eff.source === 'registration_default' && eff.emails.length > 0) {
+        label.innerHTML = '<span class="text-muted"><i class="bi bi-info-circle me-1"></i>'
+            + 'Currently sending to: <strong>' + eff.emails.join(', ') + '</strong> '
+            + '<span class="badge bg-secondary">registration default</span> '
+            + '— add a custom email above to override.</span>';
+    } else {
+        label.innerHTML = '<span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>'
+            + 'No recipients configured and no fallback admin user available — alerts will be skipped.</span>';
+    }
+}
+
+document.addEventListener('input', (e) => {
+    if (e.target.id === 'deliveryEmails') {
+        const orgId = parseInt(document.getElementById('deliveryOrgId').value, 10);
+        const org = orgsData.find(o => o.id === orgId);
+        if (org) updateRecipientsLabel(org);
+    }
+});
 
 function toggleWebhookFields() {
     const enabled = document.getElementById('deliveryWebhookEnabled').checked;
