@@ -2106,7 +2106,18 @@ def create_product():
             current_app.logger.warning(f"CPE auto-match failed: {e}")
 
     # Security: validate organization_id to prevent cross-tenant product creation
-    requested_org_id = data.get('organization_id', org_id)
+    # Frontend may send '' or null for "Select organization (optional)" — coerce
+    # to int when non-empty, fall back to session org_id otherwise. Without this
+    # normalization, '' would propagate as Product.organization_id='' and
+    # PostgreSQL would 500 with InvalidTextRepresentation before the FK check.
+    raw_org_id = data.get('organization_id')
+    if raw_org_id in (None, '', 0, '0'):
+        requested_org_id = org_id
+    else:
+        try:
+            requested_org_id = int(raw_org_id)
+        except (TypeError, ValueError):
+            requested_org_id = org_id
     if requested_org_id and requested_org_id != org_id:
         if not _super_admin_unrestricted():
             # Non-super-admins can only create products in their own org
@@ -2173,13 +2184,35 @@ def create_product():
                     new_value={'vendor': product.vendor, 'product': product.product_name,
                                'version': product.version, 'cpe': f"{cpe_vendor}:{cpe_product}"})
 
-    # Re-run matching for new product (scoped to this product only, not full rematch)
-    match_vulnerabilities_to_products(target_products=[product])
+    # Re-run matching for new product (scoped to this product only).
+    # Wrapped in try/except: the product has already been committed; if
+    # the matching pass crashes (e.g. one bad cpe_data row in 18k CVE
+    # corpus on SaaS), the user must still see a 201 with the product
+    # row — matches will rebuild on the next scheduled cycle. Without
+    # this guard, a tenant with one bad CVE upstream of the matcher
+    # produced a generic 500 on every product create attempt
+    # (observed 2026-05-14 on app.sentrikat.com).
+    matching_warning = None
+    try:
+        match_vulnerabilities_to_products(target_products=[product])
+    except Exception as match_err:
+        matching_warning = f"{type(match_err).__name__}: {match_err}"
+        current_app.logger.exception(
+            "match_vulnerabilities_to_products failed for new product %s "
+            "(%s/%s) — product persisted, will retry on next sync",
+            product.id, product.vendor, product.product_name,
+        )
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
 
     # Return product with CPE match info
     response = product.to_dict()
     response['cpe_matched'] = bool(cpe_vendor and cpe_product)
     response['cpe_confidence'] = cpe_confidence if (cpe_vendor and cpe_product) else 0.0
+    if matching_warning:
+        response['matching_warning'] = matching_warning
 
     return jsonify(response), 201
 
