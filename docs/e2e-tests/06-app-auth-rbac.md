@@ -42,6 +42,23 @@
 - **Persistence (dim 2)**: session cookie persiste dal login di fase 02 — da verificare separatamente con logout+login
 - **Discovered**: 2026-04-25
 
+### [06.1.2] Local Login on-prem 7-dim full pass ✅ 2026-05-14
+
+- **Fase**: 06 · **Area**: Login locale (auth_type=local)
+- **Deployment scope**: 🏢 on-prem
+- **Tipo**: 🟢 OK — tutte e 7 le dimensioni passate
+- **Actual** (live test Massimiliano on-prem post-deploy `74749c3`):
+  | Dim | Test | Esito |
+  |---|---|---|
+  | 1 Happy | login admin valido → dashboard | ✅ OK |
+  | 2 Persistence | session preserved across `docker compose restart sentrikat` | ✅ OK |
+  | 3 CRUD | logout → re-login | ✅ OK |
+  | 4 RBAC | `testuser` ruolo `user` non vede sezioni admin nella sidebar | ✅ OK |
+  | 5 State transitions | admin disable `testuser` → tentativo login bloccato | ✅ OK |
+  | 6 Negative input | 5 password sbagliate → lockout temporizzato | ✅ OK |
+  | 7 Integration/audit | eventi `LOGIN_SUCCESS`/`LOGOUT` in System Logs con user_id+IP | ✅ OK |
+- **Discovered**: 2026-05-14
+
 ---
 
 ## 06.2 — Sidebar super_admin SaaS Starter (baseline)
