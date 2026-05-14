@@ -20,11 +20,13 @@
 | 1.3 | 🧑 | 20 min | Verifica TODO #2 alerting fallback (tenant SaaS nuovo + alert critical → arriva all'admin di registrazione) | ⬜ |
 | 1.4 | 🧑 | 10 min | Verifica F.8 purge on CPE flip (admin edit CPE → match vecchi spariscono) | ⬜ |
 | 1.5 | 🧑 | 5 min | Verifica F.6 confidence labeling (filtro `Confidence=Low` mostra vendor_product con `cpe_data NULL`) | ⬜ |
-| 2.1 | 🤖 | parallel | Scaffold Phase 09 `09-remediation-sla.md` con 7-dim aree | ⬜ |
-| 2.2 | 🤖 | parallel | Scaffold Phase 10 `10-compliance-sbom.md` con 7-dim aree | ⬜ |
-| 2.3 | 🤖 | parallel | F.5 admin UI `/admin/cpe-failures` (audit log esiste, manca pagina) | ⬜ |
-| 2.4 | 🤖 | parallel | F.1 scheduler job `apply_cpe_nvd_backfill` ogni 6h | ⬜ |
-| 2.5 | 🧑 | 5 min | Review PR Day-1, merge se OK | ⬜ |
+| 1.6 | 🧑 | 5 min | **NUOVO** verifica F.5 `/admin/cpe-failures` (login admin, naviga `/admin/cpe-failures` → vede lista rejection se ne esistono, altrimenti "No failures match the current filter") | ⬜ |
+| 1.7 | 🧑 | 3 min | **NUOVO** verifica F.1 scheduler attivo (admin-panel scheduler section → riga "Periodic CPE NVD Remap (Tier 4)" presente con next-run timestamp) | ⬜ |
+| 2.1 | 🤖 | done | Scaffold Phase 09 — già pronto in repo | ✅ |
+| 2.2 | 🤖 | done | Scaffold Phase 10 — già pronto in repo | ✅ |
+| 2.3 | 🤖 | done | F.5 admin UI `/admin/cpe-failures` — model `CpeAssignmentFailure` + migration 0003 + 3 endpoint + template + 7 test | ✅ `cf8309e` |
+| 2.4 | 🤖 | done | F.1 scheduler — era già fatto (`scheduler.py:736 cpe_nvd_remap_job` + schedule 4h + manual trigger `/api/products/apply-cpe`) | ✅ |
+| 2.5 | 🧑 | 5 min | Review PR Day-1 (claude/master-plan-3-days), merge se OK | ⬜ |
 
 ## Day 2 — Walkthrough auth/agents + dev resilience
 
