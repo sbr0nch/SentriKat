@@ -4457,3 +4457,45 @@ class ProductAlias(db.Model):
             } if self.product else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class CpeAssignmentFailure(db.Model):
+    """Persistent record of CPE assignment rejections.
+
+    [CVE-MATCHING-PIPELINE F.5] When `validate_cpe_assignment` rejects a
+    proposed mapping (heuristic word-overlap fails) the rejection used to
+    surface only as a WARNING log line — invisible operationally. This
+    table makes rejections queryable so an admin can review false
+    negatives via /admin/cpe-failures and force-apply when appropriate.
+    """
+    __tablename__ = 'cpe_assignment_failures'
+
+    id = db.Column(db.Integer, primary_key=True)
+    product_id = db.Column(db.Integer, db.ForeignKey('products.id', ondelete='CASCADE'), nullable=True, index=True)
+    product_vendor = db.Column(db.String(200), nullable=True)
+    product_name = db.Column(db.String(500), nullable=True)
+    rejected_cpe_vendor = db.Column(db.String(200), nullable=False)
+    rejected_cpe_product = db.Column(db.String(200), nullable=False)
+    reason = db.Column(db.String(100), nullable=False, default='word_overlap_validation_failed')
+    resolved_at = db.Column(db.DateTime, nullable=True, index=True)
+    resolved_by = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    resolution = db.Column(db.String(20), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    product = db.relationship('Product', foreign_keys=[product_id])
+    resolver = db.relationship('User', foreign_keys=[resolved_by])
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'product_id': self.product_id,
+            'product_vendor': self.product_vendor,
+            'product_name': self.product_name,
+            'rejected_cpe_vendor': self.rejected_cpe_vendor,
+            'rejected_cpe_product': self.rejected_cpe_product,
+            'reason': self.reason,
+            'resolved_at': self.resolved_at.isoformat() if self.resolved_at else None,
+            'resolved_by': self.resolved_by,
+            'resolution': self.resolution,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }

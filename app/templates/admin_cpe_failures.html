@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+
+{% block title %}CPE Assignment Failures - SentriKat Admin{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin">Admin</a></li>
+<li class="breadcrumb-item active" aria-current="page">CPE Assignment Failures</li>
+{% endblock %}
+
+{% block content %}
+<div class="fade-in" id="cpeFailuresDashboard">
+    <div class="row mb-3 align-items-center">
+        <div class="col">
+            <h1 class="display-6 fw-bold text-dark mb-2">
+                <i class="bi bi-shield-exclamation me-2"></i>CPE Assignment Failures
+            </h1>
+            <p class="text-muted mb-0">
+                Validator rejections from <code>validate_cpe_assignment</code>. Review false negatives and force-apply when appropriate.
+                <a href="/docs/architecture/CVE-MATCHING-PIPELINE" class="text-decoration-none small">(F.5 doc)</a>
+            </p>
+        </div>
+        <div class="col-auto">
+            <select id="statusFilter" class="form-select form-select-sm" onchange="loadFailures()">
+                <option value="unresolved" selected>Unresolved</option>
+                <option value="resolved">Resolved</option>
+                <option value="all">All</option>
+            </select>
+        </div>
+        <div class="col-auto">
+            <button class="btn btn-outline-secondary btn-sm" onclick="loadFailures()">
+                <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+            </button>
+        </div>
+    </div>
+
+    <div id="failuresAlert" class="alert d-none" role="alert"></div>
+
+    <div class="card">
+        <div class="card-body p-0">
+            <table class="table table-hover mb-0" id="failuresTable">
+                <thead class="table-light">
+                    <tr>
+                        <th>When</th>
+                        <th>Product (vendor / name)</th>
+                        <th>Rejected CPE</th>
+                        <th>Reason</th>
+                        <th class="text-end">Resolution</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="failuresBody">
+                    <tr><td colspan="6" class="text-center text-muted py-4">Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="card-footer text-muted small d-flex justify-content-between">
+            <span id="failuresCount">—</span>
+            <span id="failuresPagination"></span>
+        </div>
+    </div>
+</div>
+
+<script nonce="{{ csp_nonce }}">
+let _page = 1;
+const _perPage = 50;
+
+async function loadFailures() {
+    const status = document.getElementById('statusFilter').value;
+    document.getElementById('failuresBody').innerHTML =
+        '<tr><td colspan="6" class="text-center text-muted py-4">Loading…</td></tr>';
+    try {
+        const resp = await fetch(
+            `/api/admin/cpe-failures?status=${encodeURIComponent(status)}&page=${_page}&per_page=${_perPage}`,
+            { credentials: 'same-origin' }
+        );
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        renderFailures(data);
+    } catch (err) {
+        showAlert('Failed to load failures: ' + (err.message || err), 'danger');
+        document.getElementById('failuresBody').innerHTML =
+            '<tr><td colspan="6" class="text-center text-danger py-4">Load error</td></tr>';
+    }
+}
+
+function renderFailures(data) {
+    const body = document.getElementById('failuresBody');
+    body.innerHTML = '';
+    if (!data.items || data.items.length === 0) {
+        body.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No failures match the current filter.</td></tr>';
+    } else {
+        for (const f of data.items) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="small text-muted">${escapeHtml(formatDate(f.created_at))}</td>
+                <td>
+                    <div class="small"><strong>${escapeHtml(f.product_vendor || '—')}</strong></div>
+                    <div class="small text-muted">${escapeHtml(f.product_name || '—')}</div>
+                </td>
+                <td>
+                    <code class="small">${escapeHtml(f.rejected_cpe_vendor)}:${escapeHtml(f.rejected_cpe_product)}</code>
+                </td>
+                <td class="small text-muted">${escapeHtml(f.reason || '')}</td>
+                <td class="text-end small">
+                    ${f.resolved_at
+                        ? `<span class="badge bg-secondary">${escapeHtml(f.resolution || 'resolved')}</span>`
+                        : '<span class="badge bg-warning text-dark">pending</span>'}
+                </td>
+                <td class="text-end">
+                    ${f.resolved_at ? '' : `
+                        <button class="btn btn-sm btn-success me-1" onclick="forceApply(${f.id})">
+                            <i class="bi bi-check-circle me-1"></i>Force apply
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="dismiss(${f.id})">
+                            <i class="bi bi-x"></i>
+                        </button>
+                    `}
+                </td>
+            `;
+            body.appendChild(tr);
+        }
+    }
+    document.getElementById('failuresCount').textContent =
+        `${data.items.length} of ${data.total} (${data.status_filter})`;
+    renderPagination(data);
+}
+
+function renderPagination(data) {
+    const total = data.total;
+    const totalPages = Math.max(1, Math.ceil(total / data.per_page));
+    if (totalPages <= 1) {
+        document.getElementById('failuresPagination').innerHTML = '';
+        return;
+    }
+    const prev = data.page > 1
+        ? `<button class="btn btn-sm btn-outline-secondary me-1" onclick="changePage(${data.page - 1})">Prev</button>`
+        : '';
+    const next = data.page < totalPages
+        ? `<button class="btn btn-sm btn-outline-secondary" onclick="changePage(${data.page + 1})">Next</button>`
+        : '';
+    document.getElementById('failuresPagination').innerHTML =
+        `Page ${data.page} of ${totalPages} ${prev}${next}`;
+}
+
+function changePage(p) {
+    _page = p;
+    loadFailures();
+}
+
+async function forceApply(failureId) {
+    if (!confirm('Apply the rejected CPE to this product and re-run matching?\n\nThis overrides the validator and is irreversible — purge of stale matches happens immediately.')) return;
+    try {
+        const resp = await fetch(`/api/admin/cpe-failures/${failureId}/force-apply`,
+            { method: 'POST', credentials: 'same-origin' });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.error || ('HTTP ' + resp.status));
+        }
+        const data = await resp.json();
+        showAlert(`Force applied. ${data.rematched} product(s) rematched.`, 'success');
+        loadFailures();
+    } catch (err) {
+        showAlert('Force apply failed: ' + (err.message || err), 'danger');
+    }
+}
+
+async function dismiss(failureId) {
+    if (!confirm('Mark this rejection as reviewed and intentionally NOT applied?')) return;
+    try {
+        const resp = await fetch(`/api/admin/cpe-failures/${failureId}/dismiss`,
+            { method: 'POST', credentials: 'same-origin' });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.error || ('HTTP ' + resp.status));
+        }
+        showAlert('Dismissed.', 'success');
+        loadFailures();
+    } catch (err) {
+        showAlert('Dismiss failed: ' + (err.message || err), 'danger');
+    }
+}
+
+function showAlert(msg, level) {
+    const el = document.getElementById('failuresAlert');
+    el.className = `alert alert-${level}`;
+    el.textContent = msg;
+    el.classList.remove('d-none');
+    setTimeout(() => el.classList.add('d-none'), 5000);
+}
+
+function escapeHtml(s) {
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
+function formatDate(iso) {
+    if (!iso) return '—';
+    try {
+        const d = new Date(iso);
+        return d.toLocaleString();
+    } catch {
+        return iso;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadFailures);
+</script>
+{% endblock %}
