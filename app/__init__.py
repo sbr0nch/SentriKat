@@ -607,6 +607,18 @@ def create_app(config_class=Config):
     @app.errorhandler(500)
     def internal_error(e):
         from flask import request as _req, jsonify as _jfy
+        # Log the unhandled exception with full context BEFORE rollback so
+        # SaaS-mode debugging (no shell access to the container) has at
+        # least the request path + method + exception type + stack trace
+        # in application.log. The generic JSON returned to the client
+        # stays scrub-of-internals.
+        try:
+            app.logger.exception(
+                "Unhandled 500 in %s %s — %s",
+                _req.method, _req.path, type(e).__name__
+            )
+        except Exception:
+            pass
         try:
             db.session.rollback()
         except Exception:

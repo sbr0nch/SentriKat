@@ -521,6 +521,135 @@ def get_health_summary():
         return jsonify({'error': str(e)}), 500
 
 
+@bp.route('/api/admin/cpe-failures', methods=['GET'])
+@login_required
+@admin_required
+def list_cpe_failures():
+    """[CVE-MATCHING-PIPELINE F.5] List CPE assignment validator rejections.
+
+    Query params:
+        status: 'unresolved' (default), 'resolved', 'all'
+        page: 1-indexed, default 1
+        per_page: default 50, max 200
+    """
+    from app.models import CpeAssignmentFailure
+    status = (request.args.get('status') or 'unresolved').lower()
+    try:
+        page = max(1, int(request.args.get('page') or 1))
+    except ValueError:
+        page = 1
+    try:
+        per_page = min(200, max(1, int(request.args.get('per_page') or 50)))
+    except ValueError:
+        per_page = 50
+
+    query = CpeAssignmentFailure.query
+    if status == 'unresolved':
+        query = query.filter(CpeAssignmentFailure.resolved_at.is_(None))
+    elif status == 'resolved':
+        query = query.filter(CpeAssignmentFailure.resolved_at.isnot(None))
+    # 'all' → no filter
+
+    query = query.order_by(CpeAssignmentFailure.created_at.desc())
+    total = query.count()
+    rows = query.offset((page - 1) * per_page).limit(per_page).all()
+
+    return jsonify({
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+        'status_filter': status,
+        'items': [r.to_dict() for r in rows],
+    })
+
+
+@bp.route('/api/admin/cpe-failures/<int:failure_id>/force-apply', methods=['POST'])
+@login_required
+@admin_required
+def force_apply_cpe_failure(failure_id):
+    """[CVE-MATCHING-PIPELINE F.5] Override validator rejection: apply the
+    proposed CPE to the product anyway, then trigger F.8 purge + rematch.
+
+    Used when an admin reviews a rejection in /admin/cpe-failures and
+    confirms the proposed mapping was a false negative of
+    `validate_cpe_assignment` (e.g. "Apache Tomcat" → apache:tomcat
+    rejected because the heuristic missed case-folding).
+    """
+    from app.models import CpeAssignmentFailure, Product
+    from app.cpe_mapping import purge_and_rematch_products
+
+    failure = CpeAssignmentFailure.query.get_or_404(failure_id)
+    if failure.resolved_at:
+        return jsonify({'error': 'Failure already resolved'}), 409
+
+    if not failure.product_id:
+        return jsonify({'error': 'Failure has no product (deleted?)'}), 410
+
+    product = Product.query.get(failure.product_id)
+    if not product:
+        # Mark the failure as resolved (orphaned) so the queue clears
+        failure.resolved_at = datetime.utcnow()
+        failure.resolved_by = session.get('user_id')
+        failure.resolution = 'orphaned'
+        db.session.commit()
+        return jsonify({'error': 'Product no longer exists', 'resolution': 'orphaned'}), 410
+
+    product.cpe_vendor = failure.rejected_cpe_vendor
+    product.cpe_product = failure.rejected_cpe_product
+
+    failure.resolved_at = datetime.utcnow()
+    failure.resolved_by = session.get('user_id')
+    failure.resolution = 'force_applied'
+
+    db.session.commit()
+
+    rematched = purge_and_rematch_products([product.id])
+
+    from app.logging_config import log_audit_event
+    log_audit_event(
+        action='CPE_FORCE_APPLIED',
+        resource='cpe_mapping',
+        resource_id=product.id,
+        new_value={
+            'cpe_vendor': product.cpe_vendor,
+            'cpe_product': product.cpe_product,
+            'failure_id': failure.id,
+        },
+    )
+
+    return jsonify({
+        'status': 'ok',
+        'product_id': product.id,
+        'rematched': rematched,
+        'failure': failure.to_dict(),
+    })
+
+
+@bp.route('/api/admin/cpe-failures/<int:failure_id>/dismiss', methods=['POST'])
+@login_required
+@admin_required
+def dismiss_cpe_failure(failure_id):
+    """[CVE-MATCHING-PIPELINE F.5] Mark a rejection as reviewed and
+    intentionally NOT applied (the rejection was correct)."""
+    from app.models import CpeAssignmentFailure
+    failure = CpeAssignmentFailure.query.get_or_404(failure_id)
+    if failure.resolved_at:
+        return jsonify({'error': 'Failure already resolved'}), 409
+    failure.resolved_at = datetime.utcnow()
+    failure.resolved_by = session.get('user_id')
+    failure.resolution = 'dismissed'
+    db.session.commit()
+    return jsonify({'status': 'ok', 'failure': failure.to_dict()})
+
+
+@bp.route('/admin/cpe-failures')
+@login_required
+@admin_required
+def admin_cpe_failures_page():
+    """F.5 admin UI rendering — client-side fetch from /api/admin/cpe-failures."""
+    return render_template('admin_cpe_failures.html')
+
+
 @bp.route('/api/admin/health-checks', methods=['GET'])
 @login_required
 @admin_required
@@ -1977,7 +2106,18 @@ def create_product():
             current_app.logger.warning(f"CPE auto-match failed: {e}")
 
     # Security: validate organization_id to prevent cross-tenant product creation
-    requested_org_id = data.get('organization_id', org_id)
+    # Frontend may send '' or null for "Select organization (optional)" — coerce
+    # to int when non-empty, fall back to session org_id otherwise. Without this
+    # normalization, '' would propagate as Product.organization_id='' and
+    # PostgreSQL would 500 with InvalidTextRepresentation before the FK check.
+    raw_org_id = data.get('organization_id')
+    if raw_org_id in (None, '', 0, '0'):
+        requested_org_id = org_id
+    else:
+        try:
+            requested_org_id = int(raw_org_id)
+        except (TypeError, ValueError):
+            requested_org_id = org_id
     if requested_org_id and requested_org_id != org_id:
         if not _super_admin_unrestricted():
             # Non-super-admins can only create products in their own org
@@ -2044,13 +2184,35 @@ def create_product():
                     new_value={'vendor': product.vendor, 'product': product.product_name,
                                'version': product.version, 'cpe': f"{cpe_vendor}:{cpe_product}"})
 
-    # Re-run matching for new product (scoped to this product only, not full rematch)
-    match_vulnerabilities_to_products(target_products=[product])
+    # Re-run matching for new product (scoped to this product only).
+    # Wrapped in try/except: the product has already been committed; if
+    # the matching pass crashes (e.g. one bad cpe_data row in 18k CVE
+    # corpus on SaaS), the user must still see a 201 with the product
+    # row — matches will rebuild on the next scheduled cycle. Without
+    # this guard, a tenant with one bad CVE upstream of the matcher
+    # produced a generic 500 on every product create attempt
+    # (observed 2026-05-14 on app.sentrikat.com).
+    matching_warning = None
+    try:
+        match_vulnerabilities_to_products(target_products=[product])
+    except Exception as match_err:
+        matching_warning = f"{type(match_err).__name__}: {match_err}"
+        current_app.logger.exception(
+            "match_vulnerabilities_to_products failed for new product %s "
+            "(%s/%s) — product persisted, will retry on next sync",
+            product.id, product.vendor, product.product_name,
+        )
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
 
     # Return product with CPE match info
     response = product.to_dict()
     response['cpe_matched'] = bool(cpe_vendor and cpe_product)
     response['cpe_confidence'] = cpe_confidence if (cpe_vendor and cpe_product) else 0.0
+    if matching_warning:
+        response['matching_warning'] = matching_warning
 
     return jsonify(response), 201
 

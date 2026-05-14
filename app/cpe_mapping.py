@@ -413,10 +413,12 @@ def apply_cpe_to_product(product):
                 f"CPE sanity check BLOCKED: {product.vendor}/{product.product_name} "
                 f"→ {cpe_vendor}:{cpe_product} (no word overlap)"
             )
-            # F.5 fix (audit 2026-05-06): surface validate rejections to audit
-            # log so admin can review false negatives via /admin/logs filter
-            # action='CPE_REJECTED'. Without this, rejections were invisible
-            # operationally (only WARNING level in app logs).
+            # F.5 fix (audit 2026-05-06, extended 2026-05-XX): surface
+            # validate rejections via (a) audit log line for trail and (b)
+            # persistent `cpe_assignment_failures` table for admin UI
+            # `/admin/cpe-failures`. Without the table, rejections were
+            # only WARNING level in app logs — impossible to filter or
+            # force-apply a false negative without dev intervention.
             try:
                 from app.logging_config import log_audit_event
                 log_audit_event(
@@ -433,6 +435,26 @@ def apply_cpe_to_product(product):
                 )
             except Exception as audit_err:
                 logger.warning(f"Failed to write CPE_REJECTED audit event: {audit_err}")
+
+            try:
+                from app.models import CpeAssignmentFailure
+                failure = CpeAssignmentFailure(
+                    product_id=getattr(product, 'id', None),
+                    product_vendor=product.vendor,
+                    product_name=product.product_name,
+                    rejected_cpe_vendor=cpe_vendor,
+                    rejected_cpe_product=cpe_product,
+                    reason='word_overlap_validation_failed',
+                )
+                db.session.add(failure)
+                # No commit here: caller controls transaction scope. The
+                # caller's commit (e.g. batch_apply_cpe_mappings or the
+                # agent-push session) will flush this together with the
+                # rest of the work — or roll back atomically.
+            except Exception as db_err:
+                logger.warning(
+                    f"Failed to persist CpeAssignmentFailure row: {db_err}"
+                )
             return False
         product.cpe_vendor = cpe_vendor
         product.cpe_product = cpe_product
