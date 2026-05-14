@@ -389,7 +389,26 @@ Dopo F.2 fix + Apache Tomcat 9.0.50 manual create:
 
 | Bug ID | Severity | Env | Title |
 |---|---|---|---|
-| _(none yet)_ | | | |
+| `[08.9.1]` | 🟡 MEDIUM | 🏢☁️ both | Edit Product modal: CPE picker auto-renames vendor+product_name → 409 duplicate |
+
+### [08.9.1] 🟡 Edit Product CPE picker rinomina vendor/product_name → 409 quando esiste già un prodotto con stessi vendor/name
+
+- **Env**: 🏢☁️ both — verificato live su SaaS 2026-05-14
+- **Severity**: 🟡 MEDIUM — UX confusa, non blocca workflow
+- **Symptom**: utente apre Edit Product su prodotto X (es. Apache/Http Server), nel modal "Find Your Product" cerca "apache tomcat" e seleziona il match → al Save backend risponde 409 "A product with the same vendor, name, and version already exists" perché il modal ha rinominato `vendor=Apache, product_name=Tomcat` (preso dal CPE selezionato) e c'è già un altro prodotto Apache/Tomcat nell'inventario.
+- **Root cause**: il frontend del modal usa il CPE search come source of truth per vendor+product_name. In modalità Edit questo è sbagliato — l'utente probabilmente vuole solo cambiare CPE, non rinominare il prodotto.
+- **Repro 2026-05-14**:
+  1. Crea prodotto Apache Tomcat (CPE apache:tomcat)
+  2. Crea prodotto Apache Http Server (CPE apache:http_server)
+  3. Edit Apache Http Server → search "apache tomcat" → seleziona match → Save
+  4. Toast "A product with the same vendor, name, and version already exists" appare in alto a destra
+- **Discovered**: 2026-05-14 durante smoke 1.4 F.8 verify
+- **Fix proposte**:
+  - (A) Modal in modalità Edit: separare il "CPE picker" dal "vendor/product_name rename". Default: change CPE only.
+  - (B) Aggiungere checkbox esplicita "also rename product to match CPE" — off di default in Edit.
+  - (C) Backend: se la rename rileva duplicate, restituire 409 con messaggio "use existing product id=Y, or pick a different CPE" e link al record gemello.
+- **Effort**: 1-2h frontend modal logic + ~30 min backend error message refine.
+- **Priority**: post-EA, non blocker.
 
 ---
 

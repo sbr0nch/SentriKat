@@ -11,33 +11,37 @@
 
 ---
 
-## Day 1 — Smoke test + dev autonomo iniziale
+## Day 1 — Smoke test + dev autonomo iniziale ✅ COMPLETATO 2026-05-14
 
 | Step | Owner | Effort | Cosa | Stato |
 |---|---|---|---|---|
-| 1.1 | 🧑 | 5 min | Verifica `[13.1.2]` filter placeholder dashboard (DOM ispezione) | ⬜ |
-| 1.2 | 🧑 | 2 min | Verifica `/admin/health` raw JSON link (click → tab JSON apre) | ⬜ |
-| 1.3 | 🧑 | 20 min | Verifica TODO #2 alerting fallback (tenant SaaS nuovo + alert critical → arriva all'admin di registrazione) | ⬜ |
-| 1.4 | 🧑 | 10 min | Verifica F.8 purge on CPE flip (admin edit CPE → match vecchi spariscono) | ⬜ |
-| 1.5 | 🧑 | 5 min | Verifica F.6 confidence labeling (filtro `Confidence=Low` mostra vendor_product con `cpe_data NULL`) | ⬜ |
-| 1.6 | 🧑 | 5 min | **NUOVO** verifica F.5 `/admin/cpe-failures` (login admin, naviga `/admin/cpe-failures` → vede lista rejection se ne esistono, altrimenti "No failures match the current filter") | ⬜ |
-| 1.7 | 🧑 | 3 min | **NUOVO** verifica F.1 scheduler attivo (admin-panel scheduler section → riga "Periodic CPE NVD Remap (Tier 4)" presente con next-run timestamp) | ⬜ |
+| 1.1 | 🧑 | 5 min | `[13.1.2]` filter placeholder dashboard — verificato live | ✅ |
+| 1.2 | 🧑 | 2 min | `/admin/health` raw JSON link | ✅ |
+| 1.3 | 🧑 | 20 min | TODO #2 alerting fallback modal label "Currently sending to: X CUSTOM/registration default" | ✅ |
+| 1.4 | 🧑 | 10 min | F.8 purge on CPE flip — log SaaS: `F.8 purge_and_rematch: rebuilt matches for 1 product(s)` | ✅ |
+| 1.5 | 🧑 | 5 min | F.6 confidence labeling — filtro Confidence=Low presente in dashboard | ✅ |
+| 1.6 | 🧑 | 5 min | F.5 `/admin/cpe-failures` page si carica su both | ✅ |
+| 1.7 | 🧑 | 3 min | F.1 scheduler — log: `CPE NVD remap scheduled every 4 hours` | ✅ |
 | 2.1 | 🤖 | done | Scaffold Phase 09 — già pronto in repo | ✅ |
 | 2.2 | 🤖 | done | Scaffold Phase 10 — già pronto in repo | ✅ |
-| 2.3 | 🤖 | done | F.5 admin UI `/admin/cpe-failures` — model `CpeAssignmentFailure` + migration 0003 + 3 endpoint + template + 7 test | ✅ `cf8309e` |
-| 2.4 | 🤖 | done | F.1 scheduler — era già fatto (`scheduler.py:736 cpe_nvd_remap_job` + schedule 4h + manual trigger `/api/products/apply-cpe`) | ✅ |
-| 2.5 | 🧑 | 5 min | Review PR Day-1 (claude/master-plan-3-days), merge se OK | ⬜ |
+| 2.3 | 🤖 | done | F.5 admin UI `/admin/cpe-failures` — model + migration 0003 + 3 endpoint + template + 7 test | ✅ `cf8309e` |
+| 2.4 | 🤖 | done | F.1 scheduler — era già fatto in main | ✅ |
+| 2.5 | 🧑 | 5 min | Review PR Day-1, merge | ✅ mergiato pre-Day-2 |
+
+### Bug nuovi scoperti Day 1
+- `[08.9.1]` 🟡 MEDIUM: Edit Product CPE picker auto-renames vendor+product_name → 409 duplicate. Vedi `08-scanning-matching.md`. Post-EA fix.
+- Bug latente `db NameError` in `check_product_limit` SaaS branch: fixato in `3e4095b` + hoist top-level import in `d0b97b9` + regression test in `tests/test_check_product_limit_saas.py`. Documentato come incident handoff.
 
 ## Day 2 — Walkthrough auth/agents + dev resilience
 
 | Step | Owner | Effort | Cosa | Stato |
 |---|---|---|---|---|
 | 3.1 | 🧑 | 1-2 g.u. | Phase 06 auth/RBAC 7-dim (PC casa, testlab Keycloak + OpenLDAP) | ⬜ |
-| 3.2 | 🤖 | parallel | R-PARSER-RESILIENCE su `euvd_sync` (EUVD path inside cisa_sync.py:1242-1309) | ⬜ |
-| 3.3 | 🤖 | parallel | R-PARSER-RESILIENCE su `cve_org` parser | ⬜ |
-| 3.4 | 🤖 | parallel | `[08.17.1]` NVD rate-limiter stress audit + `tests/test_nvd_ratelimit_stress.py` | ⬜ |
+| 3.2 | 🤖 | done | R-PARSER-RESILIENCE su `euvd_sync` | ✅ `cd12ffb` |
+| 3.3 | 🤖 | done | R-PARSER-RESILIENCE su `cve_org` parser — già in main | ✅ |
+| 3.4 | 🤖 | done | NVD rate-limiter stress test — già in `tests/test_nvd_rate_limiter_stress.py` (235 righe, 7 test classes) | ✅ |
 | 3.5 | 🧑 | 1 g.u. | Phase 07 agents 7-dim (docker locale + VM Win/Linux) | ⬜ |
-| 3.6 | 🧑+🤖 | 4h | Phase 08 scanning/matching 7-dim — incorpora F.6/F.8 verifica (dim 5 state transitions + dim 6 negative) | ⬜ |
+| 3.6 | 🧑+🤖 | 4h | Phase 08 scanning/matching 7-dim — incorpora F.6/F.8 verifica (dim 5 state transitions + dim 6 negative). Bug `[08.9.1]` già annotato | 🟡 in corso |
 | 3.7 | 🧑 | 5 min | Review PR Day-2, merge se OK | ⬜ |
 
 ## Day 3 — Integrations + alerts + admin ops + saas-specific + security-edge + chiusura
