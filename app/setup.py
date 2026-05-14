@@ -10,6 +10,9 @@ from app.models import Organization, User, ServiceCatalog
 from app.cisa_sync import sync_cisa_kev
 import os
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 setup_bp = Blueprint('setup', __name__)
 
