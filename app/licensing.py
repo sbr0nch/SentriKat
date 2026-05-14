@@ -25,6 +25,16 @@ from functools import wraps
 from flask import jsonify, has_request_context
 from sqlalchemy import func
 
+# Module-level db import. Historically each function in this file did
+# ``from app import db`` (sometimes ``as db``) inside its own body.
+# That pattern is fragile: a function that forgets the local import
+# fails at runtime with NameError only when its specific branch executes
+# — exactly how the SaaS check_product_limit bug stayed latent for
+# months until a tenant reached `current >= 1` and triggered the
+# `db.session.execute(...)` path. Hoisting once at module load lets
+# Python catch the import error at app start instead of N requests later.
+from app import db
+
 logger = logging.getLogger(__name__)
 
 
@@ -733,7 +743,6 @@ def load_license():
     the env var license is synced to DB so the GUI always shows the current state.
     """
     from app.models import SystemSettings
-    from app import db as app_db
 
     license_info = LicenseInfo()
     license_key = None
@@ -761,14 +770,14 @@ def load_license():
                             category='licensing',
                             description='SentriKat license key (synced from SENTRIKAT_LICENSE env var)'
                         )
-                        app_db.session.add(setting)
-                    app_db.session.commit()
+                        db.session.add(setting)
+                    db.session.commit()
                     logger.info("License synced from SENTRIKAT_LICENSE env var to database")
                     db_key = env_key
                 except Exception as e:
                     logger.warning(f"Could not sync license from env to DB: {e}")
                     try:
-                        app_db.session.rollback()
+                        db.session.rollback()
                     except Exception:
                         pass
 
@@ -1040,7 +1049,6 @@ def save_license(license_key):
     Cleans input before validation (handles common paste errors).
     """
     from app.models import SystemSettings
-    from app import db
 
     # Clean input before validation
     license_key = _clean_license_input(license_key)
@@ -1079,7 +1087,6 @@ def save_license(license_key):
 def remove_license():
     """Remove license and revert to Community Edition."""
     from app.models import SystemSettings
-    from app import db
 
     setting = SystemSettings.query.filter_by(key='license_key').first()
     if setting:
@@ -1254,7 +1261,6 @@ def check_product_limit(organization_id=None):
     """
     from app.saas import is_saas_mode
     from app.models import Product
-    from app import db
 
     if is_saas_mode():
         if organization_id is None:
@@ -1426,7 +1432,6 @@ def _persist_heartbeat_failure():
     """
     try:
         from app.models import SystemSettings
-        from app import db as app_db
         row = SystemSettings.query.filter_by(key='license_heartbeat_failures').first()
         try:
             current = int((row.value or '0')) if row else 0
@@ -1442,7 +1447,7 @@ def _persist_heartbeat_failure():
                 category='licensing',
                 description='Consecutive license-server heartbeat failures',
             )
-            app_db.session.add(row)
+            db.session.add(row)
 
         if new_val >= HEARTBEAT_FAILURE_ALERT_THRESHOLD:
             logger.error(
@@ -1459,15 +1464,14 @@ def _persist_heartbeat_failure():
                     category='licensing',
                     description='True when license heartbeat has failed repeatedly',
                 )
-                app_db.session.add(alert)
+                db.session.add(alert)
 
-        app_db.session.commit()
+        db.session.commit()
         return new_val
     except Exception as e:
         logger.warning(f"Could not persist heartbeat failure counter: {e}")
         try:
-            from app import db as app_db
-            app_db.session.rollback()
+            db.session.rollback()
         except Exception:
             pass
         return None
@@ -1477,7 +1481,6 @@ def _reset_heartbeat_failure_counter():
     """Clear the heartbeat failure counter and alert flag on success (H5)."""
     try:
         from app.models import SystemSettings
-        from app import db as app_db
         changed = False
         row = SystemSettings.query.filter_by(key='license_heartbeat_failures').first()
         if row and row.value != '0':
@@ -1488,12 +1491,11 @@ def _reset_heartbeat_failure_counter():
             alert.value = 'false'
             changed = True
         if changed:
-            app_db.session.commit()
+            db.session.commit()
     except Exception as e:
         logger.debug(f"Could not reset heartbeat counter: {e}")
         try:
-            from app import db as app_db
-            app_db.session.rollback()
+            db.session.rollback()
         except Exception:
             pass
 
@@ -1511,7 +1513,6 @@ def _apply_updated_limits_from_heartbeat(updated_limits):
         return
     try:
         from app.models import Subscription
-        from app import db as app_db
     except Exception as e:
         logger.debug(f"updated_limits: models unavailable: {e}")
         return
@@ -1574,7 +1575,7 @@ def _apply_updated_limits_from_heartbeat(updated_limits):
                 pass
 
         if changed:
-            app_db.session.commit()
+            db.session.commit()
             logger.info(
                 f"Updated subscription plan from heartbeat "
                 f"(sub={sub.id}, plan={plan.name}): {changed}"
@@ -1582,7 +1583,7 @@ def _apply_updated_limits_from_heartbeat(updated_limits):
     except Exception as e:
         logger.warning(f"Failed to apply updated_limits from heartbeat: {e}")
         try:
-            app_db.session.rollback()
+            db.session.rollback()
         except Exception:
             pass
 
@@ -1697,7 +1698,6 @@ def license_heartbeat():
                 logger.warning("License has been revoked by the server!")
                 # Store revocation in system settings
                 from app.models import SystemSettings
-                from app import db
                 revoked = SystemSettings.query.filter_by(key='license_revoked').first()
                 if not revoked:
                     revoked = SystemSettings(key='license_revoked', value='true', category='licensing')
