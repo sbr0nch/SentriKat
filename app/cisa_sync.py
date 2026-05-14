@@ -1325,6 +1325,25 @@ def enrich_with_cvss_data(limit=50):
 
     return enriched_count
 
+# R-PARSER-RESILIENCE field-alias map for ENISA EUVD exploited records.
+# Trigger 2026-05-06: sentrikat-web /admin/datasources flagged
+# ENISA EUVD as SCHEMA_CHANGED. Without alias chain a rename like
+# `cveId` → `cve_id` or `baseScore` → `score` would silently zero-out
+# the new-entry creation loop (the worst failure mode: zero-day gaps go
+# uncovered without any error). Aliases below cover known historical
+# field names + the obvious lowercase/snake_case variants ENISA might
+# adopt; add new aliases as drift telemetry surfaces them.
+_EUVD_ALIASES = {
+    'cve_id':         ['cveId', 'cve_id', 'cve.id', 'id'],
+    'base_score':     ['baseScore', 'cvssScore', 'score', 'cvss.baseScore'],
+    'base_severity':  ['baseSeverity', 'severity', 'cvss.baseSeverity'],
+    'aliases':        ['aliases', 'aliasList'],
+    'description':    ['description', 'desc', 'shortDescription'],
+    'vendor_list':    ['enisaIdVendor', 'vendors', 'vendorList'],
+    'product_list':   ['enisaIdProduct', 'products', 'productList'],
+}
+
+
 def enrich_with_euvd_exploited():
     """
     Cross-reference CISA KEV data with ENISA EUVD exploited vulnerabilities.
@@ -1338,9 +1357,21 @@ def enrich_with_euvd_exploited():
 
     License: ENISA IPR Policy (attribution required).
 
+    R-PARSER-RESILIENCE (post-EA week2): record fields are read via
+    ``parser_resilience.get_aliased`` so an ENISA rename (e.g. the 2026-04
+    drift that flagged ``ENISA EUVD: SCHEMA_CHANGED``) no longer
+    silently zero-fills new entries. Schema drift on the envelope is
+    detected and logged; ingestion continues.
+
     Returns:
         tuple: (enriched_count, new_count)
     """
+    from app.parser_resilience import (
+        coerce_float,
+        coerce_severity,
+        detect_schema_drift,
+        get_aliased,
+    )
     try:
         kwargs = {}
         proxies = Config.get_proxies()
@@ -1360,6 +1391,7 @@ def enrich_with_euvd_exploited():
             return 0, 0
 
         data = response.json()
+        detect_schema_drift('euvd_exploited', data)
         # EUVD API returns a bare list of vulnerability dicts
         if isinstance(data, list):
             items = data
@@ -1377,12 +1409,15 @@ def enrich_with_euvd_exploited():
             if not isinstance(item, dict):
                 continue
 
-            # EUVD uses 'aliases' field (newline-separated) for CVE IDs, not 'cveId'
-            cve_id = item.get('cveId')
+            cve_id = get_aliased(item, _EUVD_ALIASES['cve_id'])
             if not cve_id:
-                aliases = item.get('aliases', '')
+                # EUVD historically stored CVE IDs in 'aliases' field
+                # (newline-separated) rather than 'cveId'. Keep this fallback
+                # outside the alias chain because it's a list-parse, not a key
+                # rename.
+                aliases = get_aliased(item, _EUVD_ALIASES['aliases'], '')
                 if aliases:
-                    for alias in aliases.split('\n'):
+                    for alias in str(aliases).split('\n'):
                         alias = alias.strip()
                         if alias.startswith('CVE-'):
                             cve_id = alias
@@ -1394,12 +1429,16 @@ def enrich_with_euvd_exploited():
 
             if vuln:
                 # Existing CVE — enrich with EUVD CVSS if missing
-                euvd_score = item.get('baseScore') or item.get('cvssScore')
+                euvd_score = coerce_float(
+                    get_aliased(item, _EUVD_ALIASES['base_score'])
+                )
                 if euvd_score and (vuln.cvss_score is None or vuln.cvss_score == 0.0):
-                    vuln.cvss_score = float(euvd_score)
-                    severity = item.get('baseSeverity')
+                    vuln.cvss_score = euvd_score
+                    severity = coerce_severity(
+                        get_aliased(item, _EUVD_ALIASES['base_severity'])
+                    )
                     if severity:
-                        vuln.severity = severity.upper()
+                        vuln.severity = severity
                     else:
                         from app.nvd_api import _score_to_severity
                         vuln.severity = _score_to_severity(vuln.cvss_score)
@@ -1422,12 +1461,16 @@ def enrich_with_euvd_exploited():
                     details = fetch_cve_details(cve_id)
 
                     # Use EUVD CVSS as fallback if NVD didn't provide one
-                    euvd_score = euvd_item.get('baseScore') or euvd_item.get('cvssScore')
-                    euvd_severity = euvd_item.get('baseSeverity')
+                    euvd_score = coerce_float(
+                        get_aliased(euvd_item, _EUVD_ALIASES['base_score'])
+                    )
+                    euvd_severity = coerce_severity(
+                        get_aliased(euvd_item, _EUVD_ALIASES['base_severity'])
+                    )
 
                     if details:
-                        cvss_score = details['cvss_score'] or (float(euvd_score) if euvd_score else None)
-                        severity = details['severity'] or (euvd_severity.upper() if euvd_severity else _score_to_severity(cvss_score))
+                        cvss_score = details['cvss_score'] or euvd_score
+                        severity = details['severity'] or (euvd_severity if euvd_severity else _score_to_severity(cvss_score))
                         cvss_source = 'nvd' if details['cvss_score'] else ('euvd' if euvd_score else None)
                         vendor = details['vendor'] or 'Unknown'
                         product = details['product'] or 'Unknown'
@@ -1435,12 +1478,12 @@ def enrich_with_euvd_exploited():
                         vuln_name = details['vulnerability_name'] or cve_id
                     else:
                         # NVD unavailable — use what EUVD provides
-                        cvss_score = float(euvd_score) if euvd_score else None
-                        severity = euvd_severity.upper() if euvd_severity else _score_to_severity(cvss_score)
+                        cvss_score = euvd_score
+                        severity = euvd_severity if euvd_severity else _score_to_severity(cvss_score)
                         cvss_source = 'euvd' if euvd_score else None
-                        # EUVD stores vendor/product in nested arrays
-                        vendor_list = euvd_item.get('enisaIdVendor') or []
-                        product_list = euvd_item.get('enisaIdProduct') or []
+                        # EUVD stores vendor/product in nested arrays — aliased lookup
+                        vendor_list = get_aliased(euvd_item, _EUVD_ALIASES['vendor_list']) or []
+                        product_list = get_aliased(euvd_item, _EUVD_ALIASES['product_list']) or []
                         vendor = 'Unknown'
                         product = 'Unknown'
                         if vendor_list and isinstance(vendor_list[0], dict):
@@ -1455,7 +1498,7 @@ def enrich_with_euvd_exploited():
                                 product = p.get('name', 'Unknown')
                             elif isinstance(p, str):
                                 product = p
-                        description = euvd_item.get('description', '') or f'Actively exploited vulnerability {cve_id} (details pending from NVD)'
+                        description = get_aliased(euvd_item, _EUVD_ALIASES['description'], '') or f'Actively exploited vulnerability {cve_id} (details pending from NVD)'
                         vuln_name = description[:500]
 
                     vuln = Vulnerability(
