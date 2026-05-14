@@ -1254,6 +1254,7 @@ def check_product_limit(organization_id=None):
     """
     from app.saas import is_saas_mode
     from app.models import Product
+    from app import db
 
     if is_saas_mode():
         if organization_id is None:
